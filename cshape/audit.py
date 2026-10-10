@@ -1,6 +1,6 @@
 """Data-integrity audit over raw run logs. Writes results/integrity.json and prints a short report.
 Checks: required fields on every row, transcript file exists, duplicate (file, task, strategy, seed) rows,
-and that logged per-run cost reconciles with the API spend ledger (results/ledger.json).
+grid gaps (a strategy's task x seed cell with no row, e.g. an errored row deleted by an old resume pass), and that logged per-run cost reconciles with the API spend ledger (results/ledger.json).
 Usage: python -m cshape.audit   (also run by `make figures`)"""
 import json, os, subprocess
 from collections import Counter
@@ -41,6 +41,17 @@ def workers_in_flight(live):
         parts = l.split()
         n += int(parts[parts.index("--workers") + 1]) if "--workers" in parts else 6
     return n
+
+
+def grid_gaps(rows):
+    """Cells missing from each strategy's own task x seed grid in one results file."""
+    tasks, seeds, have = {}, {}, set()
+    for r in rows:
+        s = r.get("strategy")
+        tasks.setdefault(s, set()).add(r.get("task"))
+        seeds.setdefault(s, set()).add(r.get("seed"))
+        have.add((s, r.get("task"), r.get("seed")))
+    return sorted([s, t, d] for s in tasks for t in tasks[s] for d in seeds[s] if (s, t, d) not in have)
 
 
 def call_attribution(logged_ids, live):
@@ -91,11 +102,12 @@ def main():
         logged += cost
         files[f.name] = dict(rows=len(rows), cost_usd=round(cost, 4), errors=sum(bool(r.get("error")) for r in rows),
                              missing_fields=dict(miss), missing_transcripts=notr, agentic_rows_without_tool_calls=no_tc,
-                             duplicate_jobs=sum(v - 1 for v in keys.values() if v > 1), archived=f.name.startswith("archive_"))
+                             duplicate_jobs=sum(v - 1 for v in keys.values() if v > 1), archived=f.name.startswith("archive_"),
+                             grid_gaps=[] if f.name.startswith("archive_") else grid_gaps(rows))
     ledger = json.loads((RES / "ledger.json").read_text())["total_usd"]
     gap = ledger - logged
     live = runs_in_flight()
-    problems = []
+    problems, warnings = [], []
     for name, s in files.items():
         if s["archived"]:
             continue
@@ -105,6 +117,13 @@ def main():
             problems.append(f"{name}: {s['missing_transcripts']} rows without a transcript file")
         if s["agentic_rows_without_tool_calls"]:
             problems.append(f"{name}: {s['agentic_rows_without_tool_calls']} agentic rows without tool_calls")
+        if s["grid_gaps"]:
+            writing = any(f"results/{name}" in l for l in live)
+            msg = f"{name}: {len(s['grid_gaps'])} task x seed cells with no row (first: {s['grid_gaps'][0]})"
+            if writing:
+                warnings.append(msg + " [run still writing this file]")
+            else:
+                problems.append(msg + "; fill with a `cshape run` resume pass")
     attr = call_attribution(logged_ids, live)
     # gap = in-flight spend + orphaned spend (killed runs) + anything billed before the per-call log started
     unexplained = gap - ((attr["in_flight_usd"] + attr["orphaned_usd"] + attr["untagged_usd"]) if attr else 0.0)
@@ -122,11 +141,13 @@ def main():
                note=("ledger = logged rows + in-flight + orphaned (killed mid-run, no row) + pre-call-log spend. Rows were "
                      "lost when all runs were killed and restarted at ~3:43, ~4:24 and ~5:09 AM CT (API stall fixes, seed cuts); that spend "
                      f"predates results/ledger_calls.ndjson (first logged call {_first_call_ts()}) so it is only known as the residual."),
-               ok=not problems, problems=problems)
+               ok=not problems, problems=problems, warnings=warnings)
     (RES / "integrity.json").write_text(json.dumps(out, indent=1) + "\n")
     print(f"ledger ${ledger:.2f}  logged ${logged:.2f}  gap ${gap:.3f}  in-flight {len(live)} procs/{workers_in_flight(live)} workers"
           f"  attribution {attr}  unattributed ${unexplained:.3f}  ->",
           "OK" if not problems else "PROBLEMS:\n  " + "\n  ".join(problems))
+    for w in warnings:
+        print("  warning:", w)
     return out
 
 

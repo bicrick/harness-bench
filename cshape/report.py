@@ -83,19 +83,26 @@ def retag(r):
     r["_rate_limit_events"] = rate_limit_events(r)
     return r
 
+DROPPED = []  # duplicate rows load() discarded; reported in article_numbers.json so totals reconcile
+
 def load():
     """All result rows. hard*.jsonl are merged into "main". Duplicate (group, task, strategy, seed)
-    rows (two resumable runs can cover the same job) are dropped, keeping the first non-error row."""
-    best = {}
+    rows (two resumable runs can cover the same job) are dropped, keeping the first non-error row
+    (main.jsonl, final.jsonl and arm_e.jsonl load first). Dropped rows are recorded in DROPPED."""
+    best = {}; DROPPED.clear()
     files = sorted(RES.glob("*.jsonl"), key=lambda f: (f.stem not in ("main", "final", "arm_e"), f.name))
     for f in files:
         if f.name.startswith("archive_"):
             continue
         for line in f.open():
-            r = retag(json.loads(line)); r["_file"] = MERGE_INTO_MAIN.get(f.stem, f.stem)
+            r = retag(json.loads(line)); r["_file"] = MERGE_INTO_MAIN.get(f.stem, f.stem); r["_src"] = f.stem
             key = (r["_file"], r.get("task"), r.get("strategy"), r.get("seed"))
             if key not in best or (best[key].get("error") and not r.get("error")):
+                if key in best:
+                    DROPPED.append(best[key])
                 best[key] = r
+            else:
+                DROPPED.append(r)
     return list(best.values())
 
 def summarize(rs):
@@ -178,6 +185,13 @@ def main():
             w.writerow([src, st, repo, len(rs), round(sum(bool(x.get("passed")) for x in rs) / len(rs), 3)])
     main_s = {st: s for (src, st), s in summ.items() if src == MAIN}
     numbers = {"model": "claude-haiku-5-5", "total_runs": len(rows), "total_logged_cost_usd": round(sum(r.get("cost_usd", 0) for r in rows), 4),
+               "duplicates_dropped": {"rows": len(DROPPED), "cost_usd": round(sum(r.get("cost_usd") or 0 for r in DROPPED), 4),
+                                      "pass_disagreements": sum(1 for d in DROPPED for r in rows
+                                                                if (r["_file"], r.get("task"), r.get("strategy"), r.get("seed")) == (d["_file"], d.get("task"), d.get("strategy"), d.get("seed"))
+                                                                and bool(r.get("passed")) != bool(d.get("passed"))),
+                                      "by_file_strategy": dict(Counter(f"{d.get('_src', d['_file'])}:{d.get('strategy')}" for d in DROPPED)),
+                                      "note": "Same (group, task, strategy, seed) logged twice (B_tight wrote hard-task rows into main.jsonl and hard/hard2 re-ran them). "
+                                              "Stats keep the first copy; total_runs and total_logged_cost_usd exclude the dropped copies, so all-rows spend = total_logged_cost_usd + duplicates_dropped.cost_usd."},
                "ledger_usd": json.loads((RES / "ledger.json").read_text())["total_usd"] if (RES / "ledger.json").exists() else None,
                "spend_reconciliation": {k: v for k, v in (json.loads((RES / "integrity.json").read_text()) if (RES / "integrity.json").exists() else {}).items()
                                         if k in ("ledger_usd", "logged_usd", "unlogged_gap_usd", "call_attribution", "unattributed_pre_call_log_usd", "note")},
@@ -283,7 +297,14 @@ def main():
             panel[bk] = sub("final" if final_s.get("combined") else MAIN, bk)
         panel = {k: v for k, v in panel.items() if v}
         fig, ax = plt.subplots(figsize=(8, 4.2)); bar(ax, panel, list(panel), f"Real harnesses vs ours on Haiku 5.5 (same tasks, seeds {sorted(e_seeds)})")
-        fig.tight_layout(); fig.savefig(FIG / "arm_E_real_harnesses.png"); plt.close(fig)
+        rl = [f"{LABEL.get(k, k)} {v.get('runs_rate_limited', 0)}/{v['n']}" for k, v in panel.items() if k.startswith("ext_") and v.get("runs_rate_limited")]
+        if rl:  # seed-0 arm E overlapped the main run's org rate limit; say so on the chart itself
+            fig.text(0.5, 0.005, "runs that hit API 429s (rate limit): " + ", ".join(rl) + "; see runs_rate_limited / pass_rate_no_429 in summary.csv",
+                     ha="center", fontsize=7, color="#555555")
+            fig.tight_layout(rect=(0, 0.04, 1, 1))
+        else:
+            fig.tight_layout()
+        fig.savefig(FIG / "arm_E_real_harnesses.png"); plt.close(fig)
         numbers["arm_e_panel"] = panel
     (RES / "article_numbers.json").write_text(json.dumps(numbers, indent=1))
     print(f"{len(rows)} runs -> results/summary.csv, results/article_numbers.json, figures/*.png")

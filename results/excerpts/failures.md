@@ -138,7 +138,7 @@ src/marshmallow/class_registry.py
             f"Class with name {classname!r} was not
 ```
 
-### marshmallow-h03-rename-validationerror / skel_L0 / seed 1 -> output_truncated
+### marshmallow-h03-rename-validationerror / skel_L2 / seed 2 -> output_truncated
 Leftover refs: ['examples/flask_example.py:19: from marshmallow import Schema, ValidationError, fields, pre_load', 'examples/flask_example.py:64: raise ValidationError("Data not provided.")', 'examples/flask_example.py:139: except ValidationError as err:']
 Apply errors: []
 
@@ -147,13 +147,37 @@ Model output (truncated):
 
 ```
 
-### marshmallow-h03-rename-validationerror / touched / seed 1 -> output_truncated
+### marshmallow-h03-rename-validationerror / skel_L1 / seed 2 -> output_truncated
 Leftover refs: ['examples/flask_example.py:19: from marshmallow import Schema, ValidationError, fields, pre_load', 'examples/flask_example.py:64: raise ValidationError("Data not provided.")', 'examples/flask_example.py:139: except ValidationError as err:']
 Apply errors: []
 
 ```
 Model output (truncated):
 
+```
+
+### marshmallow-h03-rename-validationerror / skel_L3 / seed 2 -> no_edit
+Leftover refs: ['examples/flask_example.py:19: from marshmallow import Schema, ValidationError, fields, pre_load', 'examples/flask_example.py:64: raise ValidationError("Data not provided.")', 'examples/flask_example.py:139: except ValidationError as err:']
+Apply errors: []
+
+```
+Model output (truncated):
+I can't return a complete set of edit blocks for this rename. `ValidationError` appears roughly 400 times across about 20 files, including `fields.py`, `schema.py`, `validate.py`, the test suite, and the examples. Writing every occurrence as a SEARCH/REPLACE block would mean reproducing most of the codebase, and a partial set would leave imports broken. A mechanical rename is the reliable way to do this.
+
+Run this from the repository root:
+
+```bash
+# 1. Rename the word everywhere it appears as a whole identifier
+#    (class definition, imports, __all__, raises, except clauses, type hints,
+#    docstrings, error strings, and test references).
+grep -rlw 'ValidationError' --include='*.py' --include='*.rst' --include='*.md' . \
+  | xargs sed -i 's/\bValidationError\b/SchemaValidationError/g'
+
+# 2. Confirm no old name remains (should print nothing).
+grep -rnw 'ValidationError' --include='*.py' --include='*.rst' --include='*.md' .
+```
+
+The sed pattern also renames the `ValidationError` string in `make_error`'s docstring and the `from marshmallow.exceptions import ValidationError` lines, which is what the task requires. It does not rename `marshmallow.exceptions.MarshmallowError`, `Valida
 ```
 
 ### marshmallow-t01_rename_is_collection / skel_L1 / seed 0 -> no_edit
