@@ -1,0 +1,548 @@
+diff --git a/tests/test_middlewares.py b/tests/test_middlewares.py
+index acef565..1d2a825 100644
+--- a/tests/test_middlewares.py
++++ b/tests/test_middlewares.py
+@@ -91,7 +91,7 @@ def test_caching_json_write(tmpdir):
+     path = str(tmpdir.join('test.db'))
+ 
+     with TinyDB(path, storage=CachingMiddleware(JSONStorage)) as db:
+-        db.insert({'key': 'value'})
++        db.insert_document({'key': 'value'})
+ 
+     # Verify database filesize
+     statinfo = os.stat(path)
+@@ -110,11 +110,11 @@ def test_caching_json_write(tmpdir):
+ def test_caching_rejects_use_after_close(tmpdir):
+     path = str(tmpdir.join('closed.db'))
+     db = TinyDB(path, storage=CachingMiddleware(JSONStorage))
+-    db.insert({'key': 'value'})
++    db.insert_document({'key': 'value'})
+     db.close()
+ 
+     with pytest.raises(ValueError, match='closed'):
+-        db.insert({'key': 'again'})
++        db.insert_document({'key': 'again'})
+ 
+     with pytest.raises(ValueError, match='closed'):
+         db.all()
+diff --git a/tests/test_queries.py b/tests/test_queries.py
+index e939eb4..ca36e08 100644
+--- a/tests/test_queries.py
++++ b/tests/test_queries.py
+@@ -201,8 +201,8 @@ def test_regex_flags_affect_hash_and_query_cache():
+         Query().name.search('john', flags=re.IGNORECASE)._hash
+ 
+     db = TinyDB(storage=MemoryStorage)
+-    db.insert({'name': 'John'})
+-    db.insert({'name': 'johnny'})
++    db.insert_document({'name': 'John'})
++    db.insert_document({'name': 'johnny'})
+ 
+     ignorecase_names = [d['name'] for d in db.search(case_insensitive)]
+     sensitive_names = [d['name'] for d in db.search(case_sensitive)]
+diff --git a/tests/test_storages.py b/tests/test_storages.py
+index 6e433a1..e8c104b 100644
+--- a/tests/test_storages.py
++++ b/tests/test_storages.py
+@@ -33,8 +33,8 @@ def test_json_kwargs(tmpdir):
+     db = TinyDB(str(db_file), sort_keys=True, indent=4, separators=(',', ': '))
+ 
+     # Write contents
+-    db.insert({'b': 1})
+-    db.insert({'a': 1})
++    db.insert_document({'b': 1})
++    db.insert_document({'a': 1})
+ 
+     assert db_file.read() == '''{
+     "_default": {
+@@ -64,13 +64,13 @@ def test_json_readwrite(tmpdir):
+     def get(s):
+         return db.get(where('name') == s)
+ 
+-    db.insert(item)
++    db.insert_document(item)
+     assert get('A very long entry') == item
+ 
+     db.remove(where('name') == 'A very long entry')
+     assert get('A very long entry') is None
+ 
+-    db.insert(item2)
++    db.insert_document(item2)
+     assert get('A short one') == item2
+ 
+     db.remove(where('name') == 'A short one')
+@@ -86,14 +86,14 @@ def test_json_read(tmpdir):
+         db = TinyDB(path, storage=JSONStorage, access_mode='r')
+     # Create small database
+     db = TinyDB(path, storage=JSONStorage)
+-    db.insert({'b': 1})
+-    db.insert({'a': 1})
++    db.insert_document({'b': 1})
++    db.insert_document({'a': 1})
+     db.close()
+     # Access in read mode
+     db = TinyDB(path, storage=JSONStorage, access_mode='r')
+     assert db.get(where('a') == 1) == {'a': 1}  # reading is fine
+     with pytest.raises(IOError):
+-        db.insert({'c': 1})  # writing is not
++        db.insert_document({'c': 1})  # writing is not
+     db.close()
+ 
+ 
+@@ -143,7 +143,7 @@ def test_in_memory():
+ 
+ def test_in_memory_close():
+     with TinyDB(storage=MemoryStorage) as db:
+-        db.insert({})
++        db.insert_document({})
+ 
+ 
+ def test_custom():
+@@ -183,7 +183,7 @@ def test_read_once():
+ 
+         assert count == 1
+ 
+-        db.insert({'foo': 'bar'})
++        db.insert_document({'foo': 'bar'})
+ 
+         assert count == 3  # One for getting the next ID, one for the insert
+ 
+@@ -248,7 +248,7 @@ def test_yaml(tmpdir):
+     # Write contents
+     path = str(tmpdir.join('test.db'))
+     db = TinyDB(path, storage=YAMLStorage)
+-    db.insert(doc)
++    db.insert_document(doc)
+     assert db.all() == [doc]
+ 
+     db.update({'name': 'foo'})
+diff --git a/tests/test_tables.py b/tests/test_tables.py
+index a94005e..98fbb15 100644
+--- a/tests/test_tables.py
++++ b/tests/test_tables.py
+@@ -14,8 +14,8 @@ def test_next_id(db):
+ 
+ 
+ def test_tables_list(db):
+-    db.table('table1').insert({'a': 1})
+-    db.table('table2').insert({'a': 1})
++    db.table('table1').insert_document({'a': 1})
++    db.table('table2').insert_document({'a': 1})
+ 
+     assert db.tables() == {'_default', 'table1', 'table2'}
+ 
+@@ -34,9 +34,9 @@ def test_multiple_tables(db):
+     table2 = db.table('table2')
+     table3 = db.table('table3')
+ 
+-    table1.insert({'int': 1, 'char': 'a'})
+-    table2.insert({'int': 1, 'char': 'b'})
+-    table3.insert({'int': 1, 'char': 'c'})
++    table1.insert_document({'int': 1, 'char': 'a'})
++    table2.insert_document({'int': 1, 'char': 'b'})
++    table3.insert_document({'int': 1, 'char': 'c'})
+ 
+     assert table1.count(where('char') == 'a') == 1
+     assert table2.count(where('char') == 'b') == 1
+@@ -76,7 +76,7 @@ def test_query_cache(db):
+ 
+ def test_query_cache_with_mutable_callable(db):
+     table = db.table('table')
+-    table.insert({'val': 5})
++    table.insert_document({'val': 5})
+ 
+     mutable = 5
+     increase = lambda x: x + mutable
+@@ -99,8 +99,8 @@ def test_zero_cache_size(db):
+     table = db.table('table3', cache_size=0)
+     query = where('int') == 1
+ 
+-    table.insert({'int': 1})
+-    table.insert({'int': 1})
++    table.insert_document({'int': 1})
++    table.insert_document({'int': 1})
+ 
+     assert table.count(query) == 2
+     assert table.count(where('int') == 2) == 0
+@@ -111,8 +111,8 @@ def test_query_cache_size(db):
+     table = db.table('table3', cache_size=1)
+     query = where('int') == 1
+ 
+-    table.insert({'int': 1})
+-    table.insert({'int': 1})
++    table.insert_document({'int': 1})
++    table.insert_document({'int': 1})
+ 
+     assert table.count(query) == 2
+     assert table.count(where('int') == 2) == 0
+@@ -188,7 +188,7 @@ def test_persist_empty_does_not_wipe_existing_data(tmpdir):
+ 
+     path = str(tmpdir.join('db.json'))
+     db = TinyDB(path)
+-    db.table('t').insert({'a': 1})
++    db.table('t').insert_document({'a': 1})
+     db.close()
+ 
+     db = TinyDB(path)
+diff --git a/tests/test_tinydb.py b/tests/test_tinydb.py
+index 9ff866f..8c2c15d 100644
+--- a/tests/test_tinydb.py
++++ b/tests/test_tinydb.py
+@@ -12,7 +12,7 @@ from tinydb.table import Document
+ def test_drop_tables(db: TinyDB):
+     db.drop_tables()
+ 
+-    db.insert({})
++    db.insert_document({})
+     db.drop_tables()
+ 
+     assert len(db) == 0
+@@ -22,22 +22,22 @@ def test_all(db: TinyDB):
+     db.drop_tables()
+ 
+     for i in range(10):
+-        db.insert({})
++        db.insert_document({})
+ 
+     assert len(db.all()) == 10
+ 
+ 
+ def test_insert(db: TinyDB):
+     db.drop_tables()
+-    db.insert({'int': 1, 'char': 'a'})
++    db.insert_document({'int': 1, 'char': 'a'})
+ 
+     assert db.count(where('int') == 1) == 1
+ 
+     db.drop_tables()
+ 
+-    db.insert({'int': 1, 'char': 'a'})
+-    db.insert({'int': 1, 'char': 'b'})
+-    db.insert({'int': 1, 'char': 'c'})
++    db.insert_document({'int': 1, 'char': 'a'})
++    db.insert_document({'int': 1, 'char': 'b'})
++    db.insert_document({'int': 1, 'char': 'c'})
+ 
+     assert db.count(where('int') == 1) == 3
+     assert db.count(where('char') == 'a') == 1
+@@ -45,24 +45,24 @@ def test_insert(db: TinyDB):
+ 
+ def test_insert_ids(db: TinyDB):
+     db.drop_tables()
+-    assert db.insert({'int': 1, 'char': 'a'}) == 1
+-    assert db.insert({'int': 1, 'char': 'a'}) == 2
++    assert db.insert_document({'int': 1, 'char': 'a'}) == 1
++    assert db.insert_document({'int': 1, 'char': 'a'}) == 2
+ 
+ 
+ def test_insert_with_doc_id(db: TinyDB):
+     db.drop_tables()
+-    assert db.insert({'int': 1, 'char': 'a'}) == 1
+-    assert db.insert(Document({'int': 1, 'char': 'a'}, 12)) == 12
+-    assert db.insert(Document({'int': 1, 'char': 'a'}, 77)) == 77
+-    assert db.insert({'int': 1, 'char': 'a'}) == 78
++    assert db.insert_document({'int': 1, 'char': 'a'}) == 1
++    assert db.insert_document(Document({'int': 1, 'char': 'a'}, 12)) == 12
++    assert db.insert_document(Document({'int': 1, 'char': 'a'}, 77)) == 77
++    assert db.insert_document({'int': 1, 'char': 'a'}) == 78
+ 
+ 
+ def test_insert_with_duplicate_doc_id(db: TinyDB):
+     db.drop_tables()
+-    assert db.insert({'int': 1, 'char': 'a'}) == 1
++    assert db.insert_document({'int': 1, 'char': 'a'}) == 1
+ 
+     with pytest.raises(ValueError):
+-        db.insert(Document({'int': 1, 'char': 'a'}, 1))
++        db.insert_document(Document({'int': 1, 'char': 'a'}, 1))
+ 
+ 
+ def test_insert_multiple(db: TinyDB):
+@@ -137,7 +137,7 @@ def test_insert_multiple_mixed_document_and_dict(db: TinyDB):
+ def test_insert_invalid_type_raises_error(db: TinyDB):
+     with pytest.raises(ValueError, match='Document is not a Mapping'):
+         # object() as an example of a non-mapping-type
+-        db.insert(object())  # type: ignore
++        db.insert_document(object())  # type: ignore
+ 
+ 
+ def test_insert_valid_mapping_type(db: TinyDB):
+@@ -155,7 +155,7 @@ def test_insert_valid_mapping_type(db: TinyDB):
+             return len(self.data)
+ 
+     db.drop_tables()
+-    db.insert(CustomDocument({'int': 1, 'char': 'a'}))
++    db.insert_document(CustomDocument({'int': 1, 'char': 'a'}))
+     assert db.count(where('int') == 1) == 1
+ 
+ 
+@@ -176,7 +176,7 @@ def test_custom_mapping_type_with_json(tmpdir):
+     # Insert
+     db = TinyDB(str(tmpdir.join('test.db')))
+     db.drop_tables()
+-    db.insert(CustomDocument({'int': 1, 'char': 'a'}))
++    db.insert_document(CustomDocument({'int': 1, 'char': 'a'}))
+     assert db.count(where('int') == 1) == 1
+ 
+     # Insert multiple
+@@ -261,8 +261,8 @@ def test_update_all(db: TinyDB):
+ 
+ def test_update_returns_ids(db: TinyDB):
+     db.drop_tables()
+-    assert db.insert({'int': 1, 'char': 'a'}) == 1
+-    assert db.insert({'int': 1, 'char': 'a'}) == 2
++    assert db.insert_document({'int': 1, 'char': 'a'}) == 1
++    assert db.insert_document({'int': 1, 'char': 'a'}) == 2
+ 
+     assert db.update({'char': 'b'}, where('int') == 1) == [1, 2]
+ 
+@@ -295,7 +295,7 @@ def test_update_custom_transform_callable(db: TinyDB):
+ 
+     from tinydb.operations import delete as delete_field
+ 
+-    doc_id = db.insert({'name': 'John', 'temp': True})
++    doc_id = db.insert_document({'name': 'John', 'temp': True})
+ 
+     def remove_temp(doc: MutableMapping) -> None:
+         del doc['temp']
+@@ -314,15 +314,15 @@ def test_move_document_between_tables(db: TinyDB):
+     source = db.table('source')
+     target = db.table('target')
+ 
+-    doc_id = source.insert({'type': 'apple', 'count': 7})
+-    target.insert({'placeholder': True})
++    doc_id = source.insert_document({'type': 'apple', 'count': 7})
++    target.insert_document({'placeholder': True})
+     document = source.get(doc_id=doc_id)
+     assert document is not None
+ 
+     with pytest.raises(ValueError, match='already exists'):
+-        target.insert(document)
++        target.insert_document(document)
+ 
+-    new_id = target.insert(dict(document))
++    new_id = target.insert_document(dict(document))
+     source.remove(doc_ids=[doc_id])
+ 
+     assert source.all() == []
+@@ -432,7 +432,7 @@ def test_upsert_by_id(db: TinyDB):
+         db.upsert({'no_Document': 'no_query'})
+ 
+     # Make sure we didn't break anything
+-    assert db.insert({'check': '_next_id'}) == 6
++    assert db.insert_document({'check': '_next_id'}) == 6
+ 
+ 
+ def test_search(db: TinyDB):
+@@ -514,11 +514,11 @@ def test_multiple_dbs():
+     db1 = TinyDB(storage=MemoryStorage)
+     db2 = TinyDB(storage=MemoryStorage)
+ 
+-    db1.insert({'int': 1, 'char': 'a'})
+-    db1.insert({'int': 1, 'char': 'b'})
+-    db1.insert({'int': 1, 'value': 5.0})
++    db1.insert_document({'int': 1, 'char': 'a'})
++    db1.insert_document({'int': 1, 'char': 'b'})
++    db1.insert_document({'int': 1, 'value': 5.0})
+ 
+-    db2.insert({'color': 'blue', 'animal': 'turtle'})
++    db2.insert_document({'color': 'blue', 'animal': 'turtle'})
+ 
+     assert len(db1) == 3
+     assert len(db2) == 1
+@@ -555,10 +555,10 @@ def test_unique_ids(tmpdir):
+ 
+     # Verify ids are unique when reopening the DB and inserting
+     with TinyDB(path) as _db:
+-        _db.insert({'x': 1})
++        _db.insert_document({'x': 1})
+ 
+     with TinyDB(path) as _db:
+-        _db.insert({'x': 1})
++        _db.insert_document({'x': 1})
+ 
+     with TinyDB(path) as _db:
+         data = _db.all()
+@@ -603,8 +603,8 @@ def test_doc_ids_json(tmpdir):
+ 
+     with TinyDB(path) as _db:
+         _db.drop_tables()
+-        assert _db.insert({'int': 1, 'char': 'a'}) == 1
+-        assert _db.insert({'int': 1, 'char': 'a'}) == 2
++        assert _db.insert_document({'int': 1, 'char': 'a'}) == 1
++        assert _db.insert_document({'int': 1, 'char': 'a'}) == 2
+ 
+         _db.drop_tables()
+         assert _db.insert_multiple([{'int': 1, 'char': 'a'},
+@@ -634,14 +634,14 @@ def test_insert_string(tmpdir):
+         _db.insert_multiple(data)
+ 
+         with pytest.raises(ValueError):
+-            _db.insert([1, 2, 3])  # Fails
++            _db.insert_document([1, 2, 3])  # Fails
+ 
+         with pytest.raises(ValueError):
+-            _db.insert({'bark'})  # Fails
++            _db.insert_document({'bark'})  # Fails
+ 
+         assert data == _db.all()
+ 
+-        _db.insert({'int': 3})  # Does not fail
++        _db.insert_document({'int': 3})  # Does not fail
+ 
+ 
+ def test_insert_invalid_dict(tmpdir):
+@@ -652,11 +652,11 @@ def test_insert_invalid_dict(tmpdir):
+         _db.insert_multiple(data)
+ 
+         with pytest.raises(TypeError):
+-            _db.insert({'int': _db})  # Fails
++            _db.insert_document({'int': _db})  # Fails
+ 
+         assert data == _db.all()
+ 
+-        _db.insert({'int': 3})  # Does not fail
++        _db.insert_document({'int': 3})  # Does not fail
+ 
+ 
+ def test_gc(tmpdir):
+@@ -664,8 +664,8 @@ def test_gc(tmpdir):
+     path = str(tmpdir.join('db.json'))
+     db = TinyDB(path)
+     table = db.table('foo')
+-    table.insert({'something': 'else'})
+-    table.insert({'int': 13})
++    table.insert_document({'something': 'else'})
++    table.insert_document({'int': 13})
+     assert len(table.search(where('int') == 13)) == 1
+     assert table.all() == [{'something': 'else'}, {'int': 13}]
+     db.close()
+@@ -678,7 +678,7 @@ def test_drop_table():
+     assert [] == list(db.tables())
+     db.drop_table(default_table_name)
+ 
+-    db.insert({'a': 1})
++    db.insert_document({'a': 1})
+     assert [default_table_name] == list(db.tables())
+ 
+     db.drop_table(default_table_name)
+@@ -686,7 +686,7 @@ def test_drop_table():
+ 
+     table_name = 'some-other-table'
+     db = TinyDB(storage=MemoryStorage)
+-    db.table(table_name).insert({'a': 1})
++    db.table(table_name).insert_document({'a': 1})
+     assert {table_name} == db.tables()
+ 
+     db.drop_table(table_name)
+@@ -734,7 +734,7 @@ def test_query_cache_documents_are_shared_with_cache():
+     same objects the cache holds (see the docstring): the list itself can
+     be mutated freely, the documents inside it cannot."""
+     db = TinyDB(storage=MemoryStorage)
+-    db.insert({'name': 'Alice', 'tags': ['a', 'b']})
++    db.insert_document({'name': 'Alice', 'tags': ['a', 'b']})
+ 
+     query = where('name') == 'Alice'
+ 
+@@ -761,7 +761,7 @@ def test_repr(tmpdir):
+     path = str(tmpdir.join('db.json'))
+ 
+     db = TinyDB(path)
+-    db.insert({'a': 1})
++    db.insert_document({'a': 1})
+ 
+     assert re.match(
+         r"<TinyDB "
+@@ -777,7 +777,7 @@ def test_delete(tmpdir):
+ 
+     db = TinyDB(path, ensure_ascii=False)
+     q = Query()
+-    db.insert({'network': {'id': '114', 'name': 'ok', 'rpc': 'dac',
++    db.insert_document({'network': {'id': '114', 'name': 'ok', 'rpc': 'dac',
+                            'ticker': 'mkay'}})
+     assert db.search(q.network.id == '114') == [
+         {'network': {'id': '114', 'name': 'ok', 'rpc': 'dac',
+@@ -810,15 +810,15 @@ def test_insert_on_existing_db(tmpdir):
+     path = str(tmpdir.join('db.json'))
+ 
+     db = TinyDB(path, ensure_ascii=False)
+-    db.insert({'foo': 'bar'})
++    db.insert_document({'foo': 'bar'})
+ 
+     assert len(db) == 1
+ 
+     db.close()
+ 
+     db = TinyDB(path, ensure_ascii=False)
+-    db.insert({'foo': 'bar'})
+-    db.insert({'foo': 'bar'})
++    db.insert_document({'foo': 'bar'})
++    db.insert_document({'foo': 'bar'})
+ 
+     assert len(db) == 3
+ 
+@@ -831,7 +831,7 @@ def test_storage_access():
+ 
+ def test_lambda_query():
+     db = TinyDB(storage=MemoryStorage)
+-    db.insert({'foo': 'bar'})
++    db.insert_document({'foo': 'bar'})
+ 
+     query = lambda doc: doc.get('foo') == 'bar'
+     query.is_cacheable = lambda: False
+diff --git a/tinydb/__init__.py b/tinydb/__init__.py
+index 4a8941d..7f5c1b0 100644
+--- a/tinydb/__init__.py
++++ b/tinydb/__init__.py
+@@ -12,14 +12,14 @@ Usage example:
+ >>> from tinydb import TinyDB, where
+ >>> from tinydb.storages import MemoryStorage
+ >>> db = TinyDB(storage=MemoryStorage)
+->>> db.insert({'data': 5})  # Insert into '_default' table
++>>> db.insert_document({'data': 5})  # Insert into '_default' table
+ >>> db.search(where('data') == 5)
+ [{'data': 5}]
+ >>> # Document IDs are available via Document.doc_id, not an ``_id`` field
+ >>> # Now let's create a new table
+ >>> tbl = db.table('our_table')
+ >>> for i in range(10):
+-...     tbl.insert({'data': i})
++...     tbl.insert_document({'data': i})
+ ...
+ >>> len(tbl.search(where('data') < 5))
+ 5
+diff --git a/tinydb/database.py b/tinydb/database.py
+index 0cd2b7e..971fb79 100644
+--- a/tinydb/database.py
++++ b/tinydb/database.py
+@@ -222,7 +222,7 @@ class TinyDB(TableBase):
+         context manager::
+ 
+             with TinyDB('data.json') as db:
+-                db.insert({'foo': 'bar'})
++                db.insert_document({'foo': 'bar'})
+ 
+         Upon leaving this context, the ``close`` method will be called.
+         """
+diff --git a/tinydb/table.py b/tinydb/table.py
+index 76470aa..027e08e 100644
+--- a/tinydb/table.py
++++ b/tinydb/table.py
+@@ -136,7 +136,7 @@ class Table:
+         """
+         return self._storage
+ 
+-    def insert(self, document: Mapping) -> int:
++    def insert_document(self, document: Mapping) -> int:
+         """
+         Insert a new document into the table.
+ 
+@@ -620,7 +620,7 @@ class Table:
+ 
+         # There are no documents that match the specified query -> insert the
+         # data as a new document
+-        return [self.insert(document)]
++        return [self.insert_document(document)]
+ 
+     def remove(
+         self,

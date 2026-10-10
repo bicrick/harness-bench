@@ -1,0 +1,3441 @@
+diff --git a/examples/flask_example.py b/examples/flask_example.py
+index 17838bb..615d0d8 100644
+--- a/examples/flask_example.py
++++ b/examples/flask_example.py
+@@ -16,7 +16,7 @@ from flask_sqlalchemy import SQLAlchemy
+ from sqlalchemy.exc import NoResultFound
+ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+ 
+-from marshmallow import Schema, ValidationError, fields, pre_load
++from marshmallow import Schema, SchemaValidationError, fields, pre_load
+ 
+ app = Flask(__name__)
+ app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:////tmp/quotes.db"
+@@ -61,7 +61,7 @@ class AuthorSchema(Schema):
+ # Custom validator
+ def must_not_be_blank(data):
+     if not data:
+-        raise ValidationError("Data not provided.")
++        raise SchemaValidationError("Data not provided.")
+ 
+ 
+ class QuoteSchema(Schema):
+@@ -136,7 +136,7 @@ def new_quote():
+     # Validate and deserialize input
+     try:
+         data = quote_schema.load(json_data)
+-    except ValidationError as err:
++    except SchemaValidationError as err:
+         return err.messages, 422
+     first, last = data["author"]["first"], data["author"]["last"]
+     author = Author.query.filter_by(first=first, last=last).first()
+diff --git a/examples/package_json_example.py b/examples/package_json_example.py
+index 65c70f0..9364bb4 100644
+--- a/examples/package_json_example.py
++++ b/examples/package_json_example.py
+@@ -11,7 +11,7 @@ from pprint import pprint
+ 
+ from packaging import version
+ 
+-from marshmallow import INCLUDE, Schema, ValidationError, fields
++from marshmallow import INCLUDE, Schema, SchemaValidationError, fields
+ 
+ 
+ class Version(fields.Field[version.Version]):
+@@ -21,7 +21,7 @@ class Version(fields.Field[version.Version]):
+         try:
+             return version.Version(value)
+         except version.InvalidVersion as e:
+-            raise ValidationError("Not a valid version.") from e
++            raise SchemaValidationError("Not a valid version.") from e
+ 
+     def _serialize(self, value, *args, **kwargs):
+         return str(value)
+@@ -52,7 +52,7 @@ if __name__ == "__main__":
+     pkg = json.load(sys.stdin)
+     try:
+         pprint(PackageSchema().load(pkg))
+-    except ValidationError as error:
++    except SchemaValidationError as error:
+         print("ERROR: package.json is invalid")
+         pprint(error.messages)
+         sys.exit(1)
+diff --git a/performance/benchmark.py b/performance/benchmark.py
+index 35af1c7..c4e842a 100644
+--- a/performance/benchmark.py
++++ b/performance/benchmark.py
+@@ -10,13 +10,13 @@ import datetime
+ import gc
+ import timeit
+ 
+-from marshmallow import Schema, ValidationError, fields, post_dump
++from marshmallow import Schema, SchemaValidationError, fields, post_dump
+ 
+ 
+ # Custom validator
+ def must_not_be_blank(data):
+     if not data:
+-        raise ValidationError("Data not provided.")
++        raise SchemaValidationError("Data not provided.")
+ 
+ 
+ class AuthorSchema(Schema):
+diff --git a/src/marshmallow/__init__.py b/src/marshmallow/__init__.py
+index 60825ab..be0f37e 100644
+--- a/src/marshmallow/__init__.py
++++ b/src/marshmallow/__init__.py
+@@ -7,7 +7,7 @@ from marshmallow.decorators import (
+     validates,
+     validates_schema,
+ )
+-from marshmallow.exceptions import ValidationError
++from marshmallow.exceptions import SchemaValidationError
+ from marshmallow.schema import Schema, SchemaOpts
+ 
+ from . import fields
+@@ -18,7 +18,7 @@ __all__ = [
+     "RAISE",
+     "Schema",
+     "SchemaOpts",
+-    "ValidationError",
++    "SchemaValidationError",
+     "fields",
+     "missing",
+     "post_dump",
+diff --git a/src/marshmallow/decorators.py b/src/marshmallow/decorators.py
+index d98d2ef..38d8e39 100644
+--- a/src/marshmallow/decorators.py
++++ b/src/marshmallow/decorators.py
+@@ -22,7 +22,7 @@ Example: ::
+         validates_schema,
+         validates,
+         fields,
+-        ValidationError,
++        SchemaValidationError,
+     )
+ 
+ 
+@@ -48,12 +48,12 @@ Example: ::
+         @validates_schema
+         def validate_email(self, data, **kwargs):
+             if len(data["email"]) < 3:
+-                raise ValidationError("Email must be more than 3 characters", "email")
++                raise SchemaValidationError("Email must be more than 3 characters", "email")
+ 
+         @validates("age")
+         def validate_age(self, data, **kwargs):
+             if data < 14:
+-                raise ValidationError("Too young!")
++                raise SchemaValidationError("Too young!")
+ 
+ .. note::
+     These decorators only work with instance methods. Class and static
+diff --git a/src/marshmallow/error_store.py b/src/marshmallow/error_store.py
+index b2607ba..cc13f84 100644
+--- a/src/marshmallow/error_store.py
++++ b/src/marshmallow/error_store.py
+@@ -38,7 +38,7 @@ def merge_errors(errors1, errors2):  # noqa: PLR0911
+     """Deeply merge two error messages.
+ 
+     The format of ``errors1`` and ``errors2`` matches the ``message``
+-    parameter of :exc:`marshmallow.exceptions.ValidationError`.
++    parameter of :exc:`marshmallow.exceptions.SchemaValidationError`.
+     """
+     if not errors1:
+         return errors2
+diff --git a/src/marshmallow/exceptions.py b/src/marshmallow/exceptions.py
+index 67bdf73..4d3e29e 100644
+--- a/src/marshmallow/exceptions.py
++++ b/src/marshmallow/exceptions.py
+@@ -12,7 +12,7 @@ class MarshmallowError(Exception):
+     """Base class for all marshmallow-related errors."""
+ 
+ 
+-class ValidationError(MarshmallowError):
++class SchemaValidationError(MarshmallowError):
+     """Raised when validation fails on a field or schema.
+ 
+     Validators and custom fields should raise this exception.
+diff --git a/src/marshmallow/fields.py b/src/marshmallow/fields.py
+index 4149a25..d3fe7ad 100644
+--- a/src/marshmallow/fields.py
++++ b/src/marshmallow/fields.py
+@@ -32,7 +32,7 @@ from marshmallow import class_registry, types, utils, validate
+ from marshmallow.constants import missing as missing_
+ from marshmallow.exceptions import (
+     StringNotCollectionError,
+-    ValidationError,
++    SchemaValidationError,
+     _FieldInstanceResolutionError,
+ )
+ from marshmallow.validate import And, Length
+@@ -140,14 +140,14 @@ class Field(typing.Generic[_InternalT]):
+     :param validate: Validator or collection of validators that are called
+         during deserialization. Validator takes a field's input value as
+         its only parameter and returns a boolean.
+-        If it returns `False`, an :exc:`ValidationError` is raised.
++        If it returns `False`, an :exc:`SchemaValidationError` is raised.
+     :param pre_load: Callable or collection of callables that are applied to the
+         raw input value before deserialization. Each callable receives the value
+         and returns a transformed value.
+     :param post_load: Callable or collection of callables that are applied to the
+         deserialized value after validation. Each callable receives the value
+         and returns a transformed value.
+-    :param required: Raise a :exc:`ValidationError` if the field value
++    :param required: Raise a :exc:`SchemaValidationError` if the field value
+         is not supplied during deserialization.
+     :param allow_none: Set this to `True` if `None` should be considered a valid value during
+         validation/deserialization. If set to `False` (the default), `None` is considered invalid input.
+@@ -182,7 +182,7 @@ class Field(typing.Generic[_InternalT]):
+ 
+     #: Default error messages for various kinds of errors. The keys in this dictionary
+     #: are passed to `Field.make_error`. The values are error messages passed to
+-    #: :exc:`marshmallow.exceptions.ValidationError`.
++    #: :exc:`marshmallow.exceptions.SchemaValidationError`.
+     default_error_messages: types.ErrorMessages = {
+         "required": "Missing data for required field.",
+         "null": "Field may not be null.",
+@@ -276,7 +276,7 @@ class Field(typing.Generic[_InternalT]):
+         return accessor_func(obj, check_key, default)
+ 
+     def _validate(self, value: typing.Any) -> None:
+-        """Perform validation on ``value``. Raise a :exc:`ValidationError` if validation
++        """Perform validation on ``value``. Raise a :exc:`SchemaValidationError` if validation
+         does not succeed.
+         """
+         self._validate_all(value)
+@@ -285,8 +285,8 @@ class Field(typing.Generic[_InternalT]):
+     def _validate_all(self) -> typing.Callable[[typing.Any], None]:
+         return And(*self.validators)
+ 
+-    def make_error(self, key: str, **kwargs) -> ValidationError:
+-        """Helper method to make a `ValidationError` with an error message
++    def make_error(self, key: str, **kwargs) -> SchemaValidationError:
++        """Helper method to make a `SchemaValidationError` with an error message
+         from ``self.error_messages``.
+         """
+         try:
+@@ -294,16 +294,16 @@ class Field(typing.Generic[_InternalT]):
+         except KeyError as error:
+             class_name = self.__class__.__name__
+             message = (
+-                f"ValidationError raised by `{class_name}`, but error key `{key}` does "
++                f"SchemaValidationError raised by `{class_name}`, but error key `{key}` does "
+                 "not exist in the `error_messages` dictionary."
+             )
+             raise AssertionError(message) from error
+         if isinstance(msg, (str, bytes)):
+             msg = msg.format(**kwargs)
+-        return ValidationError(msg)
++        return SchemaValidationError(msg)
+ 
+     def _validate_missing(self, value: typing.Any) -> None:
+-        """Validate missing values. Raise a :exc:`ValidationError` if
++        """Validate missing values. Raise a :exc:`SchemaValidationError` if
+         `value` should be considered missing.
+         """
+         if value is missing_ and self.required:
+@@ -372,7 +372,7 @@ class Field(typing.Generic[_InternalT]):
+         :param attr: The attribute/key in `data` to deserialize.
+         :param data: The raw input data passed to `Schema.load <marshmallow.Schema.load>`.
+         :param kwargs: Field-specific keyword arguments.
+-        :raise ValidationError: If an invalid value is passed or if a required value
++        :raise SchemaValidationError: If an invalid value is passed or if a required value
+             is missing.
+         """
+         # Validate required fields, deserialize, then validate
+@@ -448,7 +448,7 @@ class Field(typing.Generic[_InternalT]):
+         :param attr: The attribute/key in `data` to be deserialized.
+         :param data: The raw input data passed to the `Schema.load <marshmallow.Schema.load>`.
+         :param kwargs: Field-specific keyword arguments.
+-        :raise ValidationError: In case of formatting or validation failure.
++        :raise SchemaValidationError: In case of formatting or validation failure.
+         :return: The deserialized value.
+ 
+         .. versionchanged:: 3.0.0
+@@ -641,8 +641,8 @@ class Nested(Field):
+     ):
+         try:
+             valid_data = self.schema.load(value, unknown=self.unknown, partial=partial)
+-        except ValidationError as error:
+-            raise ValidationError(
++        except SchemaValidationError as error:
++            raise SchemaValidationError(
+                 error.messages, valid_data=error.valid_data
+             ) from error
+         return valid_data
+@@ -786,12 +786,12 @@ class List(Field[list[_InternalT | None]]):
+         for idx, each in enumerate(value):
+             try:
+                 result.append(self.inner.deserialize(each, **kwargs))
+-            except ValidationError as error:
++            except SchemaValidationError as error:
+                 if error.valid_data is not None:
+                     result.append(typing.cast("_InternalT", error.valid_data))
+                 errors.update({idx: error.messages})
+         if errors:
+-            raise ValidationError(errors, valid_data=result)
++            raise SchemaValidationError(errors, valid_data=result)
+         return result
+ 
+ 
+@@ -881,12 +881,12 @@ class Tuple(Field[tuple]):
+         for idx, (field, each) in enumerate(zip(self.tuple_fields, value, strict=True)):
+             try:
+                 result.append(field.deserialize(each, **kwargs))
+-            except ValidationError as error:
++            except SchemaValidationError as error:
+                 if error.valid_data is not None:
+                     result.append(error.valid_data)
+                 errors.update({idx: error.messages})
+         if errors:
+-            raise ValidationError(errors, valid_data=result)
++            raise SchemaValidationError(errors, valid_data=result)
+ 
+         return tuple(result)
+ 
+@@ -924,7 +924,7 @@ class UUID(Field[uuid.UUID]):
+     default_error_messages = {"invalid_uuid": "Not a valid UUID."}
+ 
+     def _validated(self, value) -> uuid.UUID:
+-        """Format the value or raise a :exc:`ValidationError` if an error occurs."""
++        """Format the value or raise a :exc:`SchemaValidationError` if an error occurs."""
+         if isinstance(value, uuid.UUID):
+             return value
+         try:
+@@ -979,7 +979,7 @@ class Number(Field[_NumT], metaclass=abc.ABCMeta):
+         return self.num_type(value)  # type: ignore[call-arg]
+ 
+     def _validated(self, value: typing.Any) -> _NumT:
+-        """Format the value or raise a :exc:`ValidationError` if an error occurs."""
++        """Format the value or raise a :exc:`SchemaValidationError` if an error occurs."""
+         # (value is True or value is False) is ~5x faster than isinstance(value, bool)
+         if value is True or value is False:
+             raise self.make_error("invalid", input=value)
+@@ -1701,7 +1701,7 @@ class Mapping(Field[_MappingT], metaclass=abc.ABCMeta):
+             for key in value:
+                 try:
+                     keys[key] = self.key_field.deserialize(key, **kwargs)
+-                except ValidationError as error:
++                except SchemaValidationError as error:
+                     errors[key]["key"] = error.messages
+ 
+         # Deserialize values
+@@ -1714,7 +1714,7 @@ class Mapping(Field[_MappingT], metaclass=abc.ABCMeta):
+             for key, val in value.items():
+                 try:
+                     deser_val = self.value_field.deserialize(val, **kwargs)
+-                except ValidationError as error:
++                except SchemaValidationError as error:
+                     errors[key]["value"] = error.messages
+                     if error.valid_data is not None and key in keys:
+                         result[keys[key]] = error.valid_data
+@@ -1723,7 +1723,7 @@ class Mapping(Field[_MappingT], metaclass=abc.ABCMeta):
+                         result[keys[key]] = deser_val
+ 
+         if errors:
+-            raise ValidationError(errors, valid_data=result)
++            raise SchemaValidationError(errors, valid_data=result)
+ 
+         return result
+ 
+diff --git a/src/marshmallow/schema.py b/src/marshmallow/schema.py
+index f68da9d..16fb1fc 100644
+--- a/src/marshmallow/schema.py
++++ b/src/marshmallow/schema.py
+@@ -30,7 +30,7 @@ from marshmallow.decorators import (
+     VALIDATES_SCHEMA,
+ )
+ from marshmallow.error_store import ErrorStore
+-from marshmallow.exceptions import SCHEMA, StringNotCollectionError, ValidationError
++from marshmallow.exceptions import SCHEMA, StringNotCollectionError, SchemaValidationError
+ from marshmallow.orderedset import OrderedSet
+ from marshmallow.utils import (
+     get_value,
+@@ -484,11 +484,11 @@ class Schema(metaclass=SchemaMeta):
+     ##### Override-able methods #####
+ 
+     def handle_error(
+-        self, error: ValidationError, data: typing.Any, *, many: bool, **kwargs
++        self, error: SchemaValidationError, data: typing.Any, *, many: bool, **kwargs
+     ):
+         """Custom error handler function for the schema.
+ 
+-        :param error: The `ValidationError` raised during (de)serialization.
++        :param error: The `SchemaValidationError` raised during (de)serialization.
+         :param data: The original input data.
+         :param many: Value of ``many`` on dump or load.
+         :param partial: Value of ``partial`` on load.
+@@ -520,10 +520,10 @@ class Schema(metaclass=SchemaMeta):
+         """
+         try:
+             value = getter_func(data)
+-        except ValidationError as error:
++        except SchemaValidationError as error:
+             error_store.store_error(error.messages, field_name, index=index)
+             # When a Nested field fails validation, the marshalled data is stored
+-            # on the ValidationError's valid_data attribute
++            # on the SchemaValidationError's valid_data attribute
+             return error.valid_data or missing
+         return value
+ 
+@@ -556,7 +556,7 @@ class Schema(metaclass=SchemaMeta):
+ 
+         .. versionchanged:: 3.0.0b7
+             This method returns the serialized data rather than a ``(data, errors)`` tuple.
+-            A :exc:`ValidationError <marshmallow.exceptions.ValidationError>` is raised
++            A :exc:`SchemaValidationError <marshmallow.exceptions.SchemaValidationError>` is raised
+             if ``obj`` is invalid.
+         .. versionchanged:: 3.0.0rc9
+             Validation no longer occurs upon serialization.
+@@ -588,7 +588,7 @@ class Schema(metaclass=SchemaMeta):
+ 
+         .. versionchanged:: 3.0.0b7
+             This method returns the serialized data rather than a ``(data, errors)`` tuple.
+-            A :exc:`ValidationError <marshmallow.exceptions.ValidationError>` is raised
++            A :exc:`SchemaValidationError <marshmallow.exceptions.SchemaValidationError>` is raised
+             if ``obj`` is invalid.
+         """
+         serialized = self.dump(obj, many=many)
+@@ -728,7 +728,7 @@ class Schema(metaclass=SchemaMeta):
+ 
+         .. versionchanged:: 3.0.0b7
+             This method returns the deserialized data rather than a ``(data, errors)`` tuple.
+-            A :exc:`ValidationError <marshmallow.exceptions.ValidationError>` is raised
++            A :exc:`SchemaValidationError <marshmallow.exceptions.SchemaValidationError>` is raised
+             if invalid data are passed.
+         """
+         return self._do_load(
+@@ -762,7 +762,7 @@ class Schema(metaclass=SchemaMeta):
+ 
+         .. versionchanged:: 3.0.0b7
+             This method returns the deserialized data rather than a ``(data, errors)`` tuple.
+-            A :exc:`ValidationError <marshmallow.exceptions.ValidationError>` is raised
++            A :exc:`SchemaValidationError <marshmallow.exceptions.SchemaValidationError>` is raised
+             if invalid data are passed.
+         .. versionchanged:: 4.0.0
+             Rename ``json_module`` parameter to ``s``.
+@@ -790,7 +790,7 @@ class Schema(metaclass=SchemaMeta):
+                 )
+             else:
+                 validator_func(output, partial=partial, many=many, unknown=unknown)
+-        except ValidationError as err:
++        except SchemaValidationError as err:
+             field_name = err.field_name
+             data_key: str
+             if field_name == SCHEMA:
+@@ -833,7 +833,7 @@ class Schema(metaclass=SchemaMeta):
+         """
+         try:
+             self._do_load(data, many=many, partial=partial, postprocess=False)
+-        except ValidationError as exc:
++        except SchemaValidationError as exc:
+             return typing.cast("dict[str, list[str]]", exc.messages)
+         return {}
+ 
+@@ -881,7 +881,7 @@ class Schema(metaclass=SchemaMeta):
+                     partial=partial,
+                     unknown=unknown,
+                 )
+-            except ValidationError as err:
++            except SchemaValidationError as err:
+                 errors = err.normalized_messages()
+                 result: list | dict | None = None
+         else:
+@@ -934,10 +934,10 @@ class Schema(metaclass=SchemaMeta):
+                         partial=partial,
+                         unknown=unknown,
+                     )
+-                except ValidationError as err:
++                except SchemaValidationError as err:
+                     errors = err.normalized_messages()
+         if errors:
+-            exc = ValidationError(errors, data=data, valid_data=result)
++            exc = SchemaValidationError(errors, data=data, valid_data=result)
+             self.handle_error(exc, data, many=many, partial=partial)
+             raise exc
+ 
+diff --git a/src/marshmallow/validate.py b/src/marshmallow/validate.py
+index 35c0e8b..610d82b 100644
+--- a/src/marshmallow/validate.py
++++ b/src/marshmallow/validate.py
+@@ -7,7 +7,7 @@ import typing
+ from abc import ABC, abstractmethod
+ from operator import attrgetter
+ 
+-from marshmallow.exceptions import ValidationError
++from marshmallow.exceptions import SchemaValidationError
+ 
+ if typing.TYPE_CHECKING:
+     from marshmallow import types
+@@ -47,17 +47,17 @@ class And(Validator):
+ 
+     Example: ::
+ 
+-        from marshmallow import validate, ValidationError
++        from marshmallow import validate, SchemaValidationError
+ 
+ 
+         def is_even(value):
+             if value % 2 != 0:
+-                raise ValidationError("Not an even value.")
++                raise SchemaValidationError("Not an even value.")
+ 
+ 
+         validator = validate.And(validate.Range(min=0), is_even)
+         validator(-1)
+-        # ValidationError: ['Must be greater than or equal to 0.', 'Not an even value.']
++        # SchemaValidationError: ['Must be greater than or equal to 0.', 'Not an even value.']
+ 
+     :param validators: Validators to combine.
+     """
+@@ -74,14 +74,14 @@ class And(Validator):
+         for validator in self.validators:
+             try:
+                 validator(value)
+-            except ValidationError as err:
++            except SchemaValidationError as err:
+                 kwargs.update(err.kwargs)
+                 if isinstance(err.messages, dict):
+                     errors.append(err.messages)
+                 else:
+                     errors.extend(err.messages)
+         if errors:
+-            raise ValidationError(errors, **kwargs)
++            raise SchemaValidationError(errors, **kwargs)
+         return value
+ 
+ 
+@@ -218,14 +218,14 @@ class URL(Validator):
+     def __call__(self, value: str) -> str:
+         message = self._format_error(value)
+         if not value:
+-            raise ValidationError(message)
++            raise SchemaValidationError(message)
+ 
+         # Check first if the scheme is valid
+         scheme = None
+         if "://" in value:
+             scheme = value.split("://", maxsplit=1)[0].lower()
+             if scheme not in self.schemes:
+-                raise ValidationError(message)
++                raise SchemaValidationError(message)
+ 
+         regex = self._regex(
+             relative=self.relative, absolute=self.absolute, require_tld=self.require_tld
+@@ -239,7 +239,7 @@ class URL(Validator):
+             matched = regex.search(value)
+ 
+         if not matched:
+-            raise ValidationError(message)
++            raise SchemaValidationError(message)
+ 
+         return value
+ 
+@@ -286,16 +286,16 @@ class Email(Validator):
+         message = self._format_error(value)
+ 
+         if not value or "@" not in value:
+-            raise ValidationError(message)
++            raise SchemaValidationError(message)
+ 
+         user_part, domain_part = value.rsplit("@", 1)
+ 
+         if not self.USER_REGEX.match(user_part):
+-            raise ValidationError(message)
++            raise SchemaValidationError(message)
+ 
+         if domain_part not in self.DOMAIN_WHITELIST:
+             if not self.DOMAIN_REGEX.match(domain_part):
+-                raise ValidationError(message)
++                raise SchemaValidationError(message)
+ 
+         return value
+ 
+@@ -366,13 +366,13 @@ class Range(Validator):
+             value < self.min if self.min_inclusive else value <= self.min
+         ):
+             message = self.message_min if self.max is None else self.message_all
+-            raise ValidationError(self._format_error(value, message))
++            raise SchemaValidationError(self._format_error(value, message))
+ 
+         if self.max is not None and (
+             value > self.max if self.max_inclusive else value >= self.max
+         ):
+             message = self.message_max if self.min is None else self.message_all
+-            raise ValidationError(self._format_error(value, message))
++            raise SchemaValidationError(self._format_error(value, message))
+ 
+         return value
+ 
+@@ -432,16 +432,16 @@ class Length(Validator):
+ 
+         if self.equal is not None:
+             if length != self.equal:
+-                raise ValidationError(self._format_error(value, self.message_equal))
++                raise SchemaValidationError(self._format_error(value, self.message_equal))
+             return value
+ 
+         if self.min is not None and length < self.min:
+             message = self.message_min if self.max is None else self.message_all
+-            raise ValidationError(self._format_error(value, message))
++            raise SchemaValidationError(self._format_error(value, message))
+ 
+         if self.max is not None and length > self.max:
+             message = self.message_max if self.min is None else self.message_all
+-            raise ValidationError(self._format_error(value, message))
++            raise SchemaValidationError(self._format_error(value, message))
+ 
+         return value
+ 
+@@ -469,7 +469,7 @@ class Equal(Validator):
+ 
+     def __call__(self, value: _T) -> _T:
+         if value != self.comparable:
+-            raise ValidationError(self._format_error(value))
++            raise SchemaValidationError(self._format_error(value))
+         return value
+ 
+ 
+@@ -516,7 +516,7 @@ class Regexp(Validator):
+ 
+     def __call__(self, value):
+         if self.regex.match(value) is None:
+-            raise ValidationError(self._format_error(value))
++            raise SchemaValidationError(self._format_error(value))
+ 
+         return value
+ 
+@@ -550,7 +550,7 @@ class Predicate(Validator):
+         method = getattr(value, self.method)
+ 
+         if not method(**self.kwargs):
+-            raise ValidationError(self._format_error(value))
++            raise SchemaValidationError(self._format_error(value))
+ 
+         return value
+ 
+@@ -579,7 +579,7 @@ class NoneOf(Validator):
+     def __call__(self, value: typing.Any) -> typing.Any:
+         try:
+             if value in self.iterable:
+-                raise ValidationError(self._format_error(value))
++                raise SchemaValidationError(self._format_error(value))
+         except TypeError:
+             pass
+ 
+@@ -621,9 +621,9 @@ class OneOf(Validator):
+     def __call__(self, value: typing.Any) -> typing.Any:
+         try:
+             if value not in self.choices:
+-                raise ValidationError(self._format_error(value))
++                raise SchemaValidationError(self._format_error(value))
+         except TypeError as error:
+-            raise ValidationError(self._format_error(value)) from error
++            raise SchemaValidationError(self._format_error(value)) from error
+ 
+         return value
+ 
+@@ -680,7 +680,7 @@ class ContainsOnly(OneOf):
+         # We can't use set.issubset because does not handle unhashable types
+         for val in value:
+             if val not in self.choices:
+-                raise ValidationError(self._format_error(value))
++                raise SchemaValidationError(self._format_error(value))
+         return value
+ 
+ 
+@@ -704,5 +704,5 @@ class ContainsNoneOf(NoneOf):
+     def __call__(self, value: typing.Sequence[_T]) -> typing.Sequence[_T]:
+         for val in value:
+             if val in self.iterable:
+-                raise ValidationError(self._format_error(value))
++                raise SchemaValidationError(self._format_error(value))
+         return value
+diff --git a/tests/base.py b/tests/base.py
+index 91c7875..3846850 100644
+--- a/tests/base.py
++++ b/tests/base.py
+@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
+ import simplejson
+ 
+ from marshmallow import Schema, fields, missing, post_load, validate
+-from marshmallow.exceptions import ValidationError
++from marshmallow.exceptions import SchemaValidationError
+ 
+ central = ZoneInfo("America/Chicago")
+ 
+@@ -90,7 +90,7 @@ def predicate(
+ ) -> typing.Callable[[typing.Any], None]:
+     def validate(value: typing.Any) -> None:
+         if func(value) is False:
+-            raise ValidationError("Invalid value.")
++            raise SchemaValidationError("Invalid value.")
+ 
+     return validate
+ 
+@@ -230,7 +230,7 @@ class UserSchema(Schema):
+         try:
+             return age > 80
+         except TypeError as te:
+-            raise ValidationError(str(te)) from te
++            raise SchemaValidationError(str(te)) from te
+ 
+     @post_load
+     def make_user(self, data, **kwargs):
+diff --git a/tests/mypy_test_cases/test_validation_error.py b/tests/mypy_test_cases/test_validation_error.py
+index 105c765..5e4f87f 100644
+--- a/tests/mypy_test_cases/test_validation_error.py
++++ b/tests/mypy_test_cases/test_validation_error.py
+@@ -3,15 +3,15 @@ from __future__ import annotations
+ import marshmallow as ma
+ 
+ # OK types for 'message'
+-ma.ValidationError("foo")
+-ma.ValidationError(["foo"])
+-ma.ValidationError({"foo": "bar"})
++ma.SchemaValidationError("foo")
++ma.SchemaValidationError(["foo"])
++ma.SchemaValidationError({"foo": "bar"})
+ 
+ # non-OK types for 'message'
+-ma.ValidationError(0)  # type: ignore[arg-type]
++ma.SchemaValidationError(0)  # type: ignore[arg-type]
+ 
+ # 'messages' is a dict|list
+-err = ma.ValidationError("foo")
++err = ma.SchemaValidationError("foo")
+ a: dict | list = err.messages
+ # union type can't assign to non-union type
+ b: str = err.messages  # type: ignore[assignment]
+diff --git a/tests/test_context.py b/tests/test_context.py
+index 8758b7e..06c66a1 100644
+--- a/tests/test_context.py
++++ b/tests/test_context.py
+@@ -12,7 +12,7 @@ from marshmallow import (
+     validates,
+     validates_schema,
+ )
+-from marshmallow.exceptions import ValidationError
++from marshmallow.exceptions import SchemaValidationError
+ from marshmallow.experimental.context import Context
+ from tests.base import Blog, User
+ 
+@@ -113,7 +113,7 @@ class TestContext:
+             @validates("foo")
+             def validate_foo(self, value, **kwargs):
+                 if "foo_context" not in Context[dict].get():
+-                    raise ValidationError("Missing context")
++                    raise SchemaValidationError("Missing context")
+ 
+         class OuterSchema(Schema):
+             bars = fields.List(fields.Nested(InnerSchema()))
+@@ -134,7 +134,7 @@ class TestContext:
+             @validates("foo")
+             def validate_foo(self, value, **kwargs):
+                 if "foo_context" not in Context[dict].get():
+-                    raise ValidationError("Missing context")
++                    raise SchemaValidationError("Missing context")
+ 
+         class OuterSchema(Schema):
+             bars = fields.Dict(values=fields.Nested(InnerSchema()))
+@@ -240,12 +240,12 @@ class TestContext:
+             @validates_schema
+             def validate_schema(self, data, **kwargs):
+                 if data["f_2"] != data["f_1"] * Context.get():
+-                    raise ValidationError("Fail")
++                    raise SchemaValidationError("Fail")
+ 
+         schema = MySchema()
+ 
+         with Context(2):
+             schema.load({"f_1": 1, "f_2": 2})
+-            with pytest.raises(ValidationError) as excinfo:
++            with pytest.raises(SchemaValidationError) as excinfo:
+                 schema.load({"f_1": 1, "f_2": 3})
+             assert excinfo.value.messages["_schema"] == ["Fail"]
+diff --git a/tests/test_decorators.py b/tests/test_decorators.py
+index fce7e44..d369c05 100644
+--- a/tests/test_decorators.py
++++ b/tests/test_decorators.py
+@@ -5,7 +5,7 @@ from marshmallow import (
+     INCLUDE,
+     RAISE,
+     Schema,
+-    ValidationError,
++    SchemaValidationError,
+     fields,
+     post_dump,
+     post_load,
+@@ -124,7 +124,7 @@ def test_decorated_processor_returning_none(unknown):
+     assert schema.load({"value": 3}) is None
+     pre_schema = PreSchema(unknown=unknown)
+     assert pre_schema.dump({"value": 3}) == {}
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         pre_schema.load({"value": 3})
+     assert excinfo.value.messages == {"_schema": ["Invalid input type."]}
+ 
+@@ -253,7 +253,7 @@ class ValidatesSchema(Schema):
+     @validates("foo")
+     def validate_foo(self, value, **kwargs):
+         if value != 42:
+-            raise ValidationError("The answer to life the universe and everything.")
++            raise SchemaValidationError("The answer to life the universe and everything.")
+ 
+ 
+ class TestValidatesDecorator:
+@@ -263,9 +263,9 @@ class TestValidatesDecorator:
+ 
+             @validates("s")
+             def validate_string(self, data, **kwargs):
+-                raise ValidationError("nope")
++                raise SchemaValidationError("nope")
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             VSchema().load({"s": "bar"})
+ 
+         assert excinfo.value.messages == {"s": ["nope"]}
+@@ -277,13 +277,13 @@ class TestValidatesDecorator:
+ 
+             @validates("s")
+             def validate_string(self, data, **kwargs):
+-                raise ValidationError("nope")
++                raise SchemaValidationError("nope")
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             S1().load({"s": "foo"})
+         assert excinfo.value.messages == {"s": ["nope"]}
+ 
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             S1(many=True).load([{"s": "foo"}])
+ 
+     def test_validates_decorator(self):
+@@ -307,13 +307,13 @@ class TestValidatesDecorator:
+         errors = schema.validate({})
+         assert errors == {}
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             schema.load({"foo": 41})
+         assert excinfo.value.messages
+         result = excinfo.value.valid_data
+         assert result == {}
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             schema.load([{"foo": 42}, {"foo": 43}], many=True)
+         error_messages = excinfo.value.messages
+         result = excinfo.value.valid_data
+@@ -331,7 +331,7 @@ class TestValidatesDecorator:
+         class BadSchema(ValidatesSchema):
+             @validates("bar")
+             def validate_bar(self, value, **kwargs):
+-                raise ValidationError("Never raised.")
++                raise SchemaValidationError("Never raised.")
+ 
+         schema = BadSchema()
+ 
+@@ -346,7 +346,7 @@ class TestValidatesDecorator:
+             @validates("bar")
+             def validate_bar(self, value, **kwargs):
+                 if value != 2:
+-                    raise ValidationError("Must be 2")
++                    raise SchemaValidationError("Must be 2")
+ 
+         schema = Schema2()
+ 
+@@ -372,7 +372,7 @@ class TestValidatesDecorator:
+ 
+             @validates("foo")
+             def validate_string(self, data, **kwargs):
+-                raise ValidationError("nope")
++                raise SchemaValidationError("nope")
+ 
+         schema = BadSchema()
+         errors = schema.validate({"foo-name": "data"})
+@@ -392,10 +392,10 @@ class TestValidatesDecorator:
+ 
+             @validates("foo", "bar")
+             def validate_string(self, data: str, data_key: str):
+-                raise ValidationError(f"'{data}' is invalid for {data_key}.")
++                raise SchemaValidationError(f"'{data}' is invalid for {data_key}.")
+ 
+         schema = BadSchema()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             schema.load({"foo": "data", "Bar": "data2"})
+         assert excinfo.value.messages == {
+             "foo": ["'data' is invalid for foo."],
+@@ -424,7 +424,7 @@ class TestValidatesSchemaDecorator:
+ 
+             @validates_schema
+             def validate_schema(self, data, **kwargs):
+-                raise ValidationError("This will never work.")
++                raise SchemaValidationError("This will never work.")
+ 
+         class MySchema(Schema):
+             nested = fields.Nested(NestedSchema, required=True, many=True)
+@@ -442,7 +442,7 @@ class TestValidatesSchemaDecorator:
+ 
+             @validates_schema
+             def validate_schema(self, data, **kwargs):
+-                raise ValidationError("This will never work.", "foo")
++                raise SchemaValidationError("This will never work.", "foo")
+ 
+         class MySchema(Schema):
+             nested = fields.Nested(NestedSchema, required=True, many=True)
+@@ -473,7 +473,7 @@ class TestValidatesSchemaDecorator:
+                 assert data == expected_data
+                 assert original_data == expected_original_data
+                 assert many is True
+-                raise ValidationError("Method called")
++                raise SchemaValidationError("Method called")
+ 
+         class MySchema(Schema):
+             nested = fields.Nested(
+@@ -493,19 +493,19 @@ class TestValidatesSchemaDecorator:
+             @validates_schema
+             def validate_schema(self, data, **kwargs):
+                 if data["foo"] <= 3:
+-                    raise ValidationError("Must be greater than 3")
++                    raise SchemaValidationError("Must be greater than 3")
+ 
+             @validates_schema(pass_collection=True)
+             def validate_raw(self, data, many, **kwargs):
+                 if many:
+                     assert type(data) is list
+                     if len(data) < 2:
+-                        raise ValidationError("Must provide at least 2 items")
++                        raise SchemaValidationError("Must provide at least 2 items")
+ 
+             @validates_schema
+             def validate_bar(self, data, **kwargs):
+                 if "bar" in data and data["bar"] < 0:
+-                    raise ValidationError("bar must not be negative", "bar")
++                    raise SchemaValidationError("bar must not be negative", "bar")
+ 
+         schema = MySchema()
+         errors = schema.validate({"foo": 3})
+@@ -530,12 +530,12 @@ class TestValidatesSchemaDecorator:
+             @validates_schema
+             def validate_schema(self, data, **kwargs):
+                 if data["foo"] <= 3:
+-                    raise ValidationError("Must be greater than 3")
++                    raise SchemaValidationError("Must be greater than 3")
+ 
+             @validates_schema
+             def validate_bar(self, data, **kwargs):
+                 if "bar" in data and data["bar"] < 0:
+-                    raise ValidationError("bar must not be negative")
++                    raise SchemaValidationError("bar must not be negative")
+ 
+         schema = MySchema()
+         errors = schema.validate({"foo": 3, "bar": -1})
+@@ -564,17 +564,17 @@ class TestValidatesSchemaDecorator:
+ 
+             @validates_schema
+             def validate_nested_foo(self, data, **kwargs):
+-                raise ValidationError({"nested": {"foo": ["Invalid foo"]}})
++                raise SchemaValidationError({"nested": {"foo": ["Invalid foo"]}})
+ 
+             @validates_schema
+             def validate_nested_bar_1(self, data, **kwargs):
+-                raise ValidationError({"nested": {"bar": ["Invalid bar 1"]}})
++                raise SchemaValidationError({"nested": {"bar": ["Invalid bar 1"]}})
+ 
+             @validates_schema
+             def validate_nested_bar_2(self, data, **kwargs):
+-                raise ValidationError({"nested": {"bar": ["Invalid bar 2"]}})
++                raise SchemaValidationError({"nested": {"bar": ["Invalid bar 2"]}})
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             MySchema().load({"nested": {"foo": 1, "bar": 2}})
+ 
+         assert excinfo.value.messages == {
+@@ -594,13 +594,13 @@ class TestValidatesSchemaDecorator:
+                 if isinstance(original_data, dict) and isinstance(
+                     original_data["foo"], str
+                 ):
+-                    raise ValidationError("foo cannot be a string")
++                    raise SchemaValidationError("foo cannot be a string")
+ 
+             @validates_schema(pass_collection=True, pass_original=True)
+             def validate_original_bar(self, data, original_data, many, **kwargs):
+                 def check(datum):
+                     if isinstance(datum, dict) and isinstance(datum["bar"], str):
+-                        raise ValidationError("bar cannot be a string")
++                        raise SchemaValidationError("bar cannot be a string")
+ 
+                 if many:
+                     for each in original_data:
+@@ -636,7 +636,7 @@ class TestValidatesSchemaDecorator:
+                 if data["bam"] > data["foo"]:
+                     errors["bam"] = "Value should be less than foo"
+                 if errors:
+-                    raise ValidationError(errors)
++                    raise SchemaValidationError(errors)
+ 
+         schema = MySchema()
+         errors = schema.validate({"foo": 2, "bar": {"baz": 5}, "bam": 6})
+@@ -648,7 +648,7 @@ class TestValidatesSchemaDecorator:
+         class MySchema(Schema):
+             @validates_schema
+             def validator(self, data, **kwargs):
+-                raise ValidationError("Error message", "arbitrary_key")
++                raise SchemaValidationError("Error message", "arbitrary_key")
+ 
+         errors = MySchema().validate({})
+         assert errors["arbitrary_key"] == ["Error message"]
+@@ -661,14 +661,14 @@ class TestValidatesSchemaDecorator:
+             @validates_schema(skip_on_field_errors=True)
+             def validate_schema(self, data, **kwargs):
+                 if data["foo"] != data["bar"]:
+-                    raise ValidationError("Foo and bar must be equal.")
++                    raise SchemaValidationError("Foo and bar must be equal.")
+ 
+             @validates_schema(skip_on_field_errors=True, pass_collection=True)
+             def validate_many(self, data, many, **kwargs):
+                 if many:
+                     assert type(data) is list
+                     if len(data) < 2:
+-                        raise ValidationError("Must provide at least 2 items")
++                        raise SchemaValidationError("Must provide at least 2 items")
+ 
+         schema = MySchema()
+         # check that schema errors still occur with no field errors
+@@ -700,17 +700,17 @@ class TestValidatesSchemaDecorator:
+ 
+             @validates("foo")
+             def validate_foo(self, value, **kwargs):
+-                raise ValidationError("from validates")
++                raise SchemaValidationError("from validates")
+ 
+             @validates_schema(skip_on_field_errors=False)
+             def validate_schema(self, data, **kwargs):
+-                raise ValidationError("from validates_schema str", field_name="foo")
++                raise SchemaValidationError("from validates_schema str", field_name="foo")
+ 
+             @validates_schema(skip_on_field_errors=False)
+             def validate_schema2(self, data, **kwargs):
+-                raise ValidationError({"fooKey": "from validates_schema dict"})
++                raise SchemaValidationError({"fooKey": "from validates_schema dict"})
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             MySchema().load({"fooKey": 42})
+         exc = excinfo.value
+         assert exc.messages == {
+@@ -732,32 +732,32 @@ def test_decorator_error_handling():
+             if item["foo"] != 0:
+                 return item
+             errors = {"foo": ["preloadmsg1"], "bar": ["preloadmsg2", "preloadmsg3"]}
+-            raise ValidationError(errors)
++            raise SchemaValidationError(errors)
+ 
+         @pre_load()
+         def pre_load_error2(self, item, **kwargs):
+             if item["foo"] != 4:
+                 return item
+-            raise ValidationError("preloadmsg1", "foo")
++            raise SchemaValidationError("preloadmsg1", "foo")
+ 
+         @pre_load()
+         def pre_load_error3(self, item, **kwargs):
+             if item["foo"] != 8:
+                 return item
+-            raise ValidationError("preloadmsg1")
++            raise SchemaValidationError("preloadmsg1")
+ 
+         @post_load()
+         def post_load_error1(self, item, **kwargs):
+             if item["foo"] != 1:
+                 return item
+             errors = {"foo": ["postloadmsg1"], "bar": ["postloadmsg2", "postloadmsg3"]}
+-            raise ValidationError(errors)
++            raise SchemaValidationError(errors)
+ 
+         @post_load()
+         def post_load_error2(self, item, **kwargs):
+             if item["foo"] != 5:
+                 return item
+-            raise ValidationError("postloadmsg1", "foo")
++            raise SchemaValidationError("postloadmsg1", "foo")
+ 
+     def make_item(foo, bar):
+         data = schema.load({"foo": foo, "bar": bar})
+@@ -765,7 +765,7 @@ def test_decorator_error_handling():
+         return data
+ 
+     schema = ExampleSchema()
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         schema.load({"foo": 0, "bar": 1})
+     errors = excinfo.value.messages
+     assert "foo" in errors
+@@ -775,7 +775,7 @@ def test_decorator_error_handling():
+     assert len(errors["bar"]) == 2
+     assert "preloadmsg2" in errors["bar"]
+     assert "preloadmsg3" in errors["bar"]
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         schema.load({"foo": 1, "bar": 1})
+     errors = excinfo.value.messages
+     assert "foo" in errors
+@@ -785,21 +785,21 @@ def test_decorator_error_handling():
+     assert len(errors["bar"]) == 2
+     assert "postloadmsg2" in errors["bar"]
+     assert "postloadmsg3" in errors["bar"]
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         schema.load({"foo": 4, "bar": 1})
+     errors = excinfo.value.messages
+     assert len(errors) == 1
+     assert "foo" in errors
+     assert len(errors["foo"]) == 1
+     assert errors["foo"][0] == "preloadmsg1"
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         schema.load({"foo": 5, "bar": 1})
+     errors = excinfo.value.messages
+     assert len(errors) == 1
+     assert "foo" in errors
+     assert len(errors["foo"]) == 1
+     assert errors["foo"][0] == "postloadmsg1"
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         schema.load({"foo": 8, "bar": 1})
+     errors = excinfo.value.messages
+     assert len(errors) == 1
+@@ -813,10 +813,10 @@ def test_decorator_error_handling_with_load(decorator):
+     class ExampleSchema(Schema):
+         @decorator
+         def raise_value_error(self, item, **kwargs):
+-            raise ValidationError({"foo": "error"})
++            raise SchemaValidationError({"foo": "error"})
+ 
+     schema = ExampleSchema()
+-    with pytest.raises(ValidationError) as exc:
++    with pytest.raises(SchemaValidationError) as exc:
+         schema.load({})
+     assert exc.value.messages == {"foo": "error"}
+     schema.dump(object())
+@@ -827,10 +827,10 @@ def test_decorator_error_handling_with_load_dict_error(decorator):
+     class ExampleSchema(Schema):
+         @decorator
+         def raise_value_error(self, item, **kwargs):
+-            raise ValidationError({"foo": "error"}, "nested_field")
++            raise SchemaValidationError({"foo": "error"}, "nested_field")
+ 
+     schema = ExampleSchema()
+-    with pytest.raises(ValidationError) as exc:
++    with pytest.raises(SchemaValidationError) as exc:
+         schema.load({})
+     assert exc.value.messages == {"nested_field": {"foo": "error"}}
+     schema.dump(object())
+@@ -841,10 +841,10 @@ def test_decorator_error_handling_with_dump(decorator):
+     class ExampleSchema(Schema):
+         @decorator
+         def raise_value_error(self, item, **kwargs):
+-            raise ValidationError({"foo": "error"})
++            raise SchemaValidationError({"foo": "error"})
+ 
+     schema = ExampleSchema()
+-    with pytest.raises(ValidationError) as exc:
++    with pytest.raises(SchemaValidationError) as exc:
+         schema.dump(object())
+     assert exc.value.messages == {"foo": "error"}
+     schema.load({})
+diff --git a/tests/test_deserialization.py b/tests/test_deserialization.py
+index b3d21b1..3f7ce32 100644
+--- a/tests/test_deserialization.py
++++ b/tests/test_deserialization.py
+@@ -18,7 +18,7 @@ from marshmallow import (
+     missing,
+     validate,
+ )
+-from marshmallow.exceptions import ValidationError
++from marshmallow.exceptions import SchemaValidationError
+ from tests.base import (
+     ALL_FIELDS,
+     DateEnum,
+@@ -56,7 +56,7 @@ class TestDeserializingNone:
+     @pytest.mark.parametrize("FieldClass", ALL_FIELDS)
+     def test_fields_dont_allow_none_by_default(self, FieldClass):
+         field = FieldClass()
+-        with pytest.raises(ValidationError, match="Field may not be null."):
++        with pytest.raises(SchemaValidationError, match="Field may not be null."):
+             field.deserialize(None)
+ 
+     def test_allow_none_is_true_if_missing_is_true(self):
+@@ -78,7 +78,7 @@ class TestDeserializingNone:
+ 
+     def test_list_of_nested_non_allow_none_deserialize_none_to_validation_error(self):
+         field = fields.List(fields.Nested(Schema(), allow_none=False))
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize([None])
+ 
+ 
+@@ -91,39 +91,39 @@ class TestFieldDeserialization:
+     @pytest.mark.parametrize("in_val", ["bad", "", {}, True, False])
+     def test_invalid_float_field_deserialization(self, in_val):
+         field = fields.Float()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(in_val)
+         assert excinfo.value.args[0] == "Not a valid number."
+ 
+     def test_float_field_overflow(self):
+         field = fields.Float()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(2**1024)
+         assert excinfo.value.args[0] == "Number too large."
+ 
+     def test_integer_field_deserialization(self):
+         field = fields.Integer()
+         assert field.deserialize("42") == 42
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize("42.0")
+         assert excinfo.value.args[0] == "Not a valid integer."
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize("bad")
+         assert excinfo.value.args[0] == "Not a valid integer."
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize({})
+         assert excinfo.value.args[0] == "Not a valid integer."
+ 
+     def test_strict_integer_field_deserialization(self):
+         field = fields.Integer(strict=True)
+         assert field.deserialize(42) == 42
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(42.0)
+         assert excinfo.value.args[0] == "Not a valid integer."
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(decimal.Decimal("42.0"))
+         assert excinfo.value.args[0] == "Not a valid integer."
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize("42")
+         assert excinfo.value.args[0] == "Not a valid integer."
+ 
+@@ -144,10 +144,10 @@ class TestFieldDeserialization:
+         assert field.deserialize(m3) == decimal.Decimal(1)
+         assert isinstance(field.deserialize(m4), decimal.Decimal)
+         assert field.deserialize(m4).as_tuple() == (0, (3, 1, 4), -2)
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(m5)
+         assert excinfo.value.args[0] == "Not a valid number."
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(m6)
+         assert excinfo.value.args[0] == "Not a valid number."
+ 
+@@ -165,10 +165,10 @@ class TestFieldDeserialization:
+         assert field.deserialize(m2) == decimal.Decimal("12.4")
+         assert isinstance(field.deserialize(m3), decimal.Decimal)
+         assert field.deserialize(m3) == decimal.Decimal(1)
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(m4)
+         assert excinfo.value.args[0] == "Not a valid number."
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(m5)
+         assert excinfo.value.args[0] == "Not a valid number."
+ 
+@@ -186,9 +186,9 @@ class TestFieldDeserialization:
+         assert field.deserialize(m2) == decimal.Decimal("12.3")
+         assert isinstance(field.deserialize(m3), decimal.Decimal)
+         assert field.deserialize(m3) == decimal.Decimal(1)
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize(m4)
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize(m5)
+ 
+     def test_decimal_field_deserialization_string(self):
+@@ -205,9 +205,9 @@ class TestFieldDeserialization:
+         assert field.deserialize(m2) == decimal.Decimal("12.355")
+         assert isinstance(field.deserialize(m3), decimal.Decimal)
+         assert field.deserialize(m3) == decimal.Decimal(1)
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize(m4)
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize(m5)
+ 
+     def test_decimal_field_special_values(self):
+@@ -267,20 +267,20 @@ class TestFieldDeserialization:
+ 
+         field = fields.Decimal(places=2)
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(m1)
+         assert str(excinfo.value.args[0]) == (
+             "Special numeric values (nan or infinity) are not permitted."
+         )
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize(m2)
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize(m3)
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize(m4)
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize(m5)
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize(m6)
+ 
+         m7d = field.deserialize(m7)
+@@ -305,7 +305,7 @@ class TestFieldDeserialization:
+             else:
+                 assert res == float(value)
+         else:
+-            with pytest.raises(ValidationError) as excinfo:
++            with pytest.raises(SchemaValidationError) as excinfo:
+                 field.deserialize(value)
+             assert str(excinfo.value.args[0]) == (
+                 "Special numeric values (nan or infinity) are not permitted."
+@@ -317,11 +317,11 @@ class TestFieldDeserialization:
+         assert field.deserialize(b"foo") == "foo"
+ 
+         # https://github.com/marshmallow-code/marshmallow/issues/231
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(42)
+         assert excinfo.value.args[0] == "Not a valid string."
+ 
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize({})
+ 
+     def test_boolean_field_deserialization(self):
+@@ -353,14 +353,14 @@ class TestFieldDeserialization:
+         assert field.deserialize(1) is True
+         assert field.deserialize(0) is False
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize({})
+         assert excinfo.value.args[0] == "Not a valid boolean."
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(42)
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize("invalid-string")
+ 
+     def test_boolean_field_deserialization_with_custom_truthy_values(self):
+@@ -382,19 +382,19 @@ class TestFieldDeserialization:
+             truthy = {"yep"}
+ 
+         field = MyBoolean()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(in_val)
+         expected_msg = "Not a valid boolean."
+         assert str(excinfo.value.args[0]) == expected_msg
+ 
+         field2 = fields.Boolean(truthy={"yep"})
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field2.deserialize(in_val)
+         expected_msg = "Not a valid boolean."
+         assert str(excinfo.value.args[0]) == expected_msg
+ 
+         field3 = MyBoolean(error_messages={"invalid": "bad input"})
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field3.deserialize(in_val)
+         assert str(excinfo.value.args[0]) == "bad input"
+ 
+@@ -412,23 +412,23 @@ class TestFieldDeserialization:
+     def test_field_toggle_show_invalid_value_in_error_message(self):
+         error_messages = {"invalid": "Not valid: {input}"}
+         boolfield = fields.Boolean(error_messages=error_messages)
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             boolfield.deserialize("notabool")
+         assert str(excinfo.value.args[0]) == "Not valid: notabool"
+ 
+         numfield = fields.Float(error_messages=error_messages)
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             numfield.deserialize("notanum")
+         assert str(excinfo.value.args[0]) == "Not valid: notanum"
+ 
+         intfield = fields.Integer(error_messages=error_messages)
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             intfield.deserialize("notanint")
+         assert str(excinfo.value.args[0]) == "Not valid: notanint"
+ 
+         date_error_messages = {"invalid": "Not a valid {obj_type}: {input}"}
+         datefield = fields.DateTime(error_messages=date_error_messages)
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             datefield.deserialize("notadate")
+         assert str(excinfo.value.args[0]) == "Not a valid datetime: notadate"
+ 
+@@ -450,7 +450,7 @@ class TestFieldDeserialization:
+     )
+     def test_invalid_datetime_deserialization(self, in_value):
+         field = fields.DateTime()
+-        with pytest.raises(ValidationError, match="Not a valid datetime."):
++        with pytest.raises(SchemaValidationError, match="Not a valid datetime."):
+             field.deserialize(in_value)
+ 
+     def test_custom_date_format_datetime_field_deserialization(self):
+@@ -459,7 +459,7 @@ class TestFieldDeserialization:
+ 
+         # Deserialization should fail when datestring is not of same format
+         field = fields.DateTime(format="%d-%m-%Y %H:%M:%S")
+-        with pytest.raises(ValidationError, match="Not a valid datetime."):
++        with pytest.raises(SchemaValidationError, match="Not a valid datetime."):
+             field.deserialize(datestring)
+ 
+         field = fields.DateTime(format="%H:%M:%S.%f %Y-%m-%d")
+@@ -473,7 +473,7 @@ class TestFieldDeserialization:
+         )
+ 
+         field = fields.AwareDateTime(format="%H:%M:%S.%f %Y-%m-%d")
+-        with pytest.raises(ValidationError, match="Not a valid aware datetime."):
++        with pytest.raises(SchemaValidationError, match="Not a valid aware datetime."):
+             field.deserialize(datestring)
+ 
+     @pytest.mark.parametrize("fmt", ["rfc", "rfc822"])
+@@ -502,13 +502,13 @@ class TestFieldDeserialization:
+         assert field.deserialize(value) == expected
+         field = fields.NaiveDateTime(format=fmt)
+         if aware:
+-            with pytest.raises(ValidationError, match="Not a valid naive datetime."):
++            with pytest.raises(SchemaValidationError, match="Not a valid naive datetime."):
+                 field.deserialize(value)
+         else:
+             assert field.deserialize(value) == expected
+         field = fields.AwareDateTime(format=fmt)
+         if not aware:
+-            with pytest.raises(ValidationError, match="Not a valid aware datetime."):
++            with pytest.raises(SchemaValidationError, match="Not a valid aware datetime."):
+                 field.deserialize(value)
+         else:
+             assert field.deserialize(value) == expected
+@@ -546,13 +546,13 @@ class TestFieldDeserialization:
+         assert field.deserialize(value) == expected
+         field = fields.NaiveDateTime(format=fmt)
+         if aware:
+-            with pytest.raises(ValidationError, match="Not a valid naive datetime."):
++            with pytest.raises(SchemaValidationError, match="Not a valid naive datetime."):
+                 field.deserialize(value)
+         else:
+             assert field.deserialize(value) == expected
+         field = fields.AwareDateTime(format=fmt)
+         if not aware:
+-            with pytest.raises(ValidationError, match="Not a valid aware datetime."):
++            with pytest.raises(SchemaValidationError, match="Not a valid aware datetime."):
+                 field.deserialize(value)
+         else:
+             assert field.deserialize(value) == expected
+@@ -582,7 +582,7 @@ class TestFieldDeserialization:
+         assert field.deserialize(value) == expected
+ 
+         field = fields.AwareDateTime(format=fmt)
+-        with pytest.raises(ValidationError, match="Not a valid aware datetime."):
++        with pytest.raises(SchemaValidationError, match="Not a valid aware datetime."):
+             field.deserialize(value)
+ 
+         # But it can be added by providing a default.
+@@ -594,7 +594,7 @@ class TestFieldDeserialization:
+     @pytest.mark.parametrize("in_value", [True, False])
+     def test_boolean_timestamp_field_deserialization(self, fmt, in_value):
+         field = fields.DateTime(format=fmt)
+-        with pytest.raises(ValidationError, match="Not a valid datetime."):
++        with pytest.raises(SchemaValidationError, match="Not a valid datetime."):
+             field.deserialize(in_value)
+ 
+     @pytest.mark.parametrize("fmt", ["timestamp", "timestamp_ms"])
+@@ -604,7 +604,7 @@ class TestFieldDeserialization:
+     )
+     def test_invalid_timestamp_field_deserialization(self, fmt, in_value):
+         field = fields.DateTime(format=fmt)
+-        with pytest.raises(ValidationError, match="Not a valid datetime."):
++        with pytest.raises(SchemaValidationError, match="Not a valid datetime."):
+             field.deserialize(in_value)
+ 
+     # Regression test for https://github.com/marshmallow-code/marshmallow/pull/2102
+@@ -615,7 +615,7 @@ class TestFieldDeserialization:
+     def test_oversized_timestamp_field_deserialization(self, fmt, mock_fromtimestamp):
+         with patch("datetime.datetime", mock_fromtimestamp):
+             field = fields.DateTime(format=fmt)
+-            with pytest.raises(ValidationError, match="Not a valid datetime."):
++            with pytest.raises(SchemaValidationError, match="Not a valid datetime."):
+                 field.deserialize(99999999999999999)
+ 
+     @pytest.mark.parametrize(
+@@ -685,7 +685,7 @@ class TestFieldDeserialization:
+     @pytest.mark.parametrize("in_data", ["badvalue", "", [], 42])
+     def test_invalid_time_field_deserialization(self, in_data):
+         field = fields.Time()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(in_data)
+         assert excinfo.value.args[0] == "Not a valid time."
+ 
+@@ -695,7 +695,7 @@ class TestFieldDeserialization:
+ 
+         # Deserialization should fail when timestring is not of same format
+         field = fields.Time(format="%S:%M:%H")
+-        with pytest.raises(ValidationError, match="Not a valid time."):
++        with pytest.raises(SchemaValidationError, match="Not a valid time."):
+             field.deserialize(timestring)
+ 
+         field = fields.Time(format="%f.%S:%M:%H")
+@@ -868,7 +868,7 @@ class TestFieldDeserialization:
+     )
+     def test_invalid_timedelta_field_deserialization(self, in_value):
+         field = fields.TimeDelta(fields.TimeDelta.DAYS)
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(in_value)
+         assert excinfo.value.args[0] == "Not a valid period of time."
+ 
+@@ -886,7 +886,7 @@ class TestFieldDeserialization:
+     )
+     def test_invalid_date_field_deserialization(self, in_value):
+         field = fields.Date()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(in_value)
+         msg = "Not a valid date."
+         assert excinfo.value.args[0] == msg
+@@ -899,14 +899,14 @@ class TestFieldDeserialization:
+         # Check load is a distinct object
+         load["foo"] = "baz"
+         assert data["foo"] == "bar"
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize("baddict")
+         assert excinfo.value.args[0] == "Not a valid mapping type."
+ 
+     def test_structured_dict_value_deserialization(self):
+         field = fields.Dict(values=fields.List(fields.Str))
+         assert field.deserialize({"foo": ["bar", "baz"]}) == {"foo": ["bar", "baz"]}
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize({"foo": [1, 2], "bar": "baz", "ham": ["spam"]})
+         assert excinfo.value.args[0] == {
+             "foo": {"value": {0: ["Not a valid string."], 1: ["Not a valid string."]}},
+@@ -917,7 +917,7 @@ class TestFieldDeserialization:
+     def test_structured_dict_key_deserialization(self):
+         field = fields.Dict(keys=fields.Str)
+         assert field.deserialize({"foo": "bar"}) == {"foo": "bar"}
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize({1: "bar", "foo": "baz"})
+         assert excinfo.value.args[0] == {1: {"key": ["Not a valid string."]}}
+         assert excinfo.value.valid_data == {"foo": "baz"}
+@@ -932,22 +932,22 @@ class TestFieldDeserialization:
+         assert field.deserialize({"foo@test.com": 1}) == {
+             "foo@test.com": decimal.Decimal(1)
+         }
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize({1: "bar"})
+         assert excinfo.value.args[0] == {
+             1: {"key": ["Not a valid string."], "value": ["Not a valid number."]}
+         }
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize({"foo@test.com": "bar"})
+         assert excinfo.value.args[0] == {
+             "foo@test.com": {"value": ["Not a valid number."]}
+         }
+         assert excinfo.value.valid_data == {}
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize({1: 1})
+         assert excinfo.value.args[0] == {1: {"key": ["Not a valid string."]}}
+         assert excinfo.value.valid_data == {}
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize({"foo": "bar"})
+         assert excinfo.value.args[0] == {
+             "foo": {
+@@ -963,18 +963,18 @@ class TestFieldDeserialization:
+     def test_url_field_deserialization(self):
+         field = fields.Url()
+         assert field.deserialize("https://duckduckgo.com") == "https://duckduckgo.com"
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize("badurl")
+         assert excinfo.value.args[0][0] == "Not a valid URL."
+         # Relative URLS not allowed by default
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize("/foo/bar")
+         assert excinfo.value.args[0][0] == "Not a valid URL."
+ 
+     # regression test for https://github.com/marshmallow-code/marshmallow/issues/1400
+     def test_url_field_non_list_validators(self):
+         field = fields.Url(validate=(validate.Length(min=16),))
+-        with pytest.raises(ValidationError, match="Shorter than minimum length"):
++        with pytest.raises(SchemaValidationError, match="Shorter than minimum length"):
+             field.deserialize("https://abc.def")
+ 
+     def test_relative_url_field_deserialization(self):
+@@ -984,7 +984,7 @@ class TestFieldDeserialization:
+     def test_url_field_schemes_argument(self):
+         field = fields.URL()
+         url = "ws://test.test"
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize(url)
+         field2 = fields.URL(schemes={"http", "https", "ws"})
+         assert field2.deserialize(url) == url
+@@ -992,19 +992,19 @@ class TestFieldDeserialization:
+     def test_email_field_deserialization(self):
+         field = fields.Email()
+         assert field.deserialize("foo@bar.com") == "foo@bar.com"
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize("invalidemail")
+         assert excinfo.value.args[0][0] == "Not a valid email address."
+ 
+         field = fields.Email(validate=[validate.Length(min=12)])
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize("foo@bar.com")
+         assert excinfo.value.args[0][0] == "Shorter than minimum length 12."
+ 
+     # regression test for https://github.com/marshmallow-code/marshmallow/issues/1400
+     def test_email_field_non_list_validators(self):
+         field = fields.Email(validate=(validate.Length(min=9),))
+-        with pytest.raises(ValidationError, match="Shorter than minimum length"):
++        with pytest.raises(SchemaValidationError, match="Shorter than minimum length"):
+             field.deserialize("a@bc.com")
+ 
+     def test_function_field_deserialization_is_noop_by_default(self):
+@@ -1054,7 +1054,7 @@ class TestFieldDeserialization:
+     @pytest.mark.parametrize("in_value", ["malformed", 123, [], b"tooshort"])
+     def test_invalid_uuid_deserialization(self, in_value):
+         field = fields.UUID()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(in_value)
+ 
+         assert excinfo.value.args[0] == "Not a valid UUID."
+@@ -1077,7 +1077,7 @@ class TestFieldDeserialization:
+     )
+     def test_invalid_ip_deserialization(self, in_value):
+         field = fields.IP()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(in_value)
+ 
+         assert excinfo.value.args[0] == "Not a valid IP address."
+@@ -1102,7 +1102,7 @@ class TestFieldDeserialization:
+     )
+     def test_invalid_ipv4_deserialization(self, in_value):
+         field = fields.IPv4()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(in_value)
+ 
+         assert excinfo.value.args[0] == "Not a valid IPv4 address."
+@@ -1140,7 +1140,7 @@ class TestFieldDeserialization:
+     )
+     def test_invalid_ipinterface_deserialization(self, in_value):
+         field = fields.IPInterface()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(in_value)
+ 
+         assert excinfo.value.args[0] == "Not a valid IP interface."
+@@ -1166,7 +1166,7 @@ class TestFieldDeserialization:
+     )
+     def test_invalid_ipv4interface_deserialization(self, in_value):
+         field = fields.IPv4Interface()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(in_value)
+ 
+         assert excinfo.value.args[0] == "Not a valid IPv4 interface."
+@@ -1192,7 +1192,7 @@ class TestFieldDeserialization:
+     )
+     def test_invalid_ipv6interface_deserialization(self, in_value):
+         field = fields.IPv6Interface()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(in_value)
+ 
+         assert excinfo.value.args[0] == "Not a valid IPv6 interface."
+@@ -1204,7 +1204,7 @@ class TestFieldDeserialization:
+     def test_enum_field_by_symbol_invalid_value(self):
+         field = fields.Enum(GenderEnum)
+         with pytest.raises(
+-            ValidationError, match="Must be one of: male, female, non_binary."
++            SchemaValidationError, match="Must be one of: male, female, non_binary."
+         ):
+             field.deserialize("dummy")
+ 
+@@ -1212,13 +1212,13 @@ class TestFieldDeserialization:
+     def test_enum_field_by_symbol_rejects_non_member_attributes(self, non_member):
+         field = fields.Enum(GenderEnum)
+         with pytest.raises(
+-            ValidationError, match="Must be one of: male, female, non_binary."
++            SchemaValidationError, match="Must be one of: male, female, non_binary."
+         ):
+             field.deserialize(non_member)
+ 
+     def test_enum_field_by_symbol_not_string(self):
+         field = fields.Enum(GenderEnum)
+-        with pytest.raises(ValidationError, match="Not a valid string."):
++        with pytest.raises(SchemaValidationError, match="Not a valid string."):
+             field.deserialize(12)
+ 
+     def test_enum_field_by_value_true_deserialization(self):
+@@ -1238,50 +1238,50 @@ class TestFieldDeserialization:
+     def test_enum_field_by_value_true_invalid_value(self):
+         field = fields.Enum(HairColorEnum, by_value=True)
+         with pytest.raises(
+-            ValidationError,
++            SchemaValidationError,
+             match="Must be one of: black hair, brown hair, blond hair, red hair.",
+         ):
+             field.deserialize("dummy")
+         field2 = fields.Enum(GenderEnum, by_value=True)
+-        with pytest.raises(ValidationError, match="Must be one of: 1, 2, 3."):
++        with pytest.raises(SchemaValidationError, match="Must be one of: 1, 2, 3."):
+             field2.deserialize(12)
+ 
+     def test_enum_field_by_value_field_invalid_value(self):
+         field = fields.Enum(HairColorEnum, by_value=fields.String)
+         with pytest.raises(
+-            ValidationError,
++            SchemaValidationError,
+             match="Must be one of: black hair, brown hair, blond hair, red hair.",
+         ):
+             field.deserialize("dummy")
+         field2 = fields.Enum(GenderEnum, by_value=fields.Integer)
+-        with pytest.raises(ValidationError, match="Must be one of: 1, 2, 3."):
++        with pytest.raises(SchemaValidationError, match="Must be one of: 1, 2, 3."):
+             field2.deserialize(12)
+         field3 = fields.Enum(DateEnum, by_value=fields.Date(format="%d/%m/%Y"))
+         with pytest.raises(
+-            ValidationError, match="Must be one of: 29/02/2004, 29/02/2008, 29/02/2012."
++            SchemaValidationError, match="Must be one of: 29/02/2004, 29/02/2008, 29/02/2012."
+         ):
+             field3.deserialize("28/02/2004")
+ 
+     def test_enum_field_by_value_true_wrong_type(self):
+         field = fields.Enum(HairColorEnum, by_value=True)
+         with pytest.raises(
+-            ValidationError,
++            SchemaValidationError,
+             match="Must be one of: black hair, brown hair, blond hair, red hair.",
+         ):
+             field.deserialize("dummy")
+         field = fields.Enum(GenderEnum, by_value=True)
+-        with pytest.raises(ValidationError, match="Must be one of: 1, 2, 3."):
++        with pytest.raises(SchemaValidationError, match="Must be one of: 1, 2, 3."):
+             field.deserialize(12)
+ 
+     def test_enum_field_by_value_field_wrong_type(self):
+         field = fields.Enum(HairColorEnum, by_value=fields.String)
+-        with pytest.raises(ValidationError, match="Not a valid string."):
++        with pytest.raises(SchemaValidationError, match="Not a valid string."):
+             field.deserialize(12)
+         field = fields.Enum(GenderEnum, by_value=fields.Integer)
+-        with pytest.raises(ValidationError, match="Not a valid integer."):
++        with pytest.raises(SchemaValidationError, match="Not a valid integer."):
+             field.deserialize("dummy")
+         field = fields.Enum(DateEnum, by_value=fields.Date(format="%d/%m/%Y"))
+-        with pytest.raises(ValidationError, match="Not a valid date."):
++        with pytest.raises(SchemaValidationError, match="Not a valid date."):
+             field.deserialize("30/02/2004")
+ 
+     def test_enum_by_value_allow_none_default(self):
+@@ -1342,12 +1342,12 @@ class TestFieldDeserialization:
+ 
+     def test_list_field_deserialize_invalid_item(self):
+         field = fields.List(fields.DateTime)
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(["badvalue"])
+         assert excinfo.value.args[0] == {0: ["Not a valid datetime."]}
+ 
+         field = fields.List(fields.Str())
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(["good", 42])
+         assert excinfo.value.args[0] == {1: ["Not a valid string."]}
+ 
+@@ -1357,7 +1357,7 @@ class TestFieldDeserialization:
+                 validate=validate.Range(10, 20, error="Value {input} not in range")
+             )
+         )
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize([10, 5, 25])
+         assert len(excinfo.value.args[0]) == 2
+         assert excinfo.value.args[0][1] == ["Value 5 not in range"]
+@@ -1366,7 +1366,7 @@ class TestFieldDeserialization:
+     @pytest.mark.parametrize("value", ["notalist", 42, {}])
+     def test_list_field_deserialize_value_that_is_not_a_list(self, value):
+         field = fields.List(fields.Str())
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(value)
+         assert excinfo.value.args[0] == "Not a valid list."
+ 
+@@ -1386,12 +1386,12 @@ class TestFieldDeserialization:
+ 
+     def test_tuple_field_deserialize_invalid_item(self):
+         field = fields.Tuple([fields.DateTime])
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(["badvalue"])
+         assert excinfo.value.args[0] == {0: ["Not a valid datetime."]}
+ 
+         field = fields.Tuple([fields.Str(), fields.Integer()])
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(["good", "bad"])
+         assert excinfo.value.args[0] == {1: ["Not a valid integer."]}
+ 
+@@ -1405,7 +1405,7 @@ class TestFieldDeserialization:
+             ]
+         )
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize([10, 5, 25])
+         assert len(excinfo.value.args[0]) == 2
+         assert excinfo.value.args[0][1] == ["Value 5 not in range"]
+@@ -1414,13 +1414,13 @@ class TestFieldDeserialization:
+     @pytest.mark.parametrize("value", ["notalist", 42, {}])
+     def test_tuple_field_deserialize_value_that_is_not_a_collection(self, value):
+         field = fields.Tuple([fields.Str()])
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize(value)
+         assert excinfo.value.args[0] == "Not a valid tuple."
+ 
+     def test_tuple_field_deserialize_invalid_length(self):
+         field = fields.Tuple([fields.Str(), fields.Str()])
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize([42])
+         assert excinfo.value.args[0] == "Length must be 2."
+ 
+@@ -1456,16 +1456,16 @@ class TestFieldDeserialization:
+     def test_field_deserialization_with_user_validator_function(self):
+         field = fields.String(validate=predicate(lambda s: s.lower() == "valid"))
+         assert field.deserialize("Valid") == "Valid"
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize("invalid")
+         assert excinfo.value.args[0][0] == "Invalid value."
+-        assert type(excinfo.value) is ValidationError
++        assert type(excinfo.value) is SchemaValidationError
+ 
+     def test_field_deserialization_with_user_validator_that_raises_error_with_list(
+         self,
+     ):
+         def validator(val):
+-            raise ValidationError(["err1", "err2"])
++            raise SchemaValidationError(["err1", "err2"])
+ 
+         class MySchema(Schema):
+             foo = fields.Raw(validate=validator)
+@@ -1475,12 +1475,12 @@ class TestFieldDeserialization:
+ 
+     def test_field_deserialization_with_validator_with_nonascii_input(self):
+         def validate(val):
+-            raise ValidationError("oops")
++            raise SchemaValidationError("oops")
+ 
+         field = fields.String(validate=validate)
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             field.deserialize("привет")
+-        assert type(excinfo.value) is ValidationError
++        assert type(excinfo.value) is SchemaValidationError
+ 
+     def test_field_deserialization_with_user_validators(self):
+         validators_gen = (
+@@ -1509,7 +1509,7 @@ class TestFieldDeserialization:
+ 
+         for field in m_colletion_type:
+             assert field.deserialize("Valid") == "Valid"
+-            with pytest.raises(ValidationError, match="Invalid value."):
++            with pytest.raises(SchemaValidationError, match="Invalid value."):
+                 field.deserialize("invalid")
+ 
+     @pytest.mark.parametrize(
+@@ -1740,7 +1740,7 @@ class TestSchemaDeserialization:
+             years = fields.Integer(attribute="age")
+ 
+         data = {"username": "foobar.com", "years": "42"}
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             AliasingUserSerializer().load(data)
+         errors = excinfo.value.messages
+         assert errors["username"] == ["Not a valid email address."]
+@@ -1754,7 +1754,7 @@ class TestSchemaDeserialization:
+             years = fields.Integer(attribute="age", data_key="Years")
+ 
+         data = {"Name": "Mick", "UserName": "foobar.com", "Years": "abc"}
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             AliasingUserSerializer().load(data)
+         errors = excinfo.value.messages
+         assert errors["UserName"] == ["Not a valid email address."]
+@@ -1835,7 +1835,7 @@ class TestSchemaDeserialization:
+     def test_deserialization_raises_with_errors(self):
+         bad_data = {"email": "invalid-email", "colors": "burger", "age": -1}
+         v = Validator()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             v.load(bad_data)
+         errors = excinfo.value.messages
+         assert "email" in errors
+@@ -1845,7 +1845,7 @@ class TestSchemaDeserialization:
+     def test_deserialization_raises_with_errors_with_multiple_validators(self):
+         bad_data = {"email": "invalid-email", "colors": "burger", "age": -1}
+         v = Validators()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             v.load(bad_data)
+         errors = excinfo.value.messages
+         assert "email" in errors
+@@ -1858,32 +1858,32 @@ class TestSchemaDeserialization:
+             {"email": "bad", "colors": "pizza", "age": -1},
+         ]
+         v = Validator(many=True)
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             v.load(bad_data)
+ 
+     def test_validation_errors_are_stored(self):
+         def validate_field(val):
+-            raise ValidationError("Something went wrong")
++            raise SchemaValidationError("Something went wrong")
+ 
+         class MySchema(Schema):
+             foo = fields.Raw(validate=validate_field)
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             MySchema().load({"foo": 42})
+         errors = excinfo.value.messages
+         assert "Something went wrong" in errors["foo"]
+ 
+     def test_multiple_errors_can_be_stored_for_a_field(self):
+         def validate1(n):
+-            raise ValidationError("error one")
++            raise SchemaValidationError("error one")
+ 
+         def validate2(n):
+-            raise ValidationError("error two")
++            raise SchemaValidationError("error two")
+ 
+         class MySchema(Schema):
+             foo = fields.Raw(required=True, validate=[validate1, validate2])
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             MySchema().load({"foo": "bar"})
+         errors = excinfo.value.messages
+ 
+@@ -1892,12 +1892,12 @@ class TestSchemaDeserialization:
+ 
+     def test_multiple_errors_can_be_stored_for_an_email_field(self):
+         def validate(val):
+-            raise ValidationError("Invalid value.")
++            raise SchemaValidationError("Invalid value.")
+ 
+         class MySchema(Schema):
+             email = fields.Email(validate=[validate])
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             MySchema().load({"email": "foo"})
+         errors = excinfo.value.messages
+         assert len(errors["email"]) == 2
+@@ -1905,12 +1905,12 @@ class TestSchemaDeserialization:
+ 
+     def test_multiple_errors_can_be_stored_for_a_url_field(self):
+         def validator(val):
+-            raise ValidationError("Not a valid URL.")
++            raise SchemaValidationError("Not a valid URL.")
+ 
+         class MySchema(Schema):
+             url = fields.Url(validate=[validator])
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             MySchema().load({"url": "foo"})
+         errors = excinfo.value.messages
+         assert len(errors["url"]) == 2
+@@ -1920,7 +1920,7 @@ class TestSchemaDeserialization:
+         class MySchema(Schema):
+             foo = fields.Raw(required=True, validate=lambda f: False)
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             MySchema().load({})
+         errors = excinfo.value.messages
+         # required value missing
+@@ -1948,7 +1948,7 @@ class TestSchemaDeserialization:
+             bar = fields.Raw(required=True)
+             baz = fields.Raw(required=True)
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             MySchema().load({"foo": 3}, partial=tuple())
+         data, errors = excinfo.value.valid_data, excinfo.value.messages
+         assert data["foo"] == 3
+@@ -2003,7 +2003,7 @@ class TestSchemaDeserialization:
+         assert data["foo"] == 3
+         assert data["bar"]
+ 
+-        with pytest.raises(ValidationError, match="foo"):
++        with pytest.raises(SchemaValidationError, match="foo"):
+             MySchema(unknown=INCLUDE).load({"foo": "asd", "bar": 5})
+ 
+         data = MySchema(unknown=INCLUDE, many=True).load(
+@@ -2012,13 +2012,13 @@ class TestSchemaDeserialization:
+         assert "foo" in data[1]
+         assert "bar" in data[1]
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             MySchema().load({"foo": 3, "bar": 5})
+         err = excinfo.value
+         assert "bar" in err.messages
+         assert err.messages["bar"] == ["Unknown field."]
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             MySchema(many=True).load([{"foo": "abc"}, {"foo": 3, "bar": 5}])
+         err = excinfo.value
+         assert 0 in err.messages
+@@ -2047,7 +2047,7 @@ class TestSchemaDeserialization:
+         assert data["foo"] == 3
+         assert "bar" not in data
+ 
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             MySchema(unknown=EXCLUDE).load({"foo": 3, "bar": 5}, unknown=RAISE)
+ 
+     def test_unknown_fields_deserialization_with_data_key(self):
+@@ -2062,7 +2062,7 @@ class TestSchemaDeserialization:
+         assert data["foo"] == 1
+         assert "Foo" not in data
+ 
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             MySchema(unknown=RAISE).load({"foo": 1})
+ 
+         data = MySchema(unknown=INCLUDE).load({"Foo": 1})
+@@ -2077,7 +2077,7 @@ class TestSchemaDeserialization:
+                 unknown = RAISE
+                 index_errors = False
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             MySchema(many=True).load([{"foo": "invalid"}, {"foo": 42, "bar": 24}])
+         err = excinfo.value
+         assert 1 not in err.messages
+@@ -2090,7 +2090,7 @@ class TestSchemaDeserialization:
+         class MySchema(Schema):
+             foo = fields.Int(dump_only=True)
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             MySchema().load({"foo": 42})
+         err = excinfo.value
+         assert "foo" in err.messages
+@@ -2140,7 +2140,7 @@ class TestValidation:
+         field = fields.Integer(validate=validate.Range(18, 24))
+         out = field.deserialize("20")
+         assert out == 20
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize(25)
+ 
+     @pytest.mark.parametrize(
+@@ -2158,7 +2158,7 @@ class TestValidation:
+     def test_integer_with_validators(self, field):
+         out = field.deserialize("20")
+         assert out == 20
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize(25)
+ 
+     @pytest.mark.parametrize(
+@@ -2175,13 +2175,13 @@ class TestValidation:
+     )
+     def test_float_with_validators(self, field):
+         assert field.deserialize(3.14)
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize(4.2)
+ 
+     def test_string_validator(self):
+         field = fields.String(validate=validate.Length(equal=3))
+         assert field.deserialize("Joe") == "Joe"
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize("joseph")
+ 
+     def test_function_validator(self):
+@@ -2189,7 +2189,7 @@ class TestValidation:
+             lambda d: d.name.upper(), validate=validate.Length(equal=3)
+         )
+         assert field.deserialize("joe")
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize("joseph")
+ 
+     @pytest.mark.parametrize(
+@@ -2214,7 +2214,7 @@ class TestValidation:
+     )
+     def test_function_validators(self, field):
+         assert field.deserialize("joe")
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             field.deserialize("joseph")
+ 
+     def test_method_validator(self):
+@@ -2227,7 +2227,7 @@ class TestValidation:
+                 return val.upper()
+ 
+         assert MethodSerializer().load({"name": "joe"})
+-        with pytest.raises(ValidationError, match="Length must be 3."):
++        with pytest.raises(SchemaValidationError, match="Length must be 3."):
+             MethodSerializer().load({"name": "joseph"})
+ 
+     # Regression test for https://github.com/marshmallow-code/marshmallow/issues/269
+@@ -2243,13 +2243,13 @@ class TestValidation:
+ 
+         sch = SchemaB()
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             sch.load({"w": 90, "n": {"x": 90, "y": 89, "z": None}})
+         data, errors = excinfo.value.valid_data, excinfo.value.messages
+         assert "z" in errors["n"]
+         assert data == {"w": 90, "n": {"x": 90, "y": 89}}
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             sch.load({"w": 90, "n": {"x": 90, "y": -1, "z": 180}})
+         data, errors = excinfo.value.valid_data, excinfo.value.messages
+         assert "y" in errors["n"]
+@@ -2268,7 +2268,7 @@ class TestValidation:
+         result = SchemaB().load(b_dict, partial=True)
+         assert result["z"]["y"] == 42
+         # Non partial loading should complain about missing values.
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             SchemaB().load(b_dict)
+         data, errors = excinfo.value.valid_data, excinfo.value.messages
+         assert data["z"]["y"] == 42
+@@ -2291,7 +2291,7 @@ class TestValidation:
+         result = SchemaA().load(a_dict, partial=True)
+         assert result["b"]["c"]["y"] == 42
+         # Non partial loading should complain about missing values.
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             SchemaA().load(a_dict)
+         data, errors = excinfo.value.valid_data, excinfo.value.messages
+         assert data["b"]["c"]["y"] == 42
+@@ -2312,7 +2312,7 @@ class TestValidation:
+         result = SchemaB().load(b_dict, partial=("z.x",))
+         assert result["z"]["y"] == 42
+         # If we ignore a missing z.y we should get a validation error.
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             SchemaB().load(b_dict, partial=("z.y",))
+ 
+     def test_nested_partial_default(self):
+@@ -2327,7 +2327,7 @@ class TestValidation:
+         # Nested partial args should be respected.
+         result = SchemaB().load(b_dict)
+         assert result["z"]["y"] == 42
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             SchemaB().load({"z": {"x": 0}})
+ 
+     def test_nested_partial_tuple_with_data_key(self):
+@@ -2346,7 +2346,7 @@ class TestValidation:
+         assert result["address"]["city"] == "Springfield"
+         assert "zip_code" not in result["address"]
+         # Without partial, it should fail on the missing required field
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             PersonSchema().load(data)
+         assert "zip_code" in excinfo.value.messages["homeAddress"]
+ 
+@@ -2357,7 +2357,7 @@ def test_required_field_failure(FieldClass):
+         age = FieldClass(required=True)
+ 
+     user_data = {"name": "Phil"}
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         RequireSchema().load(user_data)
+     errors = excinfo.value.messages
+     assert "Missing data for required field." in errors["age"]
+@@ -2378,7 +2378,7 @@ def test_required_message_can_be_changed(
+         age = fields.Integer(required=True, error_messages={"required": message})
+ 
+     user_data = {"name": "Phil"}
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         RequireSchema().load(user_data)
+     errors = excinfo.value.messages
+     expected = [message] if isinstance(message, str) else message
+@@ -2392,7 +2392,7 @@ def test_deserialize_raises_exception_if_input_type_is_incorrect(data, unknown):
+         foo = fields.Raw()
+         bar = fields.Raw()
+ 
+-    with pytest.raises(ValidationError, match="Invalid input type.") as excinfo:
++    with pytest.raises(SchemaValidationError, match="Invalid input type.") as excinfo:
+         MySchema(unknown=unknown).load(data)
+     exc = excinfo.value
+     assert isinstance(exc.messages, dict)
+diff --git a/tests/test_exceptions.py b/tests/test_exceptions.py
+index e4f144a..fae9cb2 100644
+--- a/tests/test_exceptions.py
++++ b/tests/test_exceptions.py
+@@ -1,40 +1,40 @@
+ import pytest
+ 
+-from marshmallow.exceptions import ValidationError
++from marshmallow.exceptions import SchemaValidationError
+ 
+ 
+ class TestValidationError:
+     def test_stores_message_in_list(self):
+-        err = ValidationError("foo")
++        err = SchemaValidationError("foo")
+         assert err.messages == ["foo"]
+ 
+     def test_can_pass_list_of_messages(self):
+-        err = ValidationError(["foo", "bar"])
++        err = SchemaValidationError(["foo", "bar"])
+         assert err.messages == ["foo", "bar"]
+ 
+     def test_stores_dictionaries(self):
+         messages = {"user": {"email": ["email is invalid"]}}
+-        err = ValidationError(messages)
++        err = SchemaValidationError(messages)
+         assert err.messages == messages
+ 
+     def test_can_store_field_name(self):
+-        err = ValidationError("invalid email", field_name="email")
++        err = SchemaValidationError("invalid email", field_name="email")
+         assert err.field_name == "email"
+ 
+     def test_str(self):
+-        err = ValidationError("invalid email")
++        err = SchemaValidationError("invalid email")
+         assert str(err) == "invalid email"
+ 
+-        err2 = ValidationError("invalid email", "email")
++        err2 = SchemaValidationError("invalid email", "email")
+         assert str(err2) == "invalid email"
+ 
+     def test_stores_dictionaries_in_messages_dict(self):
+         messages = {"user": {"email": ["email is invalid"]}}
+-        err = ValidationError(messages)
++        err = SchemaValidationError(messages)
+         assert err.messages_dict == messages
+ 
+     def test_messages_dict_type_error_on_badval(self):
+-        err = ValidationError("foo")
++        err = SchemaValidationError("foo")
+         with pytest.raises(TypeError) as excinfo:
+             err.messages_dict  # noqa: B018
+         assert "cannot access 'messages_dict' when 'messages' is of type list" in str(
+diff --git a/tests/test_fields.py b/tests/test_fields.py
+index 77d2233..5e01261 100644
+--- a/tests/test_fields.py
++++ b/tests/test_fields.py
+@@ -5,7 +5,7 @@ from marshmallow import (
+     INCLUDE,
+     RAISE,
+     Schema,
+-    ValidationError,
++    SchemaValidationError,
+     fields,
+     missing,
+ )
+@@ -305,7 +305,7 @@ class TestNestedField:
+         ret = schema.load({"nested": {"hello": "world"}})
+         assert ret == {"nested": {"hello": "world"}}
+ 
+-        with pytest.raises(ValidationError):
++        with pytest.raises(SchemaValidationError):
+             schema.load({"nested": {"x": 1}})
+ 
+     @pytest.mark.parametrize("schema_unknown", (EXCLUDE, INCLUDE, RAISE))
+@@ -327,7 +327,7 @@ class TestNestedField:
+         ):
+             assert MySchema().load({"nested": {"x": 1}}) == {"nested": {"x": 1}}
+         elif field_unknown == RAISE or (schema_unknown == RAISE and not field_unknown):
+-            with pytest.raises(ValidationError):
++            with pytest.raises(SchemaValidationError):
+                 MySchema().load({"nested": {"x": 1}})
+ 
+     @pytest.mark.parametrize(
+@@ -500,12 +500,12 @@ class TestListNested:
+             assert result["children"][0]["name"] == "Lucette"
+ 
+         for val in (False, ("children.name",)):
+-            with pytest.raises(ValidationError) as excinfo:
++            with pytest.raises(SchemaValidationError) as excinfo:
+                 result = Family(partial=val).load(payload)
+             assert excinfo.value.args[0] == {
+                 "children": {0: {"age": ["Missing data for required field."]}}
+             }
+-            with pytest.raises(ValidationError) as excinfo:
++            with pytest.raises(SchemaValidationError) as excinfo:
+                 result = Family().load(payload, partial=val)
+             assert excinfo.value.args[0] == {
+                 "children": {0: {"age": ["Missing data for required field."]}}
+@@ -550,12 +550,12 @@ class TestTupleNested:
+             assert result["children"][0]["name"] == "Lucette"
+ 
+         for val in (False, ("children.name",)):
+-            with pytest.raises(ValidationError) as excinfo:
++            with pytest.raises(SchemaValidationError) as excinfo:
+                 result = Family(partial=val).load(payload)
+             assert excinfo.value.args[0] == {
+                 "children": {0: {"age": ["Missing data for required field."]}}
+             }
+-            with pytest.raises(ValidationError) as excinfo:
++            with pytest.raises(SchemaValidationError) as excinfo:
+                 result = Family().load(payload, partial=val)
+             assert excinfo.value.args[0] == {
+                 "children": {0: {"age": ["Missing data for required field."]}}
+@@ -617,14 +617,14 @@ class TestDictNested:
+             assert result["children"]["daughter"]["name"] == "Lucette"
+ 
+         for val in (False, ("children.name",)):
+-            with pytest.raises(ValidationError) as excinfo:
++            with pytest.raises(SchemaValidationError) as excinfo:
+                 result = Family(partial=val).load(payload)
+             assert excinfo.value.args[0] == {
+                 "children": {
+                     "daughter": {"value": {"age": ["Missing data for required field."]}}
+                 }
+             }
+-            with pytest.raises(ValidationError) as excinfo:
++            with pytest.raises(SchemaValidationError) as excinfo:
+                 result = Family().load(payload, partial=val)
+             assert excinfo.value.args[0] == {
+                 "children": {
+@@ -691,25 +691,25 @@ class TestFieldPreAndPostLoad:
+ 
+     def test_field_pre_load_validation_error(self):
+         def always_fail(value):
+-            raise ValidationError("oops")
++            raise SchemaValidationError("oops")
+ 
+         class UserSchema(Schema):
+             age = fields.Int(pre_load=always_fail)
+ 
+         schema = UserSchema()
+-        with pytest.raises(ValidationError) as exc:
++        with pytest.raises(SchemaValidationError) as exc:
+             schema.load({"age": 42})
+         assert exc.value.messages == {"age": ["oops"]}
+ 
+     def test_field_post_load_validation_error(self):
+         def always_fail(value):
+-            raise ValidationError("oops")
++            raise SchemaValidationError("oops")
+ 
+         class UserSchema(Schema):
+             age = fields.Int(post_load=always_fail)
+ 
+         schema = UserSchema()
+-        with pytest.raises(ValidationError) as exc:
++        with pytest.raises(SchemaValidationError) as exc:
+             schema.load({"age": 42})
+         assert exc.value.messages == {"age": ["oops"]}
+ 
+@@ -736,7 +736,7 @@ class TestFieldPreAndPostLoad:
+             age = fields.Int(post_load=handle_none, allow_none=False)
+ 
+         schema = UserSchema()
+-        with pytest.raises(ValidationError) as exc:
++        with pytest.raises(SchemaValidationError) as exc:
+             schema.load({"age": None})
+         assert exc.value.messages == {"age": ["Field may not be null."]}
+ 
+diff --git a/tests/test_schema.py b/tests/test_schema.py
+index ff28117..2415df1 100644
+--- a/tests/test_schema.py
++++ b/tests/test_schema.py
+@@ -21,7 +21,7 @@ from marshmallow import (
+ from marshmallow.exceptions import (
+     RegistryError,
+     StringNotCollectionError,
+-    ValidationError,
++    SchemaValidationError,
+ )
+ from tests.base import (
+     Blog,
+@@ -60,12 +60,12 @@ def test_load_resets_errors():
+         email = fields.Email()
+ 
+     schema = MySchema()
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         schema.load({"name": "Joe", "email": "notvalid"})
+     errors = excinfo.value.messages
+     assert len(errors["email"]) == 1
+     assert "Not a valid email address." in errors["email"][0]
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         schema.load({"name": "Joe", "email": "__invalid"})
+     errors = excinfo.value.messages
+     assert len(errors["email"]) == 1
+@@ -74,7 +74,7 @@ def test_load_resets_errors():
+ 
+ def test_load_validation_error_stores_input_data_and_valid_data():
+     def validator(val):
+-        raise ValidationError("oops")
++        raise SchemaValidationError("oops")
+ 
+     class MySchema(Schema):
+         always_valid = fields.DateTime()
+@@ -85,7 +85,7 @@ def test_load_validation_error_stores_input_data_and_valid_data():
+         "always_valid": dt.datetime.now(dt.timezone.utc).isoformat(),
+         "always_invalid": 24,
+     }
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         schema.load(input_data)
+     err = excinfo.value
+     # err.data is the raw input data
+@@ -104,13 +104,13 @@ def test_load_resets_error_fields():
+         name = fields.Str()
+ 
+     schema = MySchema()
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         schema.load({"name": "Joe", "email": "not-valid"})
+     exc = excinfo.value
+     assert isinstance(exc.messages, dict)
+     assert len(exc.messages.keys()) == 1
+ 
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         schema.load({"name": 12, "email": "mick@stones.com"})
+     exc = excinfo.value
+ 
+@@ -119,16 +119,16 @@ def test_errored_fields_do_not_appear_in_output():
+     class MyField(fields.Field[int]):
+         # Make sure validation fails during serialization
+         def _serialize(self, value, attr, obj, **kwargs):
+-            raise ValidationError("oops")
++            raise SchemaValidationError("oops")
+ 
+     def validator(val):
+-        raise ValidationError("oops")
++        raise SchemaValidationError("oops")
+ 
+     class MySchema(Schema):
+         foo = MyField(validate=validator)
+ 
+     sch = MySchema()
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         sch.load({"foo": 2})
+     data, errors = excinfo.value.valid_data, excinfo.value.messages
+ 
+@@ -143,7 +143,7 @@ def test_load_many_stores_error_indices():
+         {"name": "Mick", "email": "mick@stones.com"},
+         {"name": "Keith", "email": "invalid-email", "homepage": "invalid-homepage"},
+     ]
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         s.load(data, many=True)
+     errors = excinfo.value.messages
+     assert 0 not in errors
+@@ -232,7 +232,7 @@ def test_load_invalid_input_type(val):
+     class Sch(Schema):
+         name = fields.Str()
+ 
+-    with pytest.raises(ValidationError) as e:
++    with pytest.raises(SchemaValidationError) as e:
+         Sch().load(val)
+     assert e.value.messages == {"_schema": ["Invalid input type."]}
+     assert e.value.valid_data == {}
+@@ -244,7 +244,7 @@ def test_load_many_invalid_input_type(val):
+     class Sch(Schema):
+         name = fields.Str()
+ 
+-    with pytest.raises(ValidationError) as e:
++    with pytest.raises(SchemaValidationError) as e:
+         Sch(many=True).load(val)
+     assert e.value.messages == {"_schema": ["Invalid input type."]}
+     assert e.value.valid_data == []
+@@ -267,7 +267,7 @@ def test_load_many_in_nested_invalid_input_type(val):
+         list1 = fields.List(fields.Nested(Inner))
+         list2 = fields.Nested(Inner, many=True)
+ 
+-    with pytest.raises(ValidationError) as e:
++    with pytest.raises(SchemaValidationError) as e:
+         Outer().load({"list1": val, "list2": val})
+     # TODO: Error messages should be identical (#779)
+     assert e.value.messages == {
+@@ -488,7 +488,7 @@ def test_relative_url_field():
+ 
+ def test_stores_invalid_url_error():
+     user = {"name": "Steve", "homepage": "www.foo.com"}
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         UserSchema().load(user)
+     errors = excinfo.value.messages
+     assert "homepage" in errors
+@@ -504,7 +504,7 @@ def test_email_field():
+ 
+ def test_stored_invalid_email():
+     u = {"name": "John", "email": "johnexample.com"}
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         UserSchema().load(u)
+     errors = excinfo.value.messages
+     assert "email" in errors
+@@ -630,7 +630,7 @@ def test_custom_error_message():
+ 
+     u = {"email": "joe.net", "homepage": "joe@example.com", "balance": "blah"}
+     s = ErrorSchema()
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         s.load(u)
+     errors = excinfo.value.messages
+     assert "Bad balance." in errors["balance"]
+@@ -647,7 +647,7 @@ def test_custom_unknown_error_message():
+ 
+     s = ErrorSchema()
+     u = {"name": "Joe", "age": 13}
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         s.load(u)
+     errors = excinfo.value.messages
+     assert custom_message in errors["age"]
+@@ -662,7 +662,7 @@ def test_custom_type_error_message():
+ 
+     s = ErrorSchema()
+     u = ["Joe"]
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         s.load(u)  # type: ignore[arg-type]
+     errors = excinfo.value.messages
+     assert custom_message in errors["_schema"]
+@@ -677,7 +677,7 @@ def test_custom_type_error_message_with_many():
+ 
+     s = ErrorSchema(many=True)
+     u = {"name": "Joe"}
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         s.load(u)
+     errors = excinfo.value.messages
+     assert custom_message in errors["_schema"]
+@@ -701,18 +701,18 @@ def test_custom_error_messages_with_inheritance():
+     unknown_user = {"name": "Eleven", "age": 12}
+ 
+     parent_schema = ParentSchema()
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         parent_schema.load(unknown_user)
+     assert parent_unknown_message in excinfo.value.messages["age"]
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         parent_schema.load(11)  # type: ignore[arg-type]
+     assert parent_type_message in excinfo.value.messages["_schema"]
+ 
+     child_schema = ChildSchema()
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         child_schema.load(unknown_user)
+     assert parent_unknown_message in excinfo.value.messages["age"]
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         child_schema.load(11)  # type: ignore[arg-type]
+     assert child_type_message in excinfo.value.messages["_schema"]
+ 
+@@ -727,7 +727,7 @@ def test_load_errors_with_many():
+         {"email": "anotherbademail"},
+     ]
+ 
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         ErrorSchema(many=True).load(data)
+     errors = excinfo.value.messages
+     assert 0 in errors
+@@ -1664,7 +1664,7 @@ class MySchema(Schema):
+             email = fields.Email()
+ 
+             def handle_error(self, error, data, **kwargs):
+-                assert type(error) is ValidationError
++                assert type(error) is SchemaValidationError
+                 assert "email" in error.messages
+                 assert isinstance(error.messages, dict)
+                 assert list(error.messages.keys()) == ["email"]
+@@ -1682,7 +1682,7 @@ class MySchema(Schema):
+             url = fields.URL()
+ 
+             def handle_error(self, error, data, **kwargs):
+-                assert type(error) is ValidationError
++                assert type(error) is SchemaValidationError
+                 assert "email" in error.messages
+                 assert isinstance(error.messages, dict)
+                 assert list(error.messages.keys()) == ["email"]
+@@ -1701,10 +1701,10 @@ class MySchema(Schema):
+             @validates("num")
+             def validate_num(self, value):
+                 if value < 0:
+-                    raise ValidationError("Must be greater than 0.")
++                    raise SchemaValidationError("Must be greater than 0.")
+ 
+             def handle_error(self, error, data, **kwargs):
+-                assert type(error) is ValidationError
++                assert type(error) is SchemaValidationError
+                 assert "num" in error.messages
+                 assert isinstance(error.messages, dict)
+                 assert list(error.messages.keys()) == ["num"]
+@@ -1722,10 +1722,10 @@ class MySchema(Schema):
+ 
+             @validates_schema
+             def validates_schema(self, data, **kwargs):
+-                raise ValidationError("Invalid schema!")
++                raise SchemaValidationError("Invalid schema!")
+ 
+             def handle_error(self, error, data, **kwargs):
+-                assert type(error) is ValidationError
++                assert type(error) is SchemaValidationError
+                 assert isinstance(error.messages, dict)
+                 assert list(error.messages.keys()) == ["_schema"]
+                 assert data == in_data
+@@ -1742,25 +1742,25 @@ class MySchema(Schema):
+ class TestFieldValidation:
+     def test_errors_are_cleared_after_loading_collection(self):
+         def always_fail(val):
+-            raise ValidationError("lol")
++            raise SchemaValidationError("lol")
+ 
+         class MySchema(Schema):
+             foo = fields.Str(validate=always_fail)
+ 
+         schema = MySchema()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             schema.load([{"foo": "bar"}, {"foo": "baz"}], many=True)
+         errors = excinfo.value.messages
+         assert len(errors[0]["foo"]) == 1
+         assert len(errors[1]["foo"]) == 1
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             schema.load({"foo": "bar"})
+         errors = excinfo.value.messages
+         assert len(errors["foo"]) == 1
+ 
+     def test_raises_error_with_list(self):
+         def validator(val):
+-            raise ValidationError(["err1", "err2"])
++            raise SchemaValidationError(["err1", "err2"])
+ 
+         class MySchema(Schema):
+             foo = fields.Raw(validate=validator)
+@@ -1772,7 +1772,7 @@ class TestFieldValidation:
+     # https://github.com/marshmallow-code/marshmallow/issues/110
+     def test_raises_error_with_dict(self):
+         def validator(val):
+-            raise ValidationError({"code": "invalid_foo"})
++            raise SchemaValidationError({"code": "invalid_foo"})
+ 
+         class MySchema(Schema):
+             foo = fields.Raw(validate=validator)
+@@ -1788,11 +1788,11 @@ class TestFieldValidation:
+ 
+             @validates("a")
+             def validate_a(self, val, **kwargs):
+-                raise ValidationError({"code": "invalid_a"})
++                raise SchemaValidationError({"code": "invalid_a"})
+ 
+             @validates("b")
+             def validate_b(self, val, **kwargs):
+-                raise ValidationError({"code": "invalid_b"})
++                raise SchemaValidationError({"code": "invalid_b"})
+ 
+         s = MySchema(only=("b",))
+         errors = s.validate({"b": "data"})
+@@ -1876,7 +1876,7 @@ class TestNestedSchema:
+         serialized_user = user_serializer.dump(user)
+         assert serialized_blog["user"] == serialized_user
+ 
+-        with pytest.raises(ValidationError, match="email"):
++        with pytest.raises(SchemaValidationError, match="email"):
+             BlogSchema().load(
+                 {"title": "Monty's blog", "user": {"name": "Monty", "email": "foo"}}
+             )
+@@ -1916,7 +1916,7 @@ class TestNestedSchema:
+         assert collabs[0].name == in_data["collaborators"][0]["name"]
+ 
+     def test_nested_errors(self):
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             BlogSchema().load(
+                 {"title": "Monty's blog", "user": {"name": "Monty", "email": "foo"}}
+             )
+@@ -1957,7 +1957,7 @@ class TestNestedSchema:
+ 
+         sch.load({"inner": [{"foo": 42}]})
+ 
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             sch.load({"inner": "invalid"})
+         errors = excinfo.value.messages
+         assert "inner" in errors
+@@ -1967,7 +1967,7 @@ class TestNestedSchema:
+             inner = fields.Nested(InnerSchema)
+ 
+         schema = OuterSchema()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             schema.load({"inner": 1})
+         errors = excinfo.value.messages
+         assert errors["inner"]["_schema"] == ["Invalid input type."]
+@@ -1982,10 +1982,10 @@ class TestNestedSchema:
+ 
+             @validates("inner")
+             def validates_inner(self, data, **kwargs):
+-                raise ValidationError("not a chance")
++                raise SchemaValidationError("not a chance")
+ 
+         outer = Outer()
+-        with pytest.raises(ValidationError) as excinfo:
++        with pytest.raises(SchemaValidationError) as excinfo:
+             outer.load({"inner": [{}]})
+         errors = excinfo.value.messages
+         assert "inner" in errors
+@@ -2001,7 +2001,7 @@ class TestNestedSchema:
+ 
+         data = {"child": {"num": 1, "extra": 1}}
+         if unknown is None or unknown == RAISE:
+-            with pytest.raises(ValidationError) as excinfo:
++            with pytest.raises(SchemaValidationError) as excinfo:
+                 ParentSchema().load(data)
+             exc = excinfo.value
+             assert exc.messages == {"child": {"extra": ["Unknown field."]}}
+@@ -2172,7 +2172,7 @@ def test_serialization_with_required_field():
+ 
+ 
+ def test_deserialization_with_required_field():
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         RequiredUserSchema().load({})
+     data, errors = excinfo.value.valid_data, excinfo.value.messages
+     assert "name" in errors
+@@ -2185,7 +2185,7 @@ def test_deserialization_with_required_field():
+ def test_deserialization_with_required_field_and_custom_validator():
+     def validator(val):
+         if val.lower() not in {"red", "blue"}:
+-            raise ValidationError("Color must be red or blue")
++            raise SchemaValidationError("Color must be red or blue")
+ 
+     class ValidatingSchema(Schema):
+         color = fields.String(
+@@ -2193,14 +2193,14 @@ def test_deserialization_with_required_field_and_custom_validator():
+             validate=validator,
+         )
+ 
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         ValidatingSchema().load({"name": "foo"})
+     errors = excinfo.value.messages
+     assert errors
+     assert "color" in errors
+     assert "Missing data for required field." in errors["color"]
+ 
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         ValidatingSchema().load({"color": "green"})
+     errors = excinfo.value.messages
+     assert "color" in errors
+diff --git a/tests/test_validate.py b/tests/test_validate.py
+index 752e544..f0955d1 100644
+--- a/tests/test_validate.py
++++ b/tests/test_validate.py
+@@ -4,7 +4,7 @@ import re
+ 
+ import pytest
+ 
+-from marshmallow import ValidationError, validate
++from marshmallow import SchemaValidationError, validate
+ 
+ 
+ @pytest.mark.parametrize(
+@@ -73,7 +73,7 @@ def test_url_absolute_valid(valid_url):
+ )
+ def test_url_absolute_invalid(invalid_url):
+     validator = validate.URL(relative=False)
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validator(invalid_url)
+ 
+ 
+@@ -116,7 +116,7 @@ def test_url_relative_valid(valid_url):
+ )
+ def test_url_relative_invalid(invalid_url):
+     validator = validate.URL(relative=True)
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validator(invalid_url)
+ 
+ 
+@@ -159,7 +159,7 @@ def test_url_relative_only_valid(valid_url):
+ )
+ def test_url_relative_only_invalid(invalid_url):
+     validator = validate.URL(relative=True, absolute=False)
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validator(invalid_url)
+ 
+ 
+@@ -194,7 +194,7 @@ def test_url_dont_require_tld_valid(valid_url):
+ )
+ def test_url_dont_require_tld_invalid(invalid_url):
+     validator = validate.URL(require_tld=False)
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validator(invalid_url)
+ 
+ 
+@@ -202,7 +202,7 @@ def test_url_custom_scheme():
+     validator = validate.URL()
+     # By default, ws not allowed
+     url = "ws://test.test"
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validator(url)
+ 
+     validator = validate.URL(schemes={"http", "https", "ws"})
+@@ -255,7 +255,7 @@ def test_url_accepts_valid_file_urls(valid_url):
+ )
+ def test_url_rejects_invalid_file_urls(invalid_url):
+     validator = validate.URL(schemes={"file"})
+-    with pytest.raises(ValidationError, match="Not a valid URL."):
++    with pytest.raises(SchemaValidationError, match="Not a valid URL."):
+         assert validator(invalid_url)
+ 
+ 
+@@ -263,7 +263,7 @@ def test_url_relative_and_custom_schemes():
+     validator = validate.URL(relative=True)
+     # By default, ws not allowed
+     url = "ws://test.test"
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validator(url)
+ 
+     validator = validate.URL(relative=True, schemes={"http", "https", "ws"})
+@@ -272,7 +272,7 @@ def test_url_relative_and_custom_schemes():
+ 
+ def test_url_custom_message():
+     validator = validate.URL(error="{input} ain't an URL")
+-    with pytest.raises(ValidationError, match="invalid ain't an URL"):
++    with pytest.raises(SchemaValidationError, match="invalid ain't an URL"):
+         validator("invalid")
+ 
+ 
+@@ -321,7 +321,7 @@ def test_url_idn_valid(valid_url):
+ )
+ def test_url_idn_invalid(invalid_url):
+     validator = validate.URL()
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validator(invalid_url)
+ 
+ 
+@@ -368,7 +368,7 @@ def test_email_valid(valid_email):
+ )
+ def test_email_invalid(invalid_email):
+     validator = validate.Email()
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validator(invalid_email)
+ 
+ 
+@@ -399,13 +399,13 @@ def test_email_idn_valid(valid_email):
+ )
+ def test_email_idn_invalid(invalid_email):
+     validator = validate.Email()
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validator(invalid_email)
+ 
+ 
+ def test_email_custom_message():
+     validator = validate.Email(error="{input} is not an email addy.")
+-    with pytest.raises(ValidationError, match="invalid is not an email addy."):
++    with pytest.raises(SchemaValidationError, match="invalid is not an email addy."):
+         validator("invalid")
+ 
+ 
+@@ -423,13 +423,13 @@ def test_range_min():
+     assert validate.Range(min_inclusive=False, max_inclusive=False)(1) == 1
+     assert validate.Range(1, 1)(1) == 1
+ 
+-    with pytest.raises(ValidationError, match="Must be greater than or equal to 2"):
++    with pytest.raises(SchemaValidationError, match="Must be greater than or equal to 2"):
+         validate.Range(2, 3)(1)
+-    with pytest.raises(ValidationError, match="Must be greater than or equal to 2"):
++    with pytest.raises(SchemaValidationError, match="Must be greater than or equal to 2"):
+         validate.Range(2)(1)
+-    with pytest.raises(ValidationError, match="Must be greater than 1"):
++    with pytest.raises(SchemaValidationError, match="Must be greater than 1"):
+         validate.Range(1, 2, min_inclusive=False, max_inclusive=True, error=None)(1)
+-    with pytest.raises(ValidationError, match="less than 1"):
++    with pytest.raises(SchemaValidationError, match="less than 1"):
+         validate.Range(1, 1, min_inclusive=True, max_inclusive=False, error=None)(1)
+ 
+ 
+@@ -440,27 +440,27 @@ def test_range_max():
+     assert validate.Range(min_inclusive=False, max_inclusive=False)(2) == 2
+     assert validate.Range(2, 2)(2) == 2
+ 
+-    with pytest.raises(ValidationError, match="less than or equal to 1"):
++    with pytest.raises(SchemaValidationError, match="less than or equal to 1"):
+         validate.Range(0, 1)(2)
+-    with pytest.raises(ValidationError, match="less than or equal to 1"):
++    with pytest.raises(SchemaValidationError, match="less than or equal to 1"):
+         validate.Range(None, 1)(2)
+-    with pytest.raises(ValidationError, match="less than 2"):
++    with pytest.raises(SchemaValidationError, match="less than 2"):
+         validate.Range(1, 2, min_inclusive=True, max_inclusive=False, error=None)(2)
+-    with pytest.raises(ValidationError, match="greater than 2"):
++    with pytest.raises(SchemaValidationError, match="greater than 2"):
+         validate.Range(2, 2, min_inclusive=False, max_inclusive=True, error=None)(2)
+ 
+ 
+ def test_range_custom_message():
+     v = validate.Range(2, 3, error="{input} is not between {min} and {max}")
+-    with pytest.raises(ValidationError, match="1 is not between 2 and 3"):
++    with pytest.raises(SchemaValidationError, match="1 is not between 2 and 3"):
+         v(1)
+ 
+     v = validate.Range(2, None, error="{input} is less than {min}")
+-    with pytest.raises(ValidationError, match="1 is less than 2"):
++    with pytest.raises(SchemaValidationError, match="1 is less than 2"):
+         v(1)
+ 
+     v = validate.Range(None, 3, error="{input} is greater than {max}")
+-    with pytest.raises(ValidationError, match="4 is greater than 3"):
++    with pytest.raises(SchemaValidationError, match="4 is greater than 3"):
+         v(4)
+ 
+ 
+@@ -495,13 +495,13 @@ def test_length_min():
+     assert validate.Length(1, 1)("a") == "a"
+     assert validate.Length(1, 1)([1]) == [1]
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Length(4, 5)("foo")
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Length(4, 5)([1, 2, 3])
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Length(5)("foo")
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Length(5)([1, 2, 3])
+ 
+ 
+@@ -515,13 +515,13 @@ def test_length_max():
+     assert validate.Length(2, 2)("ab") == "ab"
+     assert validate.Length(2, 2)([1, 2]) == [1, 2]
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Length(1, 2)("foo")
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Length(1, 2)([1, 2, 3])
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Length(None, 2)("foo")
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Length(None, 2)([1, 2, 3])
+ 
+ 
+@@ -531,9 +531,9 @@ def test_length_equal():
+     assert validate.Length(equal=None)("") == ""
+     assert validate.Length(equal=None)([]) == []
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Length(equal=2)("foo")
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Length(equal=2)([1, 2, 3])
+     error_message = "The `equal` parameter was provided, maximum or minimum parameter must not be provided"
+     with pytest.raises(ValueError, match=error_message):
+@@ -546,19 +546,19 @@ def test_length_equal():
+ 
+ def test_length_custom_message():
+     v = validate.Length(5, 6, error="{input} is not between {min} and {max}")
+-    with pytest.raises(ValidationError, match="foo is not between 5 and 6"):
++    with pytest.raises(SchemaValidationError, match="foo is not between 5 and 6"):
+         v("foo")
+ 
+     v = validate.Length(5, None, error="{input} is shorter than {min}")
+-    with pytest.raises(ValidationError, match="foo is shorter than 5"):
++    with pytest.raises(SchemaValidationError, match="foo is shorter than 5"):
+         v("foo")
+ 
+     v = validate.Length(None, 2, error="{input} is longer than {max}")
+-    with pytest.raises(ValidationError, match="foo is longer than 2"):
++    with pytest.raises(SchemaValidationError, match="foo is longer than 2"):
+         v("foo")
+ 
+     v = validate.Length(None, None, equal=4, error="{input} does not have {equal}")
+-    with pytest.raises(ValidationError, match="foo does not have 4"):
++    with pytest.raises(SchemaValidationError, match="foo does not have 4"):
+         v("foo")
+ 
+ 
+@@ -580,17 +580,17 @@ def test_equal():
+     assert validate.Equal(1)(1) == 1
+     assert validate.Equal([1])([1]) == [1]
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Equal("b")("a")
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Equal(2)(1)
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Equal([2])([1])
+ 
+ 
+ def test_equal_custom_message():
+     v = validate.Equal("a", error="{input} is not equal to {other}.")
+-    with pytest.raises(ValidationError, match="b is not equal to a."):
++    with pytest.raises(SchemaValidationError, match="b is not equal to a."):
+         v("b")
+ 
+ 
+@@ -611,11 +611,11 @@ def test_regexp_str():
+     assert validate.Regexp(r"[0-9]+")("1") == "1"
+     assert validate.Regexp(r"a", re.IGNORECASE)("A") == "A"
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Regexp(r"[0-9]+")("a")
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Regexp(r"[a-z]+")("1")
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Regexp(r"a")("A")
+ 
+ 
+@@ -628,20 +628,20 @@ def test_regexp_compile():
+     assert validate.Regexp(re.compile(r"a", re.IGNORECASE))("A") == "A"
+     assert validate.Regexp(re.compile(r"a", re.IGNORECASE), re.IGNORECASE)("A") == "A"
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Regexp(re.compile(r"[0-9]+"))("a")
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Regexp(re.compile(r"[a-z]+"))("1")
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Regexp(re.compile(r"a"))("A")
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Regexp(re.compile(r"a"), re.IGNORECASE)("A")
+ 
+ 
+ def test_regexp_custom_message():
+     rex = r"[0-9]+"
+     v = validate.Regexp(rex, error="{input} does not match {regex}")
+-    with pytest.raises(ValidationError, match="a does not match"):
++    with pytest.raises(SchemaValidationError, match="a does not match"):
+         v("a")
+ 
+ 
+@@ -683,15 +683,15 @@ def test_predicate():
+     assert validate.Predicate("_identity", arg=1)(d) == d
+     assert validate.Predicate("_identity", arg="abc")(d) == d
+ 
+-    with pytest.raises(ValidationError, match="Invalid input."):
++    with pytest.raises(SchemaValidationError, match="Invalid input."):
+         validate.Predicate("_false")(d)
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Predicate("_empty")(d)
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Predicate("_identity", arg=False)(d)
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Predicate("_identity", arg=0)(d)
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.Predicate("_identity", arg="")(d)
+ 
+ 
+@@ -704,7 +704,7 @@ def test_predicate_custom_message():
+             return "Dummy"
+ 
+     d = Dummy()
+-    with pytest.raises(ValidationError, match="Dummy._false is invalid!"):
++    with pytest.raises(SchemaValidationError, match="Dummy._false is invalid!"):
+         validate.Predicate("_false", error="{input}.{method} is invalid!")(d)
+ 
+ 
+@@ -729,22 +729,22 @@ def test_noneof():
+     assert validate.NoneOf([])([]) == []
+     assert validate.NoneOf([1, 2, 3])(None) is None
+ 
+-    with pytest.raises(ValidationError, match="Invalid input."):
++    with pytest.raises(SchemaValidationError, match="Invalid input."):
+         validate.NoneOf([1, 2, 3])(3)
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.NoneOf("abc")("c")
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.NoneOf([1, 2, None])(None)
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.NoneOf("")("")
+ 
+ 
+ def test_noneof_custom_message():
+-    with pytest.raises(ValidationError, match="<not valid>"):
++    with pytest.raises(SchemaValidationError, match="<not valid>"):
+         validate.NoneOf([1, 2], error="<not valid>")(1)
+ 
+     none_of = validate.NoneOf([1, 2], error="{input} cannot be one of {values}")
+-    with pytest.raises(ValidationError, match="1 cannot be one of 1, 2"):
++    with pytest.raises(SchemaValidationError, match="1 cannot be one of 1, 2"):
+         none_of(1)
+ 
+ 
+@@ -764,19 +764,19 @@ def test_oneof():
+     assert validate.OneOf(dict(a=0, b=1))("a") == "a"
+     assert validate.OneOf((1, 2, None))(None) is None
+ 
+-    with pytest.raises(ValidationError, match="Must be one of: 1, 2, 3."):
++    with pytest.raises(SchemaValidationError, match="Must be one of: 1, 2, 3."):
+         validate.OneOf([1, 2, 3])(4)
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.OneOf("abc")("d")
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.OneOf((1, 2, 3))(None)
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.OneOf([])([])
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.OneOf(())(())
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.OneOf(dict(a=0, b=1))(0)
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.OneOf("123")(1)
+ 
+ 
+@@ -819,7 +819,7 @@ def test_oneof_text():
+ def test_oneof_custom_message():
+     oneof = validate.OneOf([1, 2, 3], error="{input} is not one of {choices}")
+     expected = "4 is not one of 1, 2, 3"
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         oneof(4)
+     assert expected in str(expected)
+ 
+@@ -827,7 +827,7 @@ def test_oneof_custom_message():
+         [1, 2, 3], ["one", "two", "three"], error="{input} is not one of {labels}"
+     )
+     expected = "4 is not one of one, two, three"
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         oneof(4)
+     assert expected in str(expected)
+ 
+@@ -858,11 +858,11 @@ def test_containsonly_in_list():
+     assert validate.ContainsOnly([1, 2, 3])([]) == []
+ 
+     with pytest.raises(
+-        ValidationError,
++        SchemaValidationError,
+         match="One or more of the choices you made was not in: 1, 2, 3.",
+     ):
+         validate.ContainsOnly([1, 2, 3])([4])
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsOnly([])([1])
+ 
+ 
+@@ -876,9 +876,9 @@ def test_contains_only_unhashable_types():
+     assert validate.ContainsOnly([[1], [2], [3]])([[2], [3], [1]]) == [[2], [3], [1]]
+     assert validate.ContainsOnly([[1], [2], [3]])([]) == []
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsOnly([[1], [2], [3]])([[4]])
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsOnly([])([1])
+ 
+ 
+@@ -892,9 +892,9 @@ def test_containsonly_in_tuple():
+     assert validate.ContainsOnly((1, 2, 3))((3, 1, 2)) == (3, 1, 2)
+     assert validate.ContainsOnly((1, 2, 3))((2, 3, 1)) == (2, 3, 1)
+     assert validate.ContainsOnly((1, 2, 3))(()) == tuple()
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsOnly((1, 2, 3))((4,))
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsOnly(())((1,))
+ 
+ 
+@@ -909,9 +909,9 @@ def test_contains_only_in_string():
+     assert validate.ContainsOnly("abc")("bca") == "bca"
+     assert validate.ContainsOnly("abc")("") == ""
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsOnly("abc")("d")
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsOnly("")("a")
+ 
+ 
+@@ -920,7 +920,7 @@ def test_containsonly_custom_message():
+         [1, 2, 3], error="{input} is not one of {choices}"
+     )
+     expected = "4, 5 is not one of 1, 2, 3"
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         containsonly([4, 5])
+     assert expected in str(expected)
+ 
+@@ -928,7 +928,7 @@ def test_containsonly_custom_message():
+         [1, 2, 3], ["one", "two", "three"], error="{input} is not one of {labels}"
+     )
+     expected = "4, 5 is not one of one, two, three"
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         containsonly([4, 5])
+     assert expected in str(expected)
+ 
+@@ -948,22 +948,22 @@ def test_containsonly_repr():
+ 
+ def test_containsnoneof_error_message():
+     with pytest.raises(
+-        ValidationError, match="One or more of the choices you made was in: 1"
++        SchemaValidationError, match="One or more of the choices you made was in: 1"
+     ):
+         validate.ContainsNoneOf([1])([1])
+ 
+     with pytest.raises(
+-        ValidationError, match="One or more of the choices you made was in: 1, 2, 3"
++        SchemaValidationError, match="One or more of the choices you made was in: 1, 2, 3"
+     ):
+         validate.ContainsNoneOf([1, 2, 3])([1])
+ 
+     with pytest.raises(
+-        ValidationError, match="One or more of the choices you made was in: one, two"
++        SchemaValidationError, match="One or more of the choices you made was in: one, two"
+     ):
+         validate.ContainsNoneOf(["one", "two"])(["one"])
+ 
+     with pytest.raises(
+-        ValidationError, match="One or more of the choices you made was in: @, !, &, ?"
++        SchemaValidationError, match="One or more of the choices you made was in: @, !, &, ?"
+     ):
+         validate.ContainsNoneOf("@!&?")("@")
+ 
+@@ -976,16 +976,16 @@ def test_containsnoneof_in_list():
+     assert validate.ContainsNoneOf([1, 2, 3])([4]) == [4]
+     assert validate.ContainsNoneOf([4])([1, 1, 1, 1]) == [1, 1, 1, 1]
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf([1])([1, 2, 3])
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf([1, 1, 1])([1, 2, 3])
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf([1, 2])([1, 2])
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf([1])([1, 1, 1, 1])
+ 
+ 
+@@ -995,22 +995,22 @@ def test_containsnoneof_unhashable_types():
+     assert validate.ContainsNoneOf([[1], [2], [3]])([[4], [4]]) == [[4], [4]]
+     assert validate.ContainsNoneOf([[1], [2], [3]])([[4], [5]]) == [[4], [5]]
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf([[1], [2], [3]])([[1]])
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf([[1], [2], [3]])([[1], [2]])
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf([[1], [2], [3]])([[2], [1]])
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf([[1], [2], [3]])([[1], [2], [3]])
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf([[1], [2], [3]])([[3], [2], [1]])
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf([[1], [2], [3]])([[2], [3], [1]])
+ 
+ 
+@@ -1022,16 +1022,16 @@ def test_containsnoneof_in_tuple():
+     assert validate.ContainsNoneOf((1, 2, 3))((4,)) == (4,)
+     assert validate.ContainsNoneOf((4,))((1, 1, 1, 1)) == (1, 1, 1, 1)
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf((1,))((1, 2, 3))
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf((1, 1, 1))((1, 2, 3))
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf((1, 2))((1, 2))
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf((1,))((1, 1, 1, 1))
+ 
+ 
+@@ -1043,16 +1043,16 @@ def test_containsnoneof_in_string():
+     assert validate.ContainsNoneOf("abc")("d") == "d"
+     assert validate.ContainsNoneOf("d")("aaaa") == "aaaa"
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf("a")("abc")
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf("aaa")("abc")
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf("ab")("ab")
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf("a")("aaaa")
+ 
+ 
+@@ -1061,40 +1061,40 @@ def test_containsnoneof_custom_message():
+         [1, 2, 3], error="{input} was in the banned list: {values}"
+     )
+     expected = "1 was in the banned list: 1, 2, 3"
+-    with pytest.raises(ValidationError, match=expected):
++    with pytest.raises(SchemaValidationError, match=expected):
+         validator([1])
+ 
+ 
+ def test_containsnoneof_mixing_types():
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf("abc")(["a"])
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf(["a", "b", "c"])("a")
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf((1, 2, 3))([1])
+ 
+-    with pytest.raises(ValidationError):
++    with pytest.raises(SchemaValidationError):
+         validate.ContainsNoneOf([1, 2, 3])((1,))
+ 
+ 
+ def is_even(value):
+     if value % 2 != 0:
+-        raise ValidationError("Not an even value.")
++        raise SchemaValidationError("Not an even value.")
+ 
+ 
+ def test_and():
+     validator = validate.And(validate.Range(min=0), is_even)
+     assert validator(2)
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         validator(-1)
+     errors = excinfo.value.messages
+     assert errors == ["Must be greater than or equal to 0.", "Not an even value."]
+ 
+     validator_with_composition = validate.And(validator, validate.Range(max=6))
+     assert validator_with_composition(4)
+-    with pytest.raises(ValidationError) as excinfo:
++    with pytest.raises(SchemaValidationError) as excinfo:
+         validator_with_composition(7)
+ 
+     errors = excinfo.value.messages

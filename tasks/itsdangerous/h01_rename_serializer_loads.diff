@@ -1,0 +1,173 @@
+diff --git a/src/itsdangerous/serializer.py b/src/itsdangerous/serializer.py
+index 5ed949c..8103251 100644
+--- a/src/itsdangerous/serializer.py
++++ b/src/itsdangerous/serializer.py
+@@ -42,7 +42,7 @@ class Serializer(t.Generic[_TSerialized]):
+     enable serializing and securely signing data other than bytes. It
+     can unsign to verify that the data hasn't been changed.
+ 
+-    The serializer provides :meth:`dumps` and :meth:`loads`, similar to
++    The serializer provides :meth:`dumps` and :meth:`verify_and_load`, similar to
+     :mod:`json`, and by default uses :mod:`json` internally to serialize
+     the data to bytes.
+ 
+@@ -325,7 +325,7 @@ class Serializer(t.Generic[_TSerialized]):
+         """
+         f.write(self.dumps(obj, salt))
+ 
+-    def loads(
++    def verify_and_load(
+         self, s: str | bytes, salt: str | bytes | None = None, **kwargs: t.Any
+     ) -> t.Any:
+         """Reverse of :meth:`dumps`. Raises :exc:`.BadSignature` if the
+@@ -343,13 +343,13 @@ class Serializer(t.Generic[_TSerialized]):
+         raise t.cast(BadSignature, last_exception)
+ 
+     def load(self, f: t.IO[t.Any], salt: str | bytes | None = None) -> t.Any:
+-        """Like :meth:`loads` but loads from a file."""
+-        return self.loads(f.read(), salt)
++        """Like :meth:`verify_and_load` but loads from a file."""
++        return self.verify_and_load(f.read(), salt)
+ 
+     def loads_unsafe(
+         self, s: str | bytes, salt: str | bytes | None = None
+     ) -> tuple[bool, t.Any]:
+-        """Like :meth:`loads` but without verifying the signature. This
++        """Like :meth:`verify_and_load` but without verifying the signature. This
+         is potentially very dangerous to use depending on how your
+         serializer works. The return value is ``(signature_valid,
+         payload)`` instead of just the payload. The first item will be a
+@@ -378,7 +378,7 @@ class Serializer(t.Generic[_TSerialized]):
+             load_kwargs = {}
+ 
+         try:
+-            return True, self.loads(s, salt=salt, **load_kwargs)
++            return True, self.verify_and_load(s, salt=salt, **load_kwargs)
+         except BadSignature as e:
+             if e.payload is None:
+                 return False, None
+diff --git a/src/itsdangerous/timed.py b/src/itsdangerous/timed.py
+index 52deeea..b28333b 100644
+--- a/src/itsdangerous/timed.py
++++ b/src/itsdangerous/timed.py
+@@ -182,7 +182,7 @@ class TimedSerializer(Serializer[_TSerialized]):
+     # TODO: Signature is incompatible because parameters were added
+     #  before salt.
+ 
+-    def loads(  # type: ignore[override]
++    def verify_and_load(  # type: ignore[override]
+         self,
+         s: str | bytes,
+         max_age: int | None = None,
+diff --git a/tests/test_itsdangerous/test_serializer.py b/tests/test_itsdangerous/test_serializer.py
+index 737b504..f10660a 100644
+--- a/tests/test_itsdangerous/test_serializer.py
++++ b/tests/test_itsdangerous/test_serializer.py
+@@ -49,7 +49,7 @@ class TestSerializer:
+         "value", (None, True, "str", "text", [1, 2, 3], {"id": 42})
+     )
+     def test_serializer(self, serializer: Serializer, value: Any):
+-        assert serializer.loads(serializer.dumps(value)) == value
++        assert serializer.verify_and_load(serializer.dumps(value)) == value
+ 
+     @pytest.mark.parametrize(
+         "transform",
+@@ -62,17 +62,17 @@ class TestSerializer:
+     )
+     def test_changed_value(self, serializer: Serializer, value: Any, transform):
+         signed = serializer.dumps(value)
+-        assert serializer.loads(signed) == value
++        assert serializer.verify_and_load(signed) == value
+         changed = transform(signed)
+ 
+         with pytest.raises(BadSignature):
+-            serializer.loads(changed)
++            serializer.verify_and_load(changed)
+ 
+     def test_bad_signature_exception(self, serializer: Serializer, value: Any):
+         bad_signed = serializer.dumps(value)[:-1]
+ 
+         with pytest.raises(BadSignature) as exc_info:
+-            serializer.loads(bad_signed)
++            serializer.verify_and_load(bad_signed)
+ 
+         payload = cast(bytes, exc_info.value.payload)
+         assert serializer.load_payload(payload) == value
+@@ -83,7 +83,7 @@ class TestSerializer:
+         bad = serializer.make_signer().sign(payload[:-1])
+ 
+         with pytest.raises(BadPayload) as exc_info:
+-            serializer.loads(bad)
++            serializer.verify_and_load(bad)
+ 
+         assert exc_info.value.original_error is not None
+ 
+@@ -123,23 +123,23 @@ class TestSerializer:
+         signed = serializer.dumps(value, salt="other")
+ 
+         with pytest.raises(BadSignature):
+-            serializer.loads(signed)
++            serializer.verify_and_load(signed)
+ 
+-        assert serializer.loads(signed, salt="other") == value
++        assert serializer.verify_and_load(signed, salt="other") == value
+ 
+     def test_signer_cls(self, serializer_factory, serializer: Serializer, value: Any):
+         class Other(serializer.signer):  # type: ignore
+             default_key_derivation = "hmac"
+ 
+         other = serializer_factory(signer=Other)
+-        assert other.loads(other.dumps(value)) == value
++        assert other.verify_and_load(other.dumps(value)) == value
+         assert other.dumps(value) != serializer.dumps(value)
+ 
+     def test_signer_kwargs(
+         self, serializer_factory, serializer: Serializer, value: Any
+     ):
+         other = serializer_factory(signer_kwargs={"key_derivation": "hmac"})
+-        assert other.loads(other.dumps(value)) == value
++        assert other.verify_and_load(other.dumps(value)) == value
+         assert other.dumps("value") != serializer.dumps("value")
+ 
+     def test_serializer_kwargs(self, serializer_factory):
+@@ -150,7 +150,7 @@ class TestSerializer:
+         except TypeError:
+             return
+ 
+-        assert serializer.loads(serializer.dumps({(): 1})) == {}
++        assert serializer.verify_and_load(serializer.dumps({(): 1})) == {}
+ 
+     def test_fallback_signers(self, serializer_factory, value: Any):
+         serializer = serializer_factory(signer_kwargs={"digest_method": hashlib.sha256})
+@@ -161,7 +161,7 @@ class TestSerializer:
+             fallback_signers=[{"digest_method": hashlib.sha256}],
+         )
+ 
+-        assert fallback_serializer.loads(signed) == value
++        assert fallback_serializer.verify_and_load(signed) == value
+ 
+     def test_iter_unsigners(self, serializer: Serializer, serializer_factory):
+         class Signer256(serializer.signer):  # type: ignore
+diff --git a/tests/test_itsdangerous/test_timed.py b/tests/test_itsdangerous/test_timed.py
+index a4c1741..e63a42a 100644
+--- a/tests/test_itsdangerous/test_timed.py
++++ b/tests/test_itsdangerous/test_timed.py
+@@ -101,15 +101,15 @@ class TestTimedSerializer(FreezeMixin, TestSerializer):
+     def test_max_age(self, serializer, value, ts, freeze):
+         signed = serializer.dumps(value)
+         freeze.tick()
+-        assert serializer.loads(signed, max_age=10) == value
++        assert serializer.verify_and_load(signed, max_age=10) == value
+         freeze.tick(timedelta(seconds=10))
+ 
+         with pytest.raises(SignatureExpired) as exc_info:
+-            serializer.loads(signed, max_age=10)
++            serializer.verify_and_load(signed, max_age=10)
+ 
+         assert exc_info.value.date_signed == ts
+         assert serializer.load_payload(exc_info.value.payload) == value
+ 
+     def test_return_payload(self, serializer, value, ts):
+         signed = serializer.dumps(value)
+-        assert serializer.loads(signed, return_timestamp=True) == (value, ts)
++        assert serializer.verify_and_load(signed, return_timestamp=True) == (value, ts)

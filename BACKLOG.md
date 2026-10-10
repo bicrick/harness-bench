@@ -1,3 +1,4 @@
+<!-- last session: 2:44 AM CT build sprint -->
 # Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
 Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
@@ -43,6 +44,11 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - Early read (n≈25/config): agentic configs are near the ceiling (92–100%); full single-shot is 88% at about $0.056/solve vs agentic+structured tools at 96% and about $0.001/solve. The hard tasks are needed to separate the configs.
 
 - [ ] **IN PROGRESS** Hard-tier tasks × all main strategies × 3 seeds → results/hard.jsonl (report merges it into main).
+- [x] (2:50 AM) Hard tier batch 1 early read: agentic configs still ~100% on h01/h02, so 3 more hard tasks were added and verified (reference passes, unmodified repo fails): tinydb-h02 `Table.insert`→`insert_document` (80 call sites, 8 files), marshmallow-h03 `ValidationError`→`SchemaValidationError` (468 refs, 19 files incl. examples/), itsdangerous-h01 `Serializer.loads`→`verify_and_load` (ambiguity trap: payload-serializer `loads` must survive). 25 tasks total.
+- [ ] **IN PROGRESS** Hard tier batch 2: those 3 tasks × 17 strategies × 3 seeds → results/hard2.jsonl (separate file so no two resumable runs share one; resume with the same command):
+  `python -m cshape run --tasks tinydb-h02-rename-table-insert,marshmallow-h03-rename-validationerror,itsdangerous-h01-rename-serializer-loads --strategies full,touched,skel_L0,skel_L1,skel_L2,skel_L3,skel_retrieval,agentic,agentic_tools,agentic_c50,agentic_c90,agentic_mask,agentic_skill,agentic_agentsmd,agentic_c50_tight,agentic_c90_tight,agentic_mask_tight --seeds 3 --workers 3 --out results/hard2.jsonl`
+- [x] report.load() now merges hard.jsonl and hard2.jsonl into main and dedupes (task, strategy, seed) per group, preferring non-error rows. Needed because the B_tight run (main.jsonl) and the hard run (hard.jsonl) both cover tight strategies on the hard tasks.
+- Note for FINAL COMBINED: run it only after main, B_tight, hard and hard2 finish, so combine.py sees all 25 tasks. With 25 tasks × 5 seeds, `full` costs roughly $8–10 (marshmallow full-repo prompts plus 468-edit output on h03); drop to 4 seeds if spend at that point leaves less than $12 of headroom.
 
 ## Phase 3: write-up (~8:00–10:00 AM)
 - [ ] Headline number, tables, charts, failure examples, following the outline in EXPERIMENT_PLAN.

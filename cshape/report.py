@@ -38,14 +38,22 @@ def wilson(k, n, z=1.96):
     c = (p + z * z / (2 * n)) / d; h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
     return (max(0, c - h), min(1, c + h))
 
+MERGE_INTO_MAIN = {"hard": "main", "hard2": "main"}
+
 def load():
-    rows = []
-    for f in sorted(RES.glob("*.jsonl")):
+    """All result rows. hard*.jsonl are merged into "main". Duplicate (group, task, strategy, seed)
+    rows (two resumable runs can cover the same job) are dropped, keeping the first non-error row."""
+    best = {}
+    files = sorted(RES.glob("*.jsonl"), key=lambda f: (f.stem not in ("main", "final", "arm_e"), f.name))
+    for f in files:
         if f.name.startswith("archive_"):
             continue
         for line in f.open():
-            r = json.loads(line); r["_file"] = {"hard": "main"}.get(f.stem, f.stem); rows.append(r)
-    return rows
+            r = json.loads(line); r["_file"] = MERGE_INTO_MAIN.get(f.stem, f.stem)
+            key = (r["_file"], r.get("task"), r.get("strategy"), r.get("seed"))
+            if key not in best or (best[key].get("error") and not r.get("error")):
+                best[key] = r
+    return list(best.values())
 
 def summarize(rs):
     n = len(rs); k = sum(bool(r.get("passed")) for r in rs)
