@@ -1,4 +1,4 @@
-<!-- last session: 4:15 AM CT build sprint -->
+<!-- last session: 4:44 AM CT build sprint -->
 # Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
 Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
@@ -65,6 +65,13 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [x] `llm.call` now **streams** (`messages.stream(...).get_final_message()`) with `read=90s` (max gap between chunks) and SDK retries off. The outer loop retries 429/5xx and any transport error mid-stream, and still raises other 4xx and BudgetExceeded. Smoke-tested with a tool call through the proxy. Results don't change (same request, same parsed Message); only wall time does.
 - [x] Killed B_tight, hard, hard2 and chain_final at ~4:24 and restarted them with the same commands (resumable). In-flight rows were lost, and their spend is in the ledger only.
 - **Analysis note:** `wall_s`/`api_s` on rows written before ~4:25 AM include proxy/API hangs. Don't quote wall-clock time per config from those rows; use tokens, steps and cost. If time-to-solve matters for the article, use rows written after the fix or the FINAL run.
+
+## Build sprint 4:44 AM CT: the real bottleneck is the org rate limit
+- [x] Runs are healthy after the streaming fix (no stalls; rows landing steadily). Progress at 4:45: hard 151/153, hard2 43/153, B_tight 120/225 tight rows in main.jsonl. Ledger $16.67 of $50.
+- [x] **Diagnosed the slow rows.** A probe call streams at ~200 tok/s with 0.8s to first token, but a bare request immediately got `429 rate_limit_error: 500,000 input tokens per minute` (org-level, Haiku 5.5). Cache reads count toward it. So the 10 parallel workers are throughput-capped by the shared ITPM limit, and the long `api_s` values (e.g. 186s for one skel_L1 call, 566s for an agentic run) are mostly 429 backoff sleeps inside `llm.call`. Adding workers will not speed anything up.
+- [x] **Backoff accounting.** `llm.call` now records every retry sleep on the current job; `run_one` writes `notes.backoff_s`, `notes.n_retry_429`, `notes.n_retry_5xx`, `notes.n_retry_transport`. Takes effect for new `cshape run` processes (chain_final's resume passes and the FINAL run). Already-running processes keep the old code.
+- **Analysis rule:** never quote wall-clock or `api_s` per config from rows without `notes.backoff_s`. For rows that have it, latency = `api_s - backoff_s`. Prefer tokens, steps and cost for comparisons across configs; this is also a fair point for the article (the cheap model's practical throughput limit is the org ITPM cap, and agentic configs that re-read cached context burn that budget fastest).
+- ETA (token-bound, ~30M input tokens/hour): hard2 ~6:45 AM, then chain_final resume passes + combine + FINAL (~20–25M tokens) ~7:45 AM. If hard2 is still under ~110/153 at the 6:08 sprint, consider killing hard2 and resuming it with only seeds 0–1 for the remaining rows so FINAL starts by ~7 AM (chain_final will start FINAL automatically once no `cshape run` is left; its own hard2 resume pass uses --seeds 3, so edit chain_final.sh to --seeds 2 for hard2 before killing).
 
 ## Phase 3: write-up (~8:00–10:00 AM)
 - [ ] Headline number, tables, charts, failure examples, following the outline in EXPERIMENT_PLAN.

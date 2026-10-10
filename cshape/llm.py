@@ -32,6 +32,24 @@ def _add(usd, u):
         fcntl.flock(f, fcntl.LOCK_EX)
         f.write(json.dumps(line) + "\n")
 
+def _backoff(sec, kind):
+    """Sleep before a retry and account for it on the current job (4:44 AM CT): the org limit is 500k input
+    tokens/min shared by all parallel workers, so api_s/wall_s on rows include 429 backoff. notes.backoff_s lets the
+    report subtract it; rows written before this change have no backoff fields (treat their latency as unclean)."""
+    JOB.backoff_s = getattr(JOB, "backoff_s", 0.0) + sec
+    k = f"n_retry_{kind}"
+    setattr(JOB, k, getattr(JOB, k, 0) + 1)
+    time.sleep(sec)
+
+def reset_job_backoff():
+    JOB.backoff_s = 0.0
+    for k in ("429", "5xx", "transport"):
+        setattr(JOB, f"n_retry_{k}", 0)
+
+def job_backoff():
+    return dict(backoff_s=round(getattr(JOB, "backoff_s", 0.0), 1),
+                **{f"n_retry_{k}": getattr(JOB, f"n_retry_{k}", 0) for k in ("429", "5xx", "transport")})
+
 _client = None
 def call(system, messages, tools=None, max_tokens=16000, run_budget=None):
     """One Messages API call with automatic prompt caching; enforces global hard cap."""
@@ -54,11 +72,11 @@ def call(system, messages, tools=None, max_tokens=16000, run_budget=None):
                 raise
             if attempt == 11:
                 raise
-            time.sleep(min(60, 5 * (attempt + 1)))
+            _backoff(min(60, 5 * (attempt + 1)), "429" if e.status_code == 429 else "5xx")
         except Exception as e:  # connection drops / read timeouts mid-stream (anthropic or raw httpx errors)
             if isinstance(e, BudgetExceeded) or attempt == 11:
                 raise
-            time.sleep(min(30, 3 * (attempt + 1)))
+            _backoff(min(30, 3 * (attempt + 1)), "transport")
     u = dict(input=r.usage.input_tokens or 0, output=r.usage.output_tokens or 0,
              cache_read=getattr(r.usage, "cache_read_input_tokens", 0) or 0,
              cache_write=getattr(r.usage, "cache_creation_input_tokens", 0) or 0)

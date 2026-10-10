@@ -62,6 +62,7 @@ def categorize(r):
 def run_one(task, strat, seed, out):
     root = fresh_copy(task)
     llm.JOB.run_id, llm.JOB.out = root.name, Path(out).name
+    llm.reset_job_backoff()
     rec = dict(task=task["id"], kind=task["kind"], strategy=strat, seed=seed, model=llm.MODEL, ts=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
     t0 = time.time()
     try:
@@ -73,6 +74,7 @@ def run_one(task, strat, seed, out):
     except Exception as e:
         rec.update(error=f"{type(e).__name__}: {e}", trace=traceback.format_exc()[-1500:], passed=False)
     rec["wall_s"] = round(time.time() - t0, 1)
+    rec.setdefault("notes", {}).update(llm.job_backoff())  # retry/backoff time included in wall_s/api_s
     rec["run_id"] = root.name
     tdir = Path(out).resolve().parent / "transcripts"; tdir.mkdir(parents=True, exist_ok=True)
     tpath = tdir / f"{Path(out).stem}__{strat}__{root.name}.json"
