@@ -172,7 +172,7 @@ def main():
                 bar(ax, main_s, keys, f"{arm}: pass rate by config (Haiku 5.5, n={main_s[keys[0]]['n']} each)")
                 fig.tight_layout(); fig.savefig(FIG / f"arm_{arm}.png"); plt.close(fig)
         # Pareto
-        allc = {**{k: v for k, v in main_s.items()}, **{f"final:{st}": s for (src, st), s in summ.items() if src == "final"}}
+        allc = {**{k: v for k, v in main_s.items()}, **({f"final:{st}": s for (src, st), s in summ.items() if src == "final"} if (RES / "FINAL_DONE").exists() else {})}
         pts = [(k, v["cost_per_solve_usd"], v["pass_rate"]) for k, v in allc.items() if v["cost_per_solve_usd"]]
         front, best = [], -1
         for k, c, p in sorted(pts, key=lambda t: (t[1], -t[2])):
@@ -220,12 +220,16 @@ def main():
                 out.append(excerpt(r))
         (RES / "excerpts" / "failures.md").write_text("\n".join(out))
     # headline: naive baseline vs best combined
-    final_s = {st: s for (src, st), s in summ.items() if src == "final"}
+    # Use the final run only once it has finished (chain_final.sh touches results/FINAL_DONE); a partial final
+    # run has unequal task coverage between full and combined and would make the headline misleading.
+    final_done = (RES / "FINAL_DONE").exists()
+    numbers["final_run"] = {"complete": final_done, "rows": sum(1 for r in rows if r["_file"] == "final")}
+    final_s = {st: s for (src, st), s in summ.items() if src == "final"} if final_done else {}
     base = final_s.get("full") or main_s.get("full")
     best_key = "combined" if "combined" in final_s else (max(main_s, key=lambda k: (main_s[k]["pass_rate"], -(main_s[k]["cost_per_solve_usd"] or 9))) if main_s else None)
     best = final_s.get("combined") or (main_s.get(best_key) if best_key else None)
     if base and best:
-        numbers["headline"] = dict(baseline="full", best=best_key, baseline_pass=base["pass_rate"], best_pass=best["pass_rate"],
+        numbers["headline"] = dict(source="final" if final_s.get("combined") else "main (provisional; final run not finished)", baseline="full", best=best_key, baseline_pass=base["pass_rate"], best_pass=best["pass_rate"],
                                    lift_pp=round(100 * (best["pass_rate"] - base["pass_rate"]), 1),
                                    baseline_cost_per_solve=base["cost_per_solve_usd"], best_cost_per_solve=best["cost_per_solve_usd"],
                                    baseline_ci=[base["ci_lo"], base["ci_hi"]], best_ci=[best["ci_lo"], best["ci_hi"]],

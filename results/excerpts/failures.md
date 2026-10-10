@@ -138,7 +138,7 @@ src/marshmallow/class_registry.py
             f"Class with name {classname!r} was not
 ```
 
-### marshmallow-h03-rename-validationerror / full / seed 0 -> output_truncated
+### marshmallow-h03-rename-validationerror / skel_L0 / seed 1 -> output_truncated
 Leftover refs: ['examples/flask_example.py:19: from marshmallow import Schema, ValidationError, fields, pre_load', 'examples/flask_example.py:64: raise ValidationError("Data not provided.")', 'examples/flask_example.py:139: except ValidationError as err:']
 Apply errors: []
 
@@ -147,7 +147,7 @@ Model output (truncated):
 
 ```
 
-### marshmallow-h03-rename-validationerror / skel_L2 / seed 0 -> output_truncated
+### marshmallow-h03-rename-validationerror / touched / seed 1 -> output_truncated
 Leftover refs: ['examples/flask_example.py:19: from marshmallow import Schema, ValidationError, fields, pre_load', 'examples/flask_example.py:64: raise ValidationError("Data not provided.")', 'examples/flask_example.py:139: except ValidationError as err:']
 Apply errors: []
 
