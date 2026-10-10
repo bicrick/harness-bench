@@ -73,7 +73,11 @@ def bar(ax, ss, keys, title):
 
 def excerpt(r, maxlen=1200):
     t = json.loads((ROOT / r["transcript_path"]).read_text())["transcript"]
-    if isinstance(t, dict):
+    if not t:
+        body = f"(no transcript; error: {r.get('error', '')[:300]})"
+    elif isinstance(t, dict) and "messages" not in t:
+        body = "Harness stdout (tail):\n" + (t.get("stdout") or "")[-maxlen:]
+    elif isinstance(t, dict):
         msgs = t["messages"]
         last_text = ""
         for m in reversed(msgs):
@@ -85,7 +89,7 @@ def excerpt(r, maxlen=1200):
                 break
         calls = [f"{b['name']}({json.dumps(b.get('input'))[:100]})" for m in msgs if m["role"] == "assistant" for b in m["content"] if b.get("type") == "tool_use"]
         body = "Tool calls:\n" + "\n".join(f"- {c}" for c in calls[:15]) + ("\n..." if len(calls) > 15 else "") + f"\n\nFinal message:\n{last_text[:600]}"
-    else:
+    if t and isinstance(t, list):
         resp = "".join(b.get("text", "") for b in t[-1]["response"] if b.get("type") == "text")
         body = "Model output (truncated):\n" + resp[:maxlen]
     return (f"### {r['task']} / {r['strategy']} / seed {r['seed']} -> {r.get('failure_category')}\n"
