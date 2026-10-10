@@ -13,7 +13,7 @@ def load_tasks():
     tasks = []
     for repo_yaml in sorted((ROOT / "tasks").glob("*/repo.yaml")):
         repo = yaml.safe_load(repo_yaml.read_text())
-        for t in sorted(repo_yaml.parent.glob("t*.yaml")):
+        for t in sorted(repo_yaml.parent.glob("[th]*.yaml")):
             d = yaml.safe_load(t.read_text()); d["repo"] = repo; tasks.append(d)
     return tasks
 

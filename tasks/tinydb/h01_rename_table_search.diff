@@ -1,0 +1,222 @@
+diff --git a/tests/test_queries.py b/tests/test_queries.py
+index e939eb4..df012c6 100644
+--- a/tests/test_queries.py
++++ b/tests/test_queries.py
+@@ -204,8 +204,8 @@ def test_regex_flags_affect_hash_and_query_cache():
+     db.insert({'name': 'John'})
+     db.insert({'name': 'johnny'})
+ 
+-    ignorecase_names = [d['name'] for d in db.search(case_insensitive)]
+-    sensitive_names = [d['name'] for d in db.search(case_sensitive)]
++    ignorecase_names = [d['name'] for d in db.find_all(case_insensitive)]
++    sensitive_names = [d['name'] for d in db.find_all(case_sensitive)]
+ 
+     assert ignorecase_names == ['John', 'johnny']
+     assert sensitive_names == ['johnny']
+diff --git a/tests/test_tables.py b/tests/test_tables.py
+index a94005e..3e61558 100644
+--- a/tests/test_tables.py
++++ b/tests/test_tables.py
+@@ -124,15 +124,15 @@ def test_lru_cache(db):
+     table = db.table('table3', cache_size=2)
+     query = where('int') == 1
+ 
+-    table.search(query)
+-    table.search(where('int') == 2)
+-    table.search(where('int') == 3)
++    table.find_all(query)
++    table.find_all(where('int') == 2)
++    table.find_all(where('int') == 3)
+     assert query not in table._query_cache
+ 
+     table.remove(where('int') == 1)
+     assert not table._query_cache.lru
+ 
+-    table.search(query)
++    table.find_all(query)
+ 
+     assert len(table._query_cache) == 1
+     table.clear_cache()
+diff --git a/tests/test_tinydb.py b/tests/test_tinydb.py
+index 9ff866f..4ff1539 100644
+--- a/tests/test_tinydb.py
++++ b/tests/test_tinydb.py
+@@ -437,24 +437,24 @@ def test_upsert_by_id(db: TinyDB):
+ 
+ def test_search(db: TinyDB):
+     assert not db._query_cache
+-    assert len(db.search(where('int') == 1)) == 3
++    assert len(db.find_all(where('int') == 1)) == 3
+ 
+     assert len(db._query_cache) == 1
+-    assert len(db.search(where('int') == 1)) == 3  # Query result from cache
++    assert len(db.find_all(where('int') == 1)) == 3  # Query result from cache
+ 
+ 
+ def test_search_path(db: TinyDB):
+     assert not db._query_cache
+-    assert len(db.search(where('int').exists())) == 3
++    assert len(db.find_all(where('int').exists())) == 3
+     assert len(db._query_cache) == 1
+ 
+-    assert len(db.search(where('asd').exists())) == 0
+-    assert len(db.search(where('int').exists())) == 3  # Query result from cache
++    assert len(db.find_all(where('asd').exists())) == 0
++    assert len(db.find_all(where('int').exists())) == 3  # Query result from cache
+ 
+ 
+ def test_search_no_results_cache(db: TinyDB):
+-    assert len(db.search(where('missing').exists())) == 0
+-    assert len(db.search(where('missing').exists())) == 0
++    assert len(db.find_all(where('missing').exists())) == 0
++    assert len(db.find_all(where('missing').exists())) == 0
+ 
+ 
+ def test_get(db: TinyDB):
+@@ -666,7 +666,7 @@ def test_gc(tmpdir):
+     table = db.table('foo')
+     table.insert({'something': 'else'})
+     table.insert({'int': 13})
+-    assert len(table.search(where('int') == 13)) == 1
++    assert len(table.find_all(where('int') == 13)) == 1
+     assert table.all() == [{'something': 'else'}, {'int': 13}]
+     db.close()
+ 
+@@ -717,7 +717,7 @@ def test_query_cache():
+ 
+     query = where('value') > 0
+ 
+-    results = db.search(query)
++    results = db.find_all(query)
+     assert len(results) == 1
+ 
+     # Modify the db instance to not return any results when
+@@ -726,7 +726,7 @@ def test_query_cache():
+ 
+     # Make sure we got an independent copy of the result list
+     results.extend([1])
+-    assert db.search(query) == [{'name': 'foo', 'value': 42}]
++    assert db.find_all(query) == [{'name': 'foo', 'value': 42}]
+ 
+ 
+ def test_query_cache_documents_are_shared_with_cache():
+@@ -738,18 +738,18 @@ def test_query_cache_documents_are_shared_with_cache():
+ 
+     query = where('name') == 'Alice'
+ 
+-    results1 = db.search(query)
++    results1 = db.find_all(query)
+     assert results1 == [{'name': 'Alice', 'tags': ['a', 'b']}]
+ 
+     # Mutating the returned list itself doesn't touch the cache.
+     results1.append({'name': 'fake'})
+-    results2 = db.search(query)
++    results2 = db.find_all(query)
+     assert results2 == [{'name': 'Alice', 'tags': ['a', 'b']}]
+ 
+     # But a document inside it is the cached object, so mutating a
+     # top-level key or a nested value both reach the cache.
+     results2[0]['tags'].append('c')
+-    results3 = db.search(query)
++    results3 = db.find_all(query)
+     assert results3[0]['tags'] == ['a', 'b', 'c']
+ 
+ 
+@@ -779,12 +779,12 @@ def test_delete(tmpdir):
+     q = Query()
+     db.insert({'network': {'id': '114', 'name': 'ok', 'rpc': 'dac',
+                            'ticker': 'mkay'}})
+-    assert db.search(q.network.id == '114') == [
++    assert db.find_all(q.network.id == '114') == [
+         {'network': {'id': '114', 'name': 'ok', 'rpc': 'dac',
+                      'ticker': 'mkay'}}
+     ]
+     db.remove(q.network.id == '114')
+-    assert db.search(q.network.id == '114') == []
++    assert db.find_all(q.network.id == '114') == []
+ 
+ 
+ def test_insert_multiple_with_single_dict(db: TinyDB):
+@@ -835,5 +835,5 @@ def test_lambda_query():
+ 
+     query = lambda doc: doc.get('foo') == 'bar'
+     query.is_cacheable = lambda: False
+-    assert db.search(query) == [{'foo': 'bar'}]
++    assert db.find_all(query) == [{'foo': 'bar'}]
+     assert not db._query_cache
+diff --git a/tinydb/__init__.py b/tinydb/__init__.py
+index 4a8941d..0f14751 100644
+--- a/tinydb/__init__.py
++++ b/tinydb/__init__.py
+@@ -13,7 +13,7 @@ Usage example:
+ >>> from tinydb.storages import MemoryStorage
+ >>> db = TinyDB(storage=MemoryStorage)
+ >>> db.insert({'data': 5})  # Insert into '_default' table
+->>> db.search(where('data') == 5)
++>>> db.find_all(where('data') == 5)
+ [{'data': 5}]
+ >>> # Document IDs are available via Document.doc_id, not an ``_id`` field
+ >>> # Now let's create a new table
+@@ -21,7 +21,7 @@ Usage example:
+ >>> for i in range(10):
+ ...     tbl.insert({'data': i})
+ ...
+->>> len(tbl.search(where('data') < 5))
++>>> len(tbl.find_all(where('data') < 5))
+ 5
+ """
+ 
+diff --git a/tinydb/queries.py b/tinydb/queries.py
+index e106c5d..243a263 100644
+--- a/tinydb/queries.py
++++ b/tinydb/queries.py
+@@ -148,12 +148,12 @@ class Query(QueryInstance):
+     1) ORM-like usage:
+ 
+     >>> User = Query()
+-    >>> db.search(User.name == 'John Doe')
+-    >>> db.search(User['logged-in'] == True)
++    >>> db.find_all(User.name == 'John Doe')
++    >>> db.find_all(User['logged-in'] == True)
+ 
+     2) Classical usage:
+ 
+-    >>> db.search(where('value') == True)
++    >>> db.find_all(where('value') == True)
+ 
+     Note that ``where(...)`` is a shorthand for ``Query(...)`` allowing for
+     a more fluent syntax.
+@@ -162,9 +162,9 @@ class Query(QueryInstance):
+     binary AND and OR operators:
+ 
+     >>> # Binary AND:
+-    >>> db.search((where('field1').exists()) & (where('field2') == 5))
++    >>> db.find_all((where('field1').exists()) & (where('field2') == 5))
+     >>> # Binary OR:
+-    >>> db.search((where('field1').exists()) | (where('field2') == 5))
++    >>> db.find_all((where('field1').exists()) | (where('field2') == 5))
+ 
+     Queries are executed by calling the resulting object. They expect to get
+     the document to test as the first argument and return ``True`` or
+diff --git a/tinydb/table.py b/tinydb/table.py
+index 76470aa..562d380 100644
+--- a/tinydb/table.py
++++ b/tinydb/table.py
+@@ -246,7 +246,7 @@ class Table:
+ 
+         return list(iter(self))
+ 
+-    def search(self, cond: QueryLike) -> list[Document]:
++    def find_all(self, cond: QueryLike) -> list[Document]:
+         """
+         Search for all documents matching a 'where' cond.
+ 
+@@ -713,7 +713,7 @@ class Table:
+         :param cond: the condition use
+         """
+ 
+-        return len(self.search(cond))
++        return len(self.find_all(cond))
+ 
+     def clear_cache(self) -> None:
+         """

@@ -2,7 +2,8 @@
 import subprocess, sys, re, yaml
 from pathlib import Path
 repo, tid, kind, old, new, where = sys.argv[1:7]
-B = Path(f"/workspace/context-shaping/work/base/{repo}")
+import os
+B = Path(os.environ.get("BASE", f"/workspace/context-shaping/work/base/{repo}"))
 T = Path(f"/workspace/context-shaping/tasks/{repo}")
 files = subprocess.run(["rg", "-lw", old, "src", "tests", "tinydb"], cwd=B, capture_output=True, text=True).stdout.split()
 for f in files:

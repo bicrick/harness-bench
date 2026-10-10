@@ -1,0 +1,168 @@
+diff --git a/src/marshmallow/fields.py b/src/marshmallow/fields.py
+index 4149a25..6166385 100644
+--- a/src/marshmallow/fields.py
++++ b/src/marshmallow/fields.py
+@@ -89,7 +89,7 @@ _ProcessorT = typing.TypeVar(
+ 
+ 
+ class _BaseFieldKwargs(typing.TypedDict, total=False):
+-    load_default: typing.Any
++    default_on_load: typing.Any
+     dump_default: typing.Any
+     data_key: str | None
+     attribute: str | None
+@@ -125,7 +125,7 @@ class Field(typing.Generic[_InternalT]):
+     :param dump_default: If set, this value will be used during serialization if the
+         input value is missing. If not set, the field will be excluded from the
+         serialized output if the input value is missing. May be a value or a callable.
+-    :param load_default: Default deserialization value for the field if the field is not
++    :param default_on_load: Default deserialization value for the field if the field is not
+         found in the input data. May be a value or a callable.
+     :param data_key: The name of the dict key in the external representation, i.e.
+         the input of `load` and the output of `dump`.
+@@ -151,7 +151,7 @@ class Field(typing.Generic[_InternalT]):
+         is not supplied during deserialization.
+     :param allow_none: Set this to `True` if `None` should be considered a valid value during
+         validation/deserialization. If set to `False` (the default), `None` is considered invalid input.
+-        If ``load_default`` is explicitly set to `None` and ``allow_none`` is unset,
++        If ``default_on_load`` is explicitly set to `None` and ``allow_none`` is unset,
+         `allow_none` is implicitly set to ``True``.
+     :param load_only: If `True` skip this field during serialization, otherwise
+         its value will be present in the serialized data.
+@@ -165,7 +165,7 @@ class Field(typing.Generic[_InternalT]):
+         Add ``data_key`` parameter for specifying the key in the input and
+         output data. This parameter replaced both ``load_from`` and ``dump_to``.
+     .. versionchanged:: 3.13.0
+-        Replace ``missing`` and ``default`` parameters with ``load_default`` and ``dump_default``.
++        Replace ``missing`` and ``default`` parameters with ``default_on_load`` and ``dump_default``.
+     .. versionchanged:: 3.24.0
+         `Field <marshmallow.fields.Field>` should no longer be used as a field within a `Schema <marshmallow.Schema>`.
+         Use `Raw <marshmallow.fields.Raw>` or another `Field <marshmallow.fields.Field>` subclass instead.
+@@ -192,7 +192,7 @@ class Field(typing.Generic[_InternalT]):
+     def __init__(
+         self,
+         *,
+-        load_default: typing.Any = missing_,
++        default_on_load: typing.Any = missing_,
+         dump_default: typing.Any = missing_,
+         data_key: str | None = None,
+         attribute: str | None = None,
+@@ -211,7 +211,7 @@ class Field(typing.Generic[_InternalT]):
+         metadata: typing.Mapping[str, typing.Any] | None = None,
+     ) -> None:
+         self.dump_default = dump_default
+-        self.load_default = load_default
++        self.default_on_load = default_on_load
+ 
+         self.attribute = attribute
+         self.data_key = data_key
+@@ -220,13 +220,13 @@ class Field(typing.Generic[_InternalT]):
+         self.pre_load = self._normalize_processors(pre_load, param="pre_load")
+         self.post_load = self._normalize_processors(post_load, param="post_load")
+ 
+-        # If allow_none is None and load_default is None
++        # If allow_none is None and default_on_load is None
+         # None should be considered valid by default
+-        self.allow_none = load_default is None if allow_none is None else allow_none
++        self.allow_none = default_on_load is None if allow_none is None else allow_none
+         self.load_only = load_only
+         self.dump_only = dump_only
+-        if required is True and load_default is not missing_:
+-            raise ValueError("'load_default' must not be set for required fields.")
++        if required is True and default_on_load is not missing_:
++            raise ValueError("'default_on_load' must not be set for required fields.")
+         self.required = required
+ 
+         metadata = metadata or {}
+@@ -248,7 +248,7 @@ class Field(typing.Generic[_InternalT]):
+             f"attribute={self.attribute!r}, "
+             f"validate={self.validate}, required={self.required}, "
+             f"load_only={self.load_only}, dump_only={self.dump_only}, "
+-            f"load_default={self.load_default}, allow_none={self.allow_none}, "
++            f"default_on_load={self.default_on_load}, allow_none={self.allow_none}, "
+             f"error_messages={self.error_messages})>"
+         )
+ 
+@@ -379,7 +379,7 @@ class Field(typing.Generic[_InternalT]):
+         # deserialized value
+         self._validate_missing(value)
+         if value is missing_:
+-            _miss = self.load_default
++            _miss = self.default_on_load
+             return _miss() if callable(_miss) else _miss
+ 
+         # Apply pre_load functions
+@@ -2125,7 +2125,7 @@ class Constant(Field[_ContantT]):
+     def __init__(self, constant: _ContantT, **kwargs: Unpack[_BaseFieldKwargs]):
+         super().__init__(**kwargs)
+         self.constant = constant
+-        self.load_default = constant
++        self.default_on_load = constant
+         self.dump_default = constant
+         # If allow_none was not explicitly provided and the constant is None,
+         # None should be considered valid (mirrors Field.__init__ logic).
+diff --git a/tests/test_deserialization.py b/tests/test_deserialization.py
+index b3d21b1..057cac2 100644
+--- a/tests/test_deserialization.py
++++ b/tests/test_deserialization.py
+@@ -60,7 +60,7 @@ class TestDeserializingNone:
+             field.deserialize(None)
+ 
+     def test_allow_none_is_true_if_missing_is_true(self):
+-        field = fields.Raw(load_default=None)
++        field = fields.Raw(default_on_load=None)
+         assert field.allow_none is True
+         assert field.deserialize(None) is None
+ 
+@@ -1803,7 +1803,7 @@ class TestSchemaDeserialization:
+ 
+         class AliasingUserSerializer(Schema):
+             name = fields.String()
+-            birthdate = fields.DateTime(load_default=bdate)
++            birthdate = fields.DateTime(default_on_load=bdate)
+ 
+         data = {"name": "Mick"}
+         result = AliasingUserSerializer().load(data)
+@@ -1815,7 +1815,7 @@ class TestSchemaDeserialization:
+ 
+         class AliasingUserSerializer(Schema):
+             name = fields.String()
+-            birthdate = fields.DateTime(load_default=lambda: bdate)
++            birthdate = fields.DateTime(default_on_load=lambda: bdate)
+ 
+         data = {"name": "Mick"}
+         result = AliasingUserSerializer().load(data)
+@@ -1825,7 +1825,7 @@ class TestSchemaDeserialization:
+     def test_deserialize_with_missing_param_none(self):
+         class AliasingUserSerializer(Schema):
+             name = fields.String()
+-            years = fields.Integer(load_default=None, allow_none=True)
++            years = fields.Integer(default_on_load=None, allow_none=True)
+ 
+         data = {"name": "Mick"}
+         result = AliasingUserSerializer().load(data)
+diff --git a/tests/test_fields.py b/tests/test_fields.py
+index 77d2233..d36e7b0 100644
+--- a/tests/test_fields.py
++++ b/tests/test_fields.py
+@@ -60,7 +60,7 @@ class TestField:
+             f"<fields.Raw(dump_default={default!r}, attribute=None, "
+             "validate=None, required=False, "
+             "load_only=False, dump_only=False, "
+-            f"load_default={missing}, allow_none=False, "
++            f"default_on_load={missing}, allow_none=False, "
+             f"error_messages={field.error_messages})>"
+         )
+         int_field = fields.Integer(validate=lambda x: True)
+@@ -72,9 +72,9 @@ class TestField:
+ 
+     def test_error_raised_if_missing_is_set_on_required_field(self):
+         with pytest.raises(
+-            ValueError, match="'load_default' must not be set for required fields"
++            ValueError, match="'default_on_load' must not be set for required fields"
+         ):
+-            fields.Raw(required=True, load_default=42)
++            fields.Raw(required=True, default_on_load=42)
+ 
+     def test_custom_field_receives_attr_and_obj(self):
+         class MyField(fields.Field[str]):

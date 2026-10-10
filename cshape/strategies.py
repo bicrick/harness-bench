@@ -293,9 +293,12 @@ STRATEGIES = {
     "agentic_c50": agentic_c50, "agentic_c90": agentic_c90, "agentic_mask": agentic_mask,
     "agentic_skill": agentic_skill, "agentic_agentsmd": agentic_agentsmd,
 }
+from .external import EXTERNAL
+STRATEGIES.update(EXTERNAL)
 ARMS = {
     "A": ["full", "touched", "skel_L0", "skel_L1", "skel_L2", "skel_L3", "skel_retrieval", "agentic"],
     "T": ["agentic", "agentic_tools"],
     "B": ["agentic", "agentic_c50", "agentic_c90", "agentic_mask"],
     "C": ["agentic", "agentic_skill", "agentic_agentsmd"],
+    "E": list(EXTERNAL),
 }

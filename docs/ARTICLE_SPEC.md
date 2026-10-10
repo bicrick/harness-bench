@@ -11,6 +11,7 @@
    - Tool design: raw grep/edit vs structured find_references/rename.
    - Compaction: none / summarize at 50% / summarize at 90% / drop old tool outputs.
    - Skills / AGENTS.md: none / skill file / conventions doc.
+3b. **Real harnesses vs our best config (arm E):** Claude Code (closed reference), OpenCode, Aider and mini-swe-agent, each run headless on Haiku 5.5 through the logging proxy. Figure: pass rate and cost per solve next to our naive baseline and best combined config. Panel details in `docs/research/HARNESS_PANEL.md`.
 4. **Pareto frontier:** cost per solve vs pass rate for every config, with the frontier highlighted.
 5. **Failure taxonomy:** each failed run gets an automatic tag (missed_caller, broken_import, wrong_edit/apply_failure, gave_up/no_edit, context_overflow, test_failure_other, error), with counts per config and 2–3 short real transcript excerpts.
 6. **Comparison with real tools:** how this maps to what Claude Code, Cursor, Aider, Codex CLI and Gemini CLI do (from `docs/research/`).

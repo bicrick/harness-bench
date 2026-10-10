@@ -1,0 +1,107 @@
+diff --git a/src/marshmallow/fields.py b/src/marshmallow/fields.py
+index 4149a25..8d16121 100644
+--- a/src/marshmallow/fields.py
++++ b/src/marshmallow/fields.py
+@@ -269,9 +269,9 @@ class Field(typing.Generic[_InternalT]):
+         :param obj: The object to get the value from.
+         :param attr: The attribute/key in `obj` to get the value from.
+         :param accessor: A callable used to retrieve the value of `attr` from
+-            the object `obj`. Defaults to `marshmallow.utils.get_value`.
++            the object `obj`. Defaults to `marshmallow.utils.get_nested_value`.
+         """
+-        accessor_func = accessor or utils.get_value
++        accessor_func = accessor or utils.get_nested_value
+         check_key = attr if self.attribute is None else self.attribute
+         return accessor_func(obj, check_key, default)
+ 
+diff --git a/src/marshmallow/schema.py b/src/marshmallow/schema.py
+index f68da9d..fa19b8e 100644
+--- a/src/marshmallow/schema.py
++++ b/src/marshmallow/schema.py
+@@ -33,7 +33,7 @@ from marshmallow.error_store import ErrorStore
+ from marshmallow.exceptions import SCHEMA, StringNotCollectionError, ValidationError
+ from marshmallow.orderedset import OrderedSet
+ from marshmallow.utils import (
+-    get_value,
++    get_nested_value,
+     is_collection,
+     is_sequence_but_not_string,
+     set_value,
+@@ -503,7 +503,7 @@ class Schema(metaclass=SchemaMeta):
+         .. versionchanged:: 3.0.0a1
+             Changed position of ``obj`` and ``attr``.
+         """
+-        return get_value(obj, attr, default)
++        return get_nested_value(obj, attr, default)
+ 
+     ##### Serialization/Deserialization API #####
+ 
+diff --git a/src/marshmallow/utils.py b/src/marshmallow/utils.py
+index 639dc65..f7c04f8 100644
+--- a/src/marshmallow/utils.py
++++ b/src/marshmallow/utils.py
+@@ -94,7 +94,7 @@ def pluck(dictlist: list[dict[str, typing.Any]], key: str):
+ # Various utilities for pulling keyed values from objects
+ 
+ 
+-def get_value(obj, key: str, default=missing):
++def get_nested_value(obj, key: str, default=missing):
+     """Helper for pulling a keyed value off various types of objects. Fields use
+     this method by default to access attributes of the source object. For object `x`
+     and attribute `i`, this method first tries to access `x[i]`, and then falls back to
+@@ -102,7 +102,7 @@ def get_value(obj, key: str, default=missing):
+ 
+     .. warning::
+         If an object `x` does not raise an exception when `x[i]` does not exist,
+-        `get_value` will never check the value `x.i`. Consider overriding
++        `get_nested_value` will never check the value `x.i`. Consider overriding
+         `marshmallow.fields.Field.get_value` in this case.
+     """
+     if "." in key:
+diff --git a/tests/test_utils.py b/tests/test_utils.py
+index b85e76d..28c89dd 100644
+--- a/tests/test_utils.py
++++ b/tests/test_utils.py
+@@ -35,16 +35,16 @@ class PointDict(dict):
+     "obj", [PointNT(24, 42), PointClass(24, 42), PointDict(24, 42), {"x": 24, "y": 42}]
+ )
+ def test_get_value_from_object(obj):
+-    assert utils.get_value(obj, "x") == 24
+-    assert utils.get_value(obj, "y") == 42
++    assert utils.get_nested_value(obj, "x") == 24
++    assert utils.get_nested_value(obj, "y") == 42
+ 
+ 
+ def test_get_value_from_namedtuple_with_default():
+     p = PointNT(x=42, y=None)
+     # Default is only returned if key is not found
+-    assert utils.get_value(p, "z", default=123) == 123
++    assert utils.get_nested_value(p, "z", default=123) == 123
+     # since 'y' is an attribute, None is returned instead of the default
+-    assert utils.get_value(p, "y", default=123) is None
++    assert utils.get_nested_value(p, "y", default=123) is None
+ 
+ 
+ class Triangle:
+@@ -57,16 +57,16 @@ class Triangle:
+ 
+ def test_get_value_for_nested_object():
+     tri = Triangle(p1=PointClass(1, 2), p2=PointNT(3, 4), p3={"x": 5, "y": 6})
+-    assert utils.get_value(tri, "p1.x") == 1
+-    assert utils.get_value(tri, "p2.x") == 3
+-    assert utils.get_value(tri, "p3.x") == 5
++    assert utils.get_nested_value(tri, "p1.x") == 1
++    assert utils.get_nested_value(tri, "p2.x") == 3
++    assert utils.get_nested_value(tri, "p3.x") == 5
+ 
+ 
+ # regression test for https://github.com/marshmallow-code/marshmallow/issues/62
+ def test_get_value_from_dict():
+     d = dict(items=["foo", "bar"], keys=["baz", "quux"])
+-    assert utils.get_value(d, "items") == ["foo", "bar"]
+-    assert utils.get_value(d, "keys") == ["baz", "quux"]
++    assert utils.get_nested_value(d, "items") == ["foo", "bar"]
++    assert utils.get_nested_value(d, "keys") == ["baz", "quux"]
+ 
+ 
+ def test_set_value():
