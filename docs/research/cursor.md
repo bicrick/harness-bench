@@ -1,0 +1,5 @@
+# Cursor (closed source; published research)
+
+- **Hybrid: semantic search + grep.** Cursor trains its own embedding model and indexes the codebase; the agent uses semantic search alongside grep. Reported: on average 12.5% higher accuracy on their Cursor Context Bench (6.5%–23.5% by model); online A/B showed +0.3% code retention overall and +2.6% on codebases with ≥1,000 files, and 2.2% more dissatisfied follow-ups without semantic search. "the combination of these two leads to the best outcomes." — https://cursor.com/blog/semsearch
+- **Retriever trained on agent traces:** an LLM ranks, in hindsight, which content would have helped at each step of agent sessions; the embedding model is trained to match those rankings. (same source)
+- **Relevance to us:** Cursor's evidence is the strongest public pro-retrieval data point, and its effect grows with repo size — our small Python repos may under-show retrieval benefit. Other Cursor internals (summarization thresholds, rules loading) not verified here; see BACKLOG for a follow-up pass on docs.cursor.com.
