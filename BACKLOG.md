@@ -1,4 +1,4 @@
-<!-- last session: 7:14 AM CT build sprint -->
+<!-- last session: 7:42 AM CT build sprint -->
 # Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
 Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
@@ -112,6 +112,13 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [ ] **Re-run in flight:** `scripts/chain_arm_e.sh` (log `results/arm_e.log`) waits for hard2 to exit, then adds arm E seed 1 on all 25 tasks plus seed 0 on the 3 hard2 tasks (112 runs, 3 workers, nothing else competing). Touches `results/ARM_E2_DONE`. Estimated ~$1.5–3, done ~8:45–9:15 AM if sessions keep the box awake. Then `make figures` and commit. Do not start other runs meanwhile.
 - **For the article (arm E section), regardless of the re-run:** (1) Report arm E with its `runs_rate_limited` column, or quote seed-1 numbers only, and say seed 0 overlapped the main run's rate-limit pressure. (2) Aider's genuine failure mode is real and worth a sentence: in headless `--message` mode it edits only the files it pulled in from its repo map, then ends with "If the grep finds matches in other files, add them to the chat and I'll update them" (tinydb-t01 transcript). It is built for a human to add files; there is no autonomous search loop, so missed callers are expected. That's a design difference, not a bug in our adapter. (3) Claude Code (closed) 95%, mini-swe-agent and OpenCode 91% on seed 0, vs our combined harness 100%; re-quote from summary.csv after the re-run.
 - Spend at 7:35: $27.48 of $50 (hard2 seed 2 nearly done; arm E re-run then starts automatically).
+
+## Build sprint 7:42 AM CT: Anthropic account usage limit hit; no more API runs possible
+- [x] **At ~07:42 every API call started returning HTTP 400 "You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC."** Confirmed with a direct 5-token curl call. This is the Anthropic account's own spend limit (set in the Anthropic console), not our $50 cap: our ledger is at **$28.53**. Nothing can call Haiku 5.5 until Patrick raises the limit or Nov 1.
+- [x] Stopped `chain_arm_e.sh` and the arm E `cshape run` (ARM_E2_DONE will not be touched). Moved 7 limit-affected rows (6 at $0 with only 400s, plus Aider marshmallow-h03 seed 1 cut short mid-run) to `results/archive_usage_limit.jsonl` with `archived_reason`, so they don't count as harness failures. Claude Code marshmallow-h03 seed 1 (10x200 then 1x400, passed) was kept.
+- [x] Audit + report regenerated. Audit now reports two permanent grid gaps: arm_e.jsonl seed 1 missing for 67 task cells (the re-run covered seed 0 on the 3 hard2 tasks plus seed 1 on the 6 itsdangerous base tasks, itsdangerous-h01, marshmallow-h01/h02, and Claude Code on marshmallow-h03), and main.jsonl skel_L1 / marshmallow-t05 / seed 0 (n=74 not 75). Both stay unless the limit is raised.
+- **Arm E as it stands (summary.csv):** Claude Code 91% (n=34), mini-swe-agent 94% (n=33), OpenCode 94% (n=33), Aider 18% (n=33). Aider is genuinely low, not a rate-limit artifact: on its 16 runs with no 429s it passed 18.8%. mini-swe-agent passed 100% on its runs with no 429s. Compare: combined harness 100% (n=125, final run). Article: quote these with n, and footnote that arm E seed 1 is partial because the account limit was reached.
+- If Patrick raises the limit: resume with `bash scripts/chain_arm_e.sh` (resumable; ~67 arm E runs, ~$0.5–1) and one main resume pass for the skel_L1 gap, then `make figures`. Otherwise no further runs; Phase 3 proceeds on existing data (the headline, from final.jsonl, is complete).
 
 ## Phase 3: write-up (~8:00–10:00 AM)
 - [ ] Headline number, tables, charts, failure examples, following the outline in EXPERIMENT_PLAN.
