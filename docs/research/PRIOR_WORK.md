@@ -1,10 +1,10 @@
 # Prior work
 
-Items marked **[verify]** are from memory/abstracts and need a re-read before quoting numbers.
+All former **[verify]** items were re-read against the papers on Oct 10, 2026 (9:45 AM CT).
 
 | Work | URL | What it tested | Limits for our question |
 |---|---|---|---|
-| SWE-bench | https://arxiv.org/abs/2310.06770 | Issue→patch on real repos; "oracle" vs BM25-retrieved file context settings **[verify]** | Bug fixes, mostly 1–2 files; retrieval ablation done with non-agentic early models |
+| SWE-bench | https://arxiv.org/abs/2310.06770 | Issue→patch on real repos; "oracle" vs BM25-retrieved file context settings (verified 9:45 AM Oct 10 against arXiv v3: Claude 2 resolves 1.96% with BM25 vs 4.8% with oracle files and 5.9% with "oracle-collapsed" files, i.e. unedited code collapsed to ±15 lines; performance drops as context grows even when BM25 recall rises) | Bug fixes, mostly 1–2 files; retrieval ablation done with non-agentic early models |
 | SWE-agent | https://arxiv.org/abs/2405.15793 | Agent-computer interface design (viewer, search) ablations | Interface ablation, not context-representation ablation |
 | Agentless | https://arxiv.org/abs/2407.01489 | Hierarchical localization (files → classes/functions → lines) using compressed "skeleton" file views, then repair **[verify details]** | Skeleton used for localization only; no skeleton-vs-full comparison on refactors |
 | Aider repo map | https://aider.chat/2023/10/22/repomap.html | Design of tree-sitter + graph-ranked map | Design writeup, no controlled ablation vs no-map / full repo |
@@ -15,7 +15,7 @@ Items marked **[verify]** are from memory/abstracts and need a re-read before qu
 | Lost in the Middle | https://arxiv.org/abs/2307.03172 | U-shaped accuracy vs position of relevant info | QA, not code |
 | Context Rot (Chroma) | https://research.trychroma.com/context-rot | 18 models degrade with input length; focused (~300 tok) ≫ full (~113k) on LongMemEval | Synthetic/QA, not code |
 | The Complexity Trap (JetBrains) | https://arxiv.org/abs/2508.21433 | Observation masking vs LLM summarization in SWE-agent (plus an OpenHands probe); masking halves cost vs the raw agent and matches or slightly beats LLM-Summary's solve rate; summaries also limit cache reuse (verified 8:15 AM Oct 10 from the arXiv abstract and Table 1) | SWE-bench Verified bug fixes; Qwen3-32B, Qwen3-Coder 480B, Gemini 2.5 Flash; not refactors, not Haiku |
-| RefactorBench | https://arxiv.org/abs/2503.07832 | Multi-file refactoring benchmark for agents **[verify]** | Benchmark, not a context-strategy study — possible task source |
+| RefactorBench | https://arxiv.org/abs/2503.07832 | Multi-file refactoring benchmark for agents (verified 9:45 AM Oct 10: 100 handcrafted multi-file refactors in 9 Python repos, AST-based tests; SWE-agent + GPT-4 solves 22% with base instructions vs 87% for a human with 5 min; no task needing edits in more than 6 files was solved; a state-aware interface that shows the agent its own past edits gave a 43.9% relative improvement) | Benchmark, not a context-strategy study — possible task source |
 | OpenHands condenser | https://www.all-hands.dev/blog/openhands-context-condensensation-for-more-efficient-ai-agents | Summarizing condenser: 54% vs 53%, <½ per-turn cost | One config, subset size unclear |
 | Cursor semantic search | https://cursor.com/blog/semsearch | Semantic search on/off: +12.5% avg on Context Bench; bigger effect on ≥1k-file repos | Proprietary eval; retrieval only |
 | Anthropic context engineering | https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents | Principles: just-in-time retrieval, compaction, notes, subagents | No quantitative ablation |

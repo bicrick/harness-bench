@@ -1,4 +1,4 @@
-<!-- last session: 9:09 AM CT build sprint -->
+<!-- last session: 9:43 AM CT build sprint -->
 # Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
 Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
@@ -144,7 +144,7 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 
 ## Later / notes
 - SWE-bench Verified: feasibility note in EXPERIMENT_PLAN (needs Docker; not run).
-- Resolve [verify] items in PRIOR_WORK.md.
+- [x] (9:43 sprint) Resolve [verify] items in PRIOR_WORK.md.
 
 ## Data/figures check, Oct 10 03:30 CT
 - Added `python -m cshape.audit` (runs first in `make figures`): checks required fields, transcripts, duplicates, and ledger reconciliation; writes `results/integrity.json`. Status OK: ledger $11.93 vs logged $11.79; the $0.14 gap is consistent with 3 runs in flight.
@@ -178,3 +178,10 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [x] `docs/PUBLISH_HANDOFF.md`: ready-to-use brief for the 10:08 cloud-agent PR on bicrick/personal-website.
 - [ ] **[editor 9:53]** read the new Limitations bullet for tone (sprint wrote it).
 
+
+## Build sprint 9:43 AM CT: prior-work verification
+- [x] No runs in flight; API still blocked until Nov 1 (ledger $28.53). Nothing to monitor.
+- [x] **Both PRIOR_WORK [verify] items re-read against the papers.** SWE-bench (arXiv 2310.06770): Claude 2 1.96% with BM25 vs 4.8% oracle vs 5.9% "oracle-collapsed" (unedited code collapsed to +/-15 lines), and performance falls as context grows. RefactorBench (arXiv 2503.07832): 100 handcrafted multi-file refactors in 9 Python repos; SWE-agent + GPT-4 22% on base instructions vs 87% human; no task needing more than 6 edited files solved; state-aware interface +43.9% relative.
+- [x] Article: "What's next" RefactorBench mention is now a link plus one grounded sentence (its baseline solved no task needing >6 files, the same high-fan-out regime where structured tools mattered most here). Regenerated CASE_STUDY.md + publish bundle (3,602 words).
+- Idea for the editor (optional, not applied): SWE-bench's "oracle-collapsed" result (collapsing unedited code helped Claude 2 and GPT-4) is a close cousin of our skeleton ladder and could be one sentence in Finding 1 if it fits the tone.
+- Next: 9:53 editor final read-through, then the 10:08 sprint launches the bicrick.com PR from docs/PUBLISH_HANDOFF.md (do not merge).

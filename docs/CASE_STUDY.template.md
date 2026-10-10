@@ -186,7 +186,7 @@ Most of these tools find usages with grep or the shell. Symbol-aware tooling, wh
 ## What's next
 
 - **A SWE-bench Verified subset** to check whether the tool-design result holds on real bug fixes. It needs Docker, which this box doesn't have yet.
-- **Bigger repos**, where retrieval should start to pay off, and RefactorBench-style tasks I didn't write myself.
+- **Bigger repos**, where retrieval should start to pay off, and [RefactorBench](https://arxiv.org/abs/2503.07832)-style tasks I didn't write myself (its baseline agent solved none of the tasks that needed edits in more than six files, the same high-fan-out regime where structured tools made the biggest difference here).
 - **The RL-environment angle.** Each task plus its grader is a small, cheap environment. "Missed callers" is a dense, verifiable signal instead of a single pass/fail bit, and an episode with the combined harness costs about {{final.combined.cps}}. That is enough to train a policy on harness behavior, not just evaluate it.
 
 ## Reproduce it
