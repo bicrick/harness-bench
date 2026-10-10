@@ -1,4 +1,4 @@
-<!-- last session: 2:44 AM CT build sprint -->
+<!-- last session: 3:16 AM CT build sprint -->
 # Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
 Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
@@ -24,7 +24,7 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [x] `cshape report`: aggregate tables (pass, CI, missed, cost/solve) and charts written to results/.
 
 ## Phase 2: runs (started early, ~1:45 AM)
-- [ ] **IN PROGRESS** main run: all 14 strategies (arms A/T/B/C) × 19 tasks × 3 seeds → results/main.jsonl. To resume, rerun the same command; it skips finished runs and re-runs errored ones:
+- [x] (done 3:0x AM, 880 runs, 0 errors) main run: all 14 strategies (arms A/T/B/C) × 19 tasks × 3 seeds → results/main.jsonl. To resume, rerun the same command; it skips finished runs and re-runs errored ones:
   `python -m cshape run --strategies full,touched,skel_L0,skel_L1,skel_L2,skel_L3,skel_retrieval,agentic,agentic_tools,agentic_c50,agentic_c90,agentic_mask,agentic_skill,agentic_agentsmd --seeds 3 --workers 6 --out results/main.jsonl`
 - Note: the org rate limit is 500k input tokens/min on Haiku 5.5, and marshmallow full-repo prompts are about 135k. llm.call retries with backoff on 429.
 - [ ] If agentic configs hit the ceiling (~100%), add a hard tier of tasks (signature changes with many call sites) so the configs can be told apart.
@@ -49,6 +49,9 @@ Routine pickup: start with the first unchecked item in the current clock phase.
   `python -m cshape run --tasks tinydb-h02-rename-table-insert,marshmallow-h03-rename-validationerror,itsdangerous-h01-rename-serializer-loads --strategies full,touched,skel_L0,skel_L1,skel_L2,skel_L3,skel_retrieval,agentic,agentic_tools,agentic_c50,agentic_c90,agentic_mask,agentic_skill,agentic_agentsmd,agentic_c50_tight,agentic_c90_tight,agentic_mask_tight --seeds 3 --workers 3 --out results/hard2.jsonl`
 - [x] report.load() now merges hard.jsonl and hard2.jsonl into main and dedupes (task, strategy, seed) per group, preferring non-error rows. Needed because the B_tight run (main.jsonl) and the hard run (hard.jsonl) both cover tight strategies on the hard tasks.
 - Note for FINAL COMBINED: run it only after main, B_tight, hard and hard2 finish, so combine.py sees all 25 tasks. With 25 tasks × 5 seeds, `full` costs roughly $8–10 (marshmallow full-repo prompts plus 468-edit output on h03); drop to 4 seeds if spend at that point leaves less than $12 of headroom.
+
+- [ ] **AUTO-CHAINED (3:18 AM)** `scripts/chain_final.sh` (log: results/chain_final.log) waits until no `cshape run` process is left, does one resume pass on main/B_tight, hard and hard2, then runs `python -m cshape.combine` and the FINAL run (full vs combined, all 25 tasks, 5 seeds; 4 if headroom < $15) into results/final.jsonl, and touches results/FINAL_DONE when finished. Do NOT start the final run by hand; check `pgrep -af chain_final` first. ETA: hard2 ~4:40 AM, final ~6 AM.
+- (3:16 AM) Read at $10.63 spent: on the 19 base tasks, agentic configs are 93–96%, full 82% ($0.065/solve), agentic_tools 96% ($0.0010/solve, ~65x cheaper than full). skel_L0 47%, skel_L1–L3 67–74%, skel_retrieval 95%, touched 79%. Hard batch 1 still doesn't separate the agentic configs; tinydb-h01 (ambiguous `search`) breaks every single-shot layout except skel_retrieval. The hard2 tasks (80 / 468 call sites) are the last chance to separate the agentic arms on pass rate. If they don't, the article's arm T/B/C findings should be framed on cost per solve and tokens rather than pass rate.
 
 ## Phase 3: write-up (~8:00–10:00 AM)
 - [ ] Headline number, tables, charts, failure examples, following the outline in EXPERIMENT_PLAN.
