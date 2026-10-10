@@ -111,10 +111,17 @@ def _handler(rec):
                     for chunk in r.iter_bytes():
                         buf.append(chunk)
                         self.wfile.write(f"{len(chunk):X}\r\n".encode() + chunk + b"\r\n"); self.wfile.flush()
-                    self.wfile.write(b"0\r\n\r\n"); self.wfile.flush()
                     status = r.status_code
-            if not is_msg:
-                return
+            # Record the call BEFORE sending the final chunk. The client returns as soon as it sees the
+            # terminator, so recording after it races: a caller reading rec.calls right away (preflight, or
+            # run.py after a harness's last call) could miss this call and under-count cost.
+            try:
+                if is_msg:
+                    self._record(req, status, buf, t0)
+            finally:
+                self.wfile.write(b"0\r\n\r\n"); self.wfile.flush()
+
+        def _record(self, req, status, buf, t0):
             with rec.lock:
                 rec.status[status] = rec.status.get(status, 0) + 1
             if status != 200:

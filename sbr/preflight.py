@@ -39,7 +39,7 @@ def main():
             r = httpx.post(url + "/v1/messages", timeout=60, headers={
                 "x-api-key": os.environ["ANTHROPIC_API_KEY"], "anthropic-version": "2023-06-01", "content-type": "application/json"},
                 json={"model": MODEL, "max_tokens": 16, "messages": [{"role": "user", "content": "Say ok."}]})
-            ok = r.status_code == 200 and rec.calls
+            ok = r.status_code == 200 and bool(rec.calls)
             good &= line(ok, f"{MODEL} via proxy: HTTP {r.status_code}" + (f", logged {rec.calls[0]['prompt']} prompt tokens" if rec.calls else f" {r.text[:150]}"))
         finally:
             srv.shutdown()
