@@ -1,0 +1,100 @@
+diff --git a/tinydb/database.py b/tinydb/database.py
+index 0cd2b7e..3b42c7c 100644
+--- a/tinydb/database.py
++++ b/tinydb/database.py
+@@ -7,7 +7,7 @@ from collections.abc import Iterator
+ from . import JSONStorage
+ from .storages import Storage
+ from .table import Table, Document
+-from .utils import with_typehint
++from .typing_utils import with_typehint
+ 
+ # The table's base class. This is used to add type hinting from the Table
+ # class to TinyDB. Currently, this supports PyCharm, Pyright/VS Code and MyPy.
+diff --git a/tinydb/mypy_plugin.py b/tinydb/mypy_plugin.py
+index 39ee08b..ccdcb2f 100644
+--- a/tinydb/mypy_plugin.py
++++ b/tinydb/mypy_plugin.py
+@@ -17,7 +17,7 @@ class TinyDBPlugin(Plugin):
+         self.named_placeholders: dict[str, str] = {}
+ 
+     def get_dynamic_class_hook(self, fullname: str) -> CB[DynamicClassDef]:
+-        if fullname == 'tinydb.utils.with_typehint':
++        if fullname == 'tinydb.typing_utils.with_typehint':
+             def hook(ctx: DynamicClassDefContext):
+                 klass = ctx.call.args[0]
+                 assert isinstance(klass, NameExpr)
+diff --git a/tinydb/typing_utils.py b/tinydb/typing_utils.py
+new file mode 100644
+index 0000000..8d94239
+--- /dev/null
++++ b/tinydb/typing_utils.py
+@@ -0,0 +1,27 @@
++from typing import TYPE_CHECKING, TypeVar
++
++T = TypeVar("T")
++
++__all__ = ("with_typehint",)
++
++
++def with_typehint(baseclass: type[T]):
++    """
++    Add type hints from a specified class to a base class:
++
++    >>> class Foo(with_typehint(Bar)):
++    ...     pass
++
++    This would add type hints from class ``Bar`` to class ``Foo``.
++
++    Note that while PyCharm and Pyright (for VS Code) understand this pattern,
++    MyPy does not. For that reason TinyDB has a MyPy plugin in
++    ``mypy_plugin.py`` that adds support for this pattern.
++    """
++    if TYPE_CHECKING:
++        # In the case of type checking: pretend that the target class inherits
++        # from the specified base class
++        return baseclass
++
++    # Otherwise: just inherit from `object` like a regular Python class
++    return object
+diff --git a/tinydb/utils.py b/tinydb/utils.py
+index 43cad4e..492c9b3 100644
+--- a/tinydb/utils.py
++++ b/tinydb/utils.py
+@@ -11,35 +11,13 @@ V = TypeVar('V')
+ D = TypeVar('D')
+ T = TypeVar('T')
+ 
+-__all__ = ('LRUCache', 'freeze', 'with_typehint')
++__all__ = ('LRUCache', 'freeze')
+ 
+ # Used internally by LRUCache to tell "key maps to None" apart from
+ # "key isn't in the cache at all"
+ _missing = object()
+ 
+ 
+-def with_typehint(baseclass: type[T]):
+-    """
+-    Add type hints from a specified class to a base class:
+-
+-    >>> class Foo(with_typehint(Bar)):
+-    ...     pass
+-
+-    This would add type hints from class ``Bar`` to class ``Foo``.
+-
+-    Note that while PyCharm and Pyright (for VS Code) understand this pattern,
+-    MyPy does not. For that reason TinyDB has a MyPy plugin in
+-    ``mypy_plugin.py`` that adds support for this pattern.
+-    """
+-    if TYPE_CHECKING:
+-        # In the case of type checking: pretend that the target class inherits
+-        # from the specified base class
+-        return baseclass
+-
+-    # Otherwise: just inherit from `object` like a regular Python class
+-    return object
+-
+-
+ class LRUCache(abc.MutableMapping, Generic[K, V]):
+     """
+     A least-recently used (LRU) cache with a fixed cache size.

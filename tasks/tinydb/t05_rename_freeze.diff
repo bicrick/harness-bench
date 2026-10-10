@@ -1,0 +1,157 @@
+diff --git a/tests/test_queries.py b/tests/test_queries.py
+index e939eb4..041e868 100644
+--- a/tests/test_queries.py
++++ b/tests/test_queries.py
+@@ -287,7 +287,7 @@ def test_custom_with_unhashable_params():
+     assert not query3({'val': 'y'})
+     assert hash(query3)
+ 
+-    # args that stay unhashable even after freeze() (e.g. numpy arrays)
++    # args that stay unhashable even after deep_freeze() (e.g. numpy arrays)
+     # degrade to an uncacheable query instead of raising
+     class Unhashable:
+         __hash__ = None
+diff --git a/tests/test_utils.py b/tests/test_utils.py
+index 1fe622e..e3b05fa 100644
+--- a/tests/test_utils.py
++++ b/tests/test_utils.py
+@@ -1,6 +1,6 @@
+ import pytest
+ 
+-from tinydb.utils import LRUCache, freeze, FrozenDict
++from tinydb.utils import LRUCache, deep_freeze, FrozenDict
+ 
+ 
+ def test_lru_cache():
+@@ -142,7 +142,7 @@ def test_lru_cache_falsy_values_bug():
+     assert cache["a"] == 3
+ 
+ def test_freeze():
+-    frozen = freeze([0, 1, 2, {'a': [1, 2, 3]}, {1, 2}])
++    frozen = deep_freeze([0, 1, 2, {'a': [1, 2, 3]}, {1, 2}])
+     assert isinstance(frozen, tuple)
+     assert isinstance(frozen[3], FrozenDict)
+     assert isinstance(frozen[3]['a'], tuple)
+diff --git a/tinydb/queries.py b/tinydb/queries.py
+index e106c5d..b69b30a 100644
+--- a/tinydb/queries.py
++++ b/tinydb/queries.py
+@@ -20,7 +20,7 @@ import re
+ from collections.abc import Mapping, Callable, Sequence
+ from typing import Any, Union, Optional, Protocol
+ 
+-from .utils import freeze
++from .utils import deep_freeze
+ 
+ __all__ = ('Query', 'QueryLike', 'where')
+ 
+@@ -79,7 +79,7 @@ class QueryInstance:
+             try:
+                 hash(hashval)
+             except TypeError:
+-                # Contains something we can't freeze (e.g. a numpy array) --
++                # Contains something we can't deep_freeze (e.g. a numpy array) --
+                 # fall back to uncacheable rather than crash on first use.
+                 hashval = None
+         self._hash = hashval
+@@ -261,7 +261,7 @@ class Query(QueryInstance):
+         """
+         return self._generate_test(
+             lambda value: value == rhs,
+-            ('==', self._path, freeze(rhs))
++            ('==', self._path, deep_freeze(rhs))
+         )
+ 
+     def __ne__(self, rhs: Any):
+@@ -274,7 +274,7 @@ class Query(QueryInstance):
+         """
+         return self._generate_test(
+             lambda value: value != rhs,
+-            ('!=', self._path, freeze(rhs))
++            ('!=', self._path, deep_freeze(rhs))
+         )
+ 
+     def __lt__(self, rhs: Any) -> QueryInstance:
+@@ -402,7 +402,7 @@ class Query(QueryInstance):
+         """
+         return self._generate_test(
+             lambda value: func(value, *args),
+-            ('test', self._path, func, tuple(freeze(arg) for arg in args))
++            ('test', self._path, func, tuple(deep_freeze(arg) for arg in args))
+         )
+ 
+     def any(self, cond: Union[QueryInstance, list[Any]]) -> QueryInstance:
+@@ -437,7 +437,7 @@ class Query(QueryInstance):
+ 
+         return self._generate_test(
+             lambda value: test(value),
+-            ('any', self._path, freeze(cond))
++            ('any', self._path, deep_freeze(cond))
+         )
+ 
+     def all(self, cond: Union['QueryInstance', list[Any]]) -> QueryInstance:
+@@ -470,7 +470,7 @@ class Query(QueryInstance):
+ 
+         return self._generate_test(
+             lambda value: test(value),
+-            ('all', self._path, freeze(cond))
++            ('all', self._path, deep_freeze(cond))
+         )
+ 
+     def one_of(self, items: list[Any]) -> QueryInstance:
+@@ -483,7 +483,7 @@ class Query(QueryInstance):
+         """
+         return self._generate_test(
+             lambda value: value in items,
+-            ('one_of', self._path, freeze(items))
++            ('one_of', self._path, deep_freeze(items))
+         )
+ 
+     def fragment(self, document: Mapping) -> QueryInstance:
+@@ -496,7 +496,7 @@ class Query(QueryInstance):
+ 
+         return self._generate_test(
+             lambda value: test(value),
+-            ('fragment', freeze(document)),
++            ('fragment', deep_freeze(document)),
+             allow_empty_path=True
+         )
+ 
+diff --git a/tinydb/utils.py b/tinydb/utils.py
+index 43cad4e..2136772 100644
+--- a/tinydb/utils.py
++++ b/tinydb/utils.py
+@@ -11,7 +11,7 @@ V = TypeVar('V')
+ D = TypeVar('D')
+ T = TypeVar('T')
+ 
+-__all__ = ('LRUCache', 'freeze', 'with_typehint')
++__all__ = ('LRUCache', 'deep_freeze', 'with_typehint')
+ 
+ # Used internally by LRUCache to tell "key maps to None" apart from
+ # "key isn't in the cache at all"
+@@ -147,20 +147,20 @@ class FrozenDict(dict):
+         raise TypeError('object is immutable')
+ 
+ 
+-def freeze(obj):
++def deep_freeze(obj):
+     """
+     Freeze an object by making it immutable and thus hashable.
+     """
+     if isinstance(obj, dict):
+         # Transform dicts into ``FrozenDict``s
+-        return FrozenDict((k, freeze(v)) for k, v in obj.items())
++        return FrozenDict((k, deep_freeze(v)) for k, v in obj.items())
+     elif isinstance(obj, list):
+         # Transform lists into tuples
+-        return tuple(freeze(el) for el in obj)
++        return tuple(deep_freeze(el) for el in obj)
+     elif isinstance(obj, tuple):
+         # Freeze tuple elements too, so a nested dict/list inside an
+         # already-tuple arg (e.g. Query.test's *args) is still hashable
+-        return tuple(freeze(el) for el in obj)
++        return tuple(deep_freeze(el) for el in obj)
+     elif isinstance(obj, set):
+         # Transform sets into ``frozenset``s
+         return frozenset(obj)

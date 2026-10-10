@@ -1,0 +1,172 @@
+diff --git a/tests/test_utils.py b/tests/test_utils.py
+index 1fe622e..457b770 100644
+--- a/tests/test_utils.py
++++ b/tests/test_utils.py
+@@ -1,10 +1,10 @@
+ import pytest
+ 
+-from tinydb.utils import LRUCache, freeze, FrozenDict
++from tinydb.utils import LeastRecentlyUsedCache, freeze, FrozenDict
+ 
+ 
+ def test_lru_cache():
+-    cache = LRUCache(capacity=3)
++    cache = LeastRecentlyUsedCache(capacity=3)
+     cache["a"] = 1
+     cache["b"] = 2
+     cache["c"] = 3
+@@ -20,7 +20,7 @@ def test_lru_cache():
+ 
+ 
+ def test_lru_cache_set_multiple():
+-    cache = LRUCache(capacity=3)
++    cache = LeastRecentlyUsedCache(capacity=3)
+     cache["a"] = 1
+     cache["a"] = 2
+     cache["a"] = 3
+@@ -30,7 +30,7 @@ def test_lru_cache_set_multiple():
+ 
+ 
+ def test_lru_cache_set_update():
+-    cache = LRUCache(capacity=3)
++    cache = LeastRecentlyUsedCache(capacity=3)
+     cache["a"] = 1
+     cache["a"] = 2
+ 
+@@ -38,7 +38,7 @@ def test_lru_cache_set_update():
+ 
+ 
+ def test_lru_cache_get():
+-    cache = LRUCache(capacity=3)
++    cache = LeastRecentlyUsedCache(capacity=3)
+     cache["a"] = 1
+     cache["b"] = 1
+     cache["c"] = 1
+@@ -49,7 +49,7 @@ def test_lru_cache_get():
+ 
+ 
+ def test_lru_cache_none_value():
+-    cache = LRUCache(capacity=3)
++    cache = LeastRecentlyUsedCache(capacity=3)
+     cache["a"] = None
+ 
+     assert "a" in cache
+@@ -68,7 +68,7 @@ def test_lru_cache_none_value():
+ 
+ 
+ def test_lru_cache_delete():
+-    cache = LRUCache(capacity=3)
++    cache = LeastRecentlyUsedCache(capacity=3)
+     cache["a"] = 1
+     cache["b"] = 2
+     del cache["a"]
+@@ -82,7 +82,7 @@ def test_lru_cache_delete():
+ 
+ 
+ def test_lru_cache_clear():
+-    cache = LRUCache(capacity=3)
++    cache = LeastRecentlyUsedCache(capacity=3)
+     cache["a"] = 1
+     cache["b"] = 2
+     cache.clear()
+@@ -91,7 +91,7 @@ def test_lru_cache_clear():
+ 
+ 
+ def test_lru_cache_unlimited():
+-    cache = LRUCache()
++    cache = LeastRecentlyUsedCache()
+     for i in range(100):
+         cache[i] = i
+ 
+@@ -99,7 +99,7 @@ def test_lru_cache_unlimited():
+ 
+ 
+ def test_lru_cache_unlimited_explicit():
+-    cache = LRUCache(capacity=None)
++    cache = LeastRecentlyUsedCache(capacity=None)
+     for i in range(100):
+         cache[i] = i
+ 
+@@ -107,7 +107,7 @@ def test_lru_cache_unlimited_explicit():
+ 
+ 
+ def test_lru_cache_iteration_works():
+-    cache = LRUCache()
++    cache = LeastRecentlyUsedCache()
+     count = 0
+     for _ in cache:
+         assert False, 'there should be no elements in the cache'
+@@ -122,7 +122,7 @@ def test_lru_cache_falsy_values_bug():
+     Bug: `if self.cache.get(key):` treated falsy values as non-existent keys,
+     breaking LRU ordering when updating existing keys with falsy values.
+     """
+-    cache = LRUCache(capacity=3)
++    cache = LeastRecentlyUsedCache(capacity=3)
+     
+     # Set up cache with falsy value
+     cache["a"] = 0      # Falsy value
+diff --git a/tinydb/table.py b/tinydb/table.py
+index 76470aa..e44dcbc 100644
+--- a/tinydb/table.py
++++ b/tinydb/table.py
+@@ -14,7 +14,7 @@ from typing import (
+ 
+ from .queries import QueryLike
+ from .storages import Storage
+-from .utils import LRUCache
++from .utils import LeastRecentlyUsedCache
+ 
+ __all__ = ('Document', 'Table')
+ 
+@@ -41,7 +41,7 @@ class Table:
+     .. admonition:: Query Cache
+ 
+         As an optimization, a query cache is implemented using a
+-        :class:`~tinydb.utils.LRUCache`. This class mimics the interface of
++        :class:`~tinydb.utils.LeastRecentlyUsedCache`. This class mimics the interface of
+         a normal ``dict``, but starts to remove the least-recently used entries
+         once a threshold is reached.
+ 
+@@ -84,7 +84,7 @@ class Table:
+     #: The class used for caching query results
+     #:
+     #: .. versionadded:: 4.0
+-    query_cache_class = LRUCache
++    query_cache_class = LeastRecentlyUsedCache
+ 
+     #: The default capacity of the query cache
+     #:
+@@ -104,7 +104,7 @@ class Table:
+ 
+         self._storage = storage
+         self._name = name
+-        self._query_cache: LRUCache[QueryLike, list[Document]] \
++        self._query_cache: LeastRecentlyUsedCache[QueryLike, list[Document]] \
+             = self.query_cache_class(capacity=cache_size)
+ 
+         self._next_id: Optional[int] = None
+diff --git a/tinydb/utils.py b/tinydb/utils.py
+index 43cad4e..7a65bc1 100644
+--- a/tinydb/utils.py
++++ b/tinydb/utils.py
+@@ -11,9 +11,9 @@ V = TypeVar('V')
+ D = TypeVar('D')
+ T = TypeVar('T')
+ 
+-__all__ = ('LRUCache', 'freeze', 'with_typehint')
++__all__ = ('LeastRecentlyUsedCache', 'freeze', 'with_typehint')
+ 
+-# Used internally by LRUCache to tell "key maps to None" apart from
++# Used internally by LeastRecentlyUsedCache to tell "key maps to None" apart from
+ # "key isn't in the cache at all"
+ _missing = object()
+ 
+@@ -40,7 +40,7 @@ def with_typehint(baseclass: type[T]):
+     return object
+ 
+ 
+-class LRUCache(abc.MutableMapping, Generic[K, V]):
++class LeastRecentlyUsedCache(abc.MutableMapping, Generic[K, V]):
+     """
+     A least-recently used (LRU) cache with a fixed cache size.
+ 
