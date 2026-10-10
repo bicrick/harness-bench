@@ -13,7 +13,12 @@ def _acc(stats, u, usd, dt):
     stats["cost_usd"] += usd; stats["api_s"] += dt; stats["calls"] += 1
 
 def _new_stats():
-    return dict(tokens={}, cost_usd=0.0, api_s=0.0, calls=0, notes={})
+    return dict(tokens={}, cost_usd=0.0, api_s=0.0, calls=0, notes={}, transcript=[])
+
+def _log(stats, request, r):
+    """Append the full request messages and the raw response content to the transcript."""
+    stats["transcript"].append({"request": request, "response": [b.model_dump(exclude_none=True) for b in r.content],
+                                "stop_reason": r.stop_reason})
 
 def _text(r):
     return "".join(b.text for b in r.content if b.type == "text")
@@ -21,7 +26,7 @@ def _text(r):
 def _single_shot(root, task, ctx, stats):
     msg = f"{ctx}\n\n### TASK\n{task['instruction']}\n\n{edits.EDIT_FORMAT}"
     r, u, usd, dt = llm.call(SYSTEM, [{"role": "user", "content": msg}])
-    _acc(stats, u, usd, dt)
+    _acc(stats, u, usd, dt); _log(stats, [{"role": "user", "content": msg}], r)
     out = _text(r)
     blocks = edits.parse(out)
     stats["notes"]["edit_blocks"] = len(blocks)
@@ -44,7 +49,7 @@ def make_skeleton(level):
                "List EVERY file you need to read or edit (including tests and files that only reference the symbol), "
                "one path per line inside <files></files>. Paths must come from the tree above.")
         r, u, usd, dt = llm.call(SYSTEM, [{"role": "user", "content": ask}])
-        _acc(stats, u, usd, dt)
+        _acc(stats, u, usd, dt); _log(stats, [{"role": "user", "content": ask}], r)
         m = re.search(r"<files>(.*?)</files>", _text(r), re.S)
         picked = [l.strip().strip("-* `") for l in (m.group(1) if m else "").splitlines() if l.strip()]
         picked = [p for p in dict.fromkeys(picked) if (root / p).is_file()][:25]
@@ -122,6 +127,7 @@ def _agentic(root, task, preamble):
         if done:
             break
     stats["notes"].update(steps=steps, tool_calls=tool_calls, hit_step_cap=steps >= MAX_STEPS)
+    stats["transcript"] = {"system": SYSTEM, "messages": msgs}
     return stats
 
 def agentic(root, task):

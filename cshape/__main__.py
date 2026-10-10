@@ -43,6 +43,13 @@ def run_one(task, strat, seed, out):
     except Exception as e:
         rec.update(error=f"{type(e).__name__}: {e}", trace=traceback.format_exc()[-1500:], passed=False)
     rec["wall_s"] = round(time.time() - t0, 1)
+    rec["run_id"] = root.name
+    tdir = Path(out).parent / "transcripts"; tdir.mkdir(parents=True, exist_ok=True)
+    tpath = tdir / f"{Path(out).stem}__{strat}__{root.name}.json"
+    tpath.write_text(json.dumps({"task": task["id"], "strategy": strat, "seed": seed,
+                                 "transcript": rec.pop("transcript", None)}, default=str))
+    rec["transcript_path"] = str(tpath.relative_to(ROOT))
+    rec["config"] = dict(strategy=strat, model=llm.MODEL, max_steps=__import__("cshape.strategies", fromlist=["x"]).MAX_STEPS)
     with open(out, "a") as f:
         f.write(json.dumps(rec) + "\n")
     shutil.rmtree(root, ignore_errors=True)
