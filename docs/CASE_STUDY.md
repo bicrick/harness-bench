@@ -26,7 +26,7 @@ The short version: on this kind of task, the harness matters more than I expecte
 - **Context layout:** the whole repo in one prompt (`full`, the naive baseline), only the files the reference solution touches (an oracle), a skeleton ladder from file tree (L0) to imports (L1), signatures (L2) and docstrings (L3), and agent loops that explore on their own.
 - **Tool design:** raw `grep` / `read_file` / `edit` vs structured `find_references` (AST-aware, grouped into definitions, imports, code and comments), `rename_symbol` with a dry-run preview, and a replace-all edit that reports match counts.
 - **Compaction:** none, summarize at 50% or 90% of a context budget, or drop old tool outputs. I ran it at a 24k budget and again at 12k.
-- **Procedural context:** nothing, a five-line refactor skill ("find all references, change, test, search again, then finish"), or an AGENTS.md-style conventions doc.
+- **Procedural context:** nothing, a five-step refactor skill ("find all references, change, test, search again, then finish"), or an AGENTS.md-style conventions doc.
 
 I wrote down seven hypotheses before the main runs (`docs/HYPOTHESES.md`) and fixed the rule for building the combined config in advance: for each arm, take the option with the highest pass rate, and break ties on cost. That rule picked **layout = agentic, tools = structured, compaction = none, procedural = skill**. The combined config then got a fresh final run against the naive baseline, 5 seeds on every task.
 
@@ -48,7 +48,7 @@ The skeleton ladder mostly shows that a bare file tree is not enough: L0 passed 
 
 Same agent loop and same prompt; only the tools changed. Raw grep/read/edit passed 93% at $0.0085 per solve. With `find_references` and `rename_symbol` it passed 97% at $0.0016, which is 5.2x cheaper. The structured agent also made 4.3x fewer tool calls (9.2 vs 39.2 per run).
 
-The pass-rate gap is inside the confidence intervals over all tasks. It shows up clearly on the biggest refactor, though. On the `ValidationError` rename (468 referencing lines), the grep agent passed 0/3 and the structured agent passed 3/3. Doing that rename with grep means hundreds of small edits. All 3 grep-agent runs hit the 25-step cap, averaging 451 tool calls, and the prompt grew to as much as 122,762 tokens. The structured agent finished in about 8 calls, and its prompt never went past 9,785 tokens.
+The pass-rate gap is inside the confidence intervals over all tasks. It shows up clearly on the biggest refactor, though. On the `ValidationError` rename (468 referencing lines), the grep agent passed 0/3 and the structured agent passed 3/3. Doing that rename with grep means hundreds of small edits. All 3 grep-agent runs used up the 25 model turns the harness allows. They averaged 451 tool calls, since the model can call several tools in one turn, and the prompt grew to as much as 122,762 tokens. The structured agent finished in about 8 calls, and its prompt never went past 9,785 tokens.
 
 The cost drop is about more than fewer calls. Each grep-and-read step adds tool output that later calls carry along as context. A tool that answers "where is this used?" exactly keeps the context small and focused on the task.
 
@@ -62,7 +62,7 @@ At a 24k-token budget, compaction barely triggered (about 1.0 compactions per ru
 
 At 12k the variants separate. Summarizing at 50% averaged 6.6 compactions per run and fell to 79% at $0.0397 per solve. Summarizing at 90% held 88%. Simply dropping old tool outputs held 93% at $0.0143, the best result of the three at the lowest cost. That matches the pre-registered hypothesis, and it matches JetBrains Research's [The Complexity Trap](https://arxiv.org/abs/2508.21433), which found on SWE-bench Verified, across five model configurations, that simply masking old observations matched LLM summarization's solve rate and was the cheaper of the two in four of the five. Each summary rewrites the prompt prefix, so the cache hit rate collapsed to 10% for summarize-at-50%, versus 85% with no compaction. Rewriting the prefix costs real money.
 
-## Finding 4: a five-line skill is a cost win, not an accuracy win
+## Finding 4: a five-step skill is a cost win, not an accuracy win
 
 ![Skill file vs AGENTS.md](../figures/arm_skills.png)
 

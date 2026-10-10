@@ -25,7 +25,7 @@ The short version: on this kind of task, the harness matters more than I expecte
 - **Context layout:** the whole repo in one prompt (`full`, the naive baseline), only the files the reference solution touches (an oracle), a skeleton ladder from file tree (L0) to imports (L1), signatures (L2) and docstrings (L3), and agent loops that explore on their own.
 - **Tool design:** raw `grep` / `read_file` / `edit` vs structured `find_references` (AST-aware, grouped into definitions, imports, code and comments), `rename_symbol` with a dry-run preview, and a replace-all edit that reports match counts.
 - **Compaction:** none, summarize at 50% or 90% of a context budget, or drop old tool outputs. I ran it at a 24k budget and again at 12k.
-- **Procedural context:** nothing, a five-line refactor skill ("find all references, change, test, search again, then finish"), or an AGENTS.md-style conventions doc.
+- **Procedural context:** nothing, a five-step refactor skill ("find all references, change, test, search again, then finish"), or an AGENTS.md-style conventions doc.
 
 I wrote down seven hypotheses before the main runs (`docs/HYPOTHESES.md`) and fixed the rule for building the combined config in advance: for each arm, take the option with the highest pass rate, and break ties on cost. That rule picked **{{choice}}**. The combined config then got a fresh final run against the naive baseline, {{n_seeds_final}} seeds on every task.
 
@@ -47,7 +47,7 @@ The skeleton ladder mostly shows that a bare file tree is not enough: L0 passed 
 
 Same agent loop and same prompt; only the tools changed. Raw grep/read/edit passed {{main.agentic.pass}} at {{main.agentic.cps}} per solve. With `find_references` and `rename_symbol` it passed {{main.agentic_tools.pass}} at {{main.agentic_tools.cps}}, which is {{tools.ratio}}x cheaper. The structured agent also made {{tools.callratio}}x fewer tool calls ({{main.agentic_tools.tools}} vs {{main.agentic.tools}} per run).
 
-The pass-rate gap is inside the confidence intervals over all tasks. It shows up clearly on the biggest refactor, though. On the `ValidationError` rename ({{fan.h03.lines}} referencing lines), the grep agent passed {{h03.agentic}} and the structured agent passed {{h03.agentic_tools}}. Doing that rename with grep means hundreds of small edits. All {{h03.agentic.capped}} grep-agent runs hit the 25-step cap, averaging {{h03.agentic.calls}} tool calls, and the prompt grew to as much as {{h03.agentic.peak}} tokens. The structured agent finished in about {{h03.agentic_tools.calls}} calls, and its prompt never went past {{h03.agentic_tools.peak}} tokens.
+The pass-rate gap is inside the confidence intervals over all tasks. It shows up clearly on the biggest refactor, though. On the `ValidationError` rename ({{fan.h03.lines}} referencing lines), the grep agent passed {{h03.agentic}} and the structured agent passed {{h03.agentic_tools}}. Doing that rename with grep means hundreds of small edits. All {{h03.agentic.capped}} grep-agent runs used up the 25 model turns the harness allows. They averaged {{h03.agentic.calls}} tool calls, since the model can call several tools in one turn, and the prompt grew to as much as {{h03.agentic.peak}} tokens. The structured agent finished in about {{h03.agentic_tools.calls}} calls, and its prompt never went past {{h03.agentic_tools.peak}} tokens.
 
 The cost drop is about more than fewer calls. Each grep-and-read step adds tool output that later calls carry along as context. A tool that answers "where is this used?" exactly keeps the context small and focused on the task.
 
@@ -61,7 +61,7 @@ At a 24k-token budget, compaction barely triggered (about {{main.agentic_c50.com
 
 At 12k the variants separate. Summarizing at 50% averaged {{main.agentic_c50_tight.comp}} compactions per run and fell to {{main.agentic_c50_tight.pass}} at {{main.agentic_c50_tight.cps}} per solve. Summarizing at 90% held {{main.agentic_c90_tight.pass}}. Simply dropping old tool outputs held {{main.agentic_mask_tight.pass}} at {{main.agentic_mask_tight.cps}}, the best result of the three at the lowest cost. That matches the pre-registered hypothesis, and it matches JetBrains Research's [The Complexity Trap](https://arxiv.org/abs/2508.21433), which found on SWE-bench Verified, across five model configurations, that simply masking old observations matched LLM summarization's solve rate and was the cheaper of the two in four of the five. Each summary rewrites the prompt prefix, so the cache hit rate collapsed to {{main.agentic_c50_tight.cache}} for summarize-at-50%, versus {{main.agentic.cache}} with no compaction. Rewriting the prefix costs real money.
 
-## Finding 4: a five-line skill is a cost win, not an accuracy win
+## Finding 4: a five-step skill is a cost win, not an accuracy win
 
 ![Skill file vs AGENTS.md](../figures/arm_skills.png)
 
