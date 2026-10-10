@@ -1,4 +1,4 @@
-<!-- last session: 5:09 AM CT build sprint -->
+<!-- last session: 5:47 AM CT build sprint -->
 # Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
 Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
@@ -27,11 +27,11 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [x] (done 3:0x AM, 880 runs, 0 errors) main run: all 14 strategies (arms A/T/B/C) × 19 tasks × 3 seeds → results/main.jsonl. To resume, rerun the same command; it skips finished runs and re-runs errored ones:
   `python -m cshape run --strategies full,touched,skel_L0,skel_L1,skel_L2,skel_L3,skel_retrieval,agentic,agentic_tools,agentic_c50,agentic_c90,agentic_mask,agentic_skill,agentic_agentsmd --seeds 3 --workers 6 --out results/main.jsonl`
 - Note: the org rate limit is 500k input tokens/min on Haiku 5.5, and marshmallow full-repo prompts are about 135k. llm.call retries with backoff on 429.
-- [ ] If agentic configs hit the ceiling (~100%), add a hard tier of tasks (signature changes with many call sites) so the configs can be told apart.
+- [x] (done: hard + hard2 tiers, 6 tasks) If agentic configs hit the ceiling (~100%), add a hard tier of tasks (signature changes with many call sites) so the configs can be told apart.
 - [ ] **FINAL COMBINED** config (rule in EXPERIMENT_PLAN; `python -m cshape.combine` then `python -m cshape run --strategies full,combined --seeds 5 --workers 6 --out results/final.jsonl`): the best option from each arm stacked, 19 tasks × ≥5 seeds. Reserve ~$10 for it, and run it last.
-- [ ] Arm A: 19 × 8 × 3 seeds.
+- [x] Arm A: 19 × 8 × 3 seeds (in main run).
 - [x] Arm T: 19 × 2 × 3.
-- [ ] Arms B and C: 19 × (3 + 2) × 3.
+- [x] Arms B and C: 19 × (3 + 2) × 3 (in main run).
 - [ ] Arm D, only if budget and time allow.
 - [ ] Commit results JSONL after each arm.
 
@@ -82,6 +82,14 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - **Article note:** hard2 configs have n=6 per config (3 tasks × 2 seeds), hard batch 1 n=9; B_tight n=50 per config (25 tasks × 2 seeds). combine.py compares the arm options on equal coverage (every non-tight strategy has the same seeds on every task), so the selection rule is unaffected.
 - [ ] **Optional, only after FINAL_DONE and before ~9 AM:** if spend < $35, restore seed 2 for hard2 (rerun the hard2 command with `--seeds 3`, ~20M tokens / ~45 min / ~$2). Do not start it while FINAL is running (they share the rate limit).
 - Analysis observation for the write-up: cache_write tokens (59.7M) exceed cache_read (51.2M) across the whole study, so prompt caching is mostly writing, not hitting. That is a harness-design finding in itself (cache breakpoints vs. growing/compacted histories) and the reason compaction variants (which rewrite history) cost more per solve than expected. Worth one paragraph; do not change caching mid-study.
+
+## Build sprint 5:47 AM CT: health check, no intervention
+- [x] **Runs healthy.** All three processes (B_tight run, hard2 run, chain_final.sh) show start times of 05:38:46–05:38:58, i.e. they were restarted again at ~5:38 with no note in chain_final.log (probably an interrupted earlier fire of this routine; any in-flight rows were lost, spend is in the ledger only). Nothing to fix: both runs are resuming correctly, no tracebacks in logs.
+- Progress at 5:48: B_tight 136/150 rows (14 left), hard2 72/102 (30 left, all seed 1). Spend $18.68 of $50. Throughput is still pinned by the 500k ITPM org limit. ETA: both done ~6:30–6:50, then chain_final runs combine + FINAL (full vs combined, 25 tasks × 5 seeds = 250 runs) automatically; FINAL done ~7:45–8:00 AM.
+- [x] **combine.py dry run** on current data works (no crash risk at the chain step). Interim choice: layout=agentic, tools=structured, compaction=none, procedural=skill. chain_final re-runs it on complete data before FINAL.
+- [x] **New summary column `cache_hit_ratio`** = cache_read / (cache_read + cache_write + uncached input), per config, in `summarize()` (so summary.csv / article_numbers pick it up on the next `make figures`).
+- **Article finding (from logged rows, main.jsonl, 5:48 snapshot):** compaction wrecks prompt caching. Cache hit ratio: agentic 0.83, agentic_tools 0.75, agentic_c90 0.74, agentic_mask 0.58, agentic_c50 0.55; at the 12k budget c90_tight 0.45, mask_tight 0.21, c50_tight 0.10. Cost per solve moves the opposite way (agentic $0.0047 vs c50_tight $0.035). Every compaction rewrites the prefix, so the next call pays cache-write prices on the whole history. This explains why compaction "saves tokens" but costs more on a cheap model with caching. Re-quote final numbers from summary.csv after FINAL, not these.
+- Next sprint (6:08): just confirm chain_final moved to FINAL (`tail results/chain_final.log`). If hard2 still has >10 rows left at 6:38, leave it; FINAL waits on it by design.
 
 ## Phase 3: write-up (~8:00–10:00 AM)
 - [ ] Headline number, tables, charts, failure examples, following the outline in EXPERIMENT_PLAN.
