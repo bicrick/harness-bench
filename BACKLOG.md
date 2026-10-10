@@ -1,4 +1,4 @@
-<!-- last session: 3:16 AM CT build sprint -->
+<!-- last session: 3:41 AM CT build sprint -->
 # Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
 Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
@@ -52,6 +52,13 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 
 - [ ] **AUTO-CHAINED (3:18 AM)** `scripts/chain_final.sh` (log: results/chain_final.log) waits until no `cshape run` process is left, does one resume pass on main/B_tight, hard and hard2, then runs `python -m cshape.combine` and the FINAL run (full vs combined, all 25 tasks, 5 seeds; 4 if headroom < $15) into results/final.jsonl, and touches results/FINAL_DONE when finished. Do NOT start the final run by hand; check `pgrep -af chain_final` first. ETA: hard2 ~4:40 AM, final ~6 AM.
 - (3:16 AM) Read at $10.63 spent: on the 19 base tasks, agentic configs are 93–96%, full 82% ($0.065/solve), agentic_tools 96% ($0.0010/solve, ~65x cheaper than full). skel_L0 47%, skel_L1–L3 67–74%, skel_retrieval 95%, touched 79%. Hard batch 1 still doesn't separate the agentic configs; tinydb-h01 (ambiguous `search`) breaks every single-shot layout except skel_retrieval. The hard2 tasks (80 / 468 call sites) are the last chance to separate the agentic arms on pass rate. If they don't, the article's arm T/B/C findings should be framed on cost per solve and tokens rather than pass rate.
+
+## Build sprint 3:41 AM CT: stall fix
+- [x] **Stall found and fixed.** From ~3:31 to 3:43 AM, all 10 workers (B_tight, hard, hard2) sat on open API sockets with no ledger writes. The anthropic client had no explicit timeout (SDK default 600s × 4 retries), which is also why a few earlier rows show 1500–2100s wall times. `llm.py` now uses timeout=300s (connect 15s) and max_retries=2; the outer backoff loop retries timeouts (APITimeoutError is an APIConnectionError). Killed all three runs plus chain_final at 3:43 and restarted them in parallel (resumable; in-flight rows were lost, and their spend is in the ledger but not in the logs, so expect the ledger to run a little ahead of logged cost in integrity.json). chain_final.sh was restarted too and still auto-runs combine + FINAL once no `cshape run` is left.
+- [x] **Sandbox escape fixed.** `read_file` and `edit_all` built paths as `root / path`, so a model-supplied absolute path (one B_tight run used `/root/tinydb/tinydb/table.py`) escaped the task checkout. It crashed with PermissionError (an `error` row, re-run on resume), but it could have touched files outside the sandbox. Both tools now go through `_inside()` and return "bad path: use a path relative to the repository root" to the model, as a real harness would. Only runs that used absolute paths are affected, and before the fix those were error rows.
+- [x] **`output_truncated` is now tagged at the source.** run_one stores `notes.last_stop_reason` from the transcript, and categorize() tags zero-diff runs whose last stop_reason is max_tokens as `output_truncated`. report.retag() reads the note first and falls back to the transcript for older rows.
+- [x] `base_checkout` is file-locked, because parallel `cshape run` starts raced on `git checkout` (the hard run died at its first restart with exit 128).
+- Early hard2 read: agentic_tools solved marshmallow-h03 (468 references, 19 files) for $0.0018 in 10s, while every single-shot layout misses all 468 (output cap). Expected ETA: B_tight/hard/hard2 by ~5:00 AM, then FINAL (~$8–10) by ~6:15 AM.
 
 ## Phase 3: write-up (~8:00–10:00 AM)
 - [ ] Headline number, tables, charts, failure examples, following the outline in EXPERIMENT_PLAN.

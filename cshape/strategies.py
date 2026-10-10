@@ -78,6 +78,11 @@ TOOLS = [
 MAX_STEPS = 25
 MAX_TOOL_CHARS = 8000
 
+def _inside(root, rel):
+    """Resolve a model-supplied path inside the task checkout; None if it escapes (e.g. absolute /root/... paths)."""
+    q = (root / str(rel)).resolve()
+    return q if (root.resolve() == q or root.resolve() in q.parents) else None
+
 def _tool(root, task, name, a):
     if name == "list_files":
         return "\n".join(str(p.relative_to(root)) for p in context.py_files(root))
@@ -90,7 +95,9 @@ def _tool(root, task, name, a):
                 for i, l in enumerate(p.read_text().splitlines(), 1) if rx.search(l)]
         return "\n".join(hits[:80]) + (f"\n... {len(hits)-80} more" if len(hits) > 80 else "") or "no matches"
     if name == "read_file":
-        p = root / a["path"]
+        p = _inside(root, a["path"])
+        if p is None:
+            return "bad path: use a path relative to the repository root"
         if not p.is_file():
             return "file not found"
         return "\n".join(f"{i:4d}  {l}" for i, l in enumerate(p.read_text().splitlines(), 1))
@@ -112,7 +119,9 @@ def _tool(root, task, name, a):
             return "bad path"
         dst.parent.mkdir(parents=True, exist_ok=True); src.rename(dst); return f"moved {a['src']} -> {a['dst']}"
     if name == "edit_all":
-        p = root / a["path"]
+        p = _inside(root, a["path"])
+        if p is None:
+            return "bad path: use a path relative to the repository root"
         if not p.is_file():
             return "file not found"
         t = p.read_text(); n = t.count(a["search"])

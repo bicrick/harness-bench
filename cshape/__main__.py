@@ -18,10 +18,15 @@ def load_tasks():
     return tasks
 
 def base_checkout(repo):
+    """Clone/checkout the pinned base. File-locked so parallel `cshape run` starts don't race on git."""
+    import fcntl
     dst = WORK / "base" / repo["name"]
-    if not dst.exists():
-        subprocess.run(["git", "clone", "-q", repo["url"], str(dst)], check=True)
-    subprocess.run(["git", "checkout", "-q", repo["commit"]], cwd=dst, check=True)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with open(dst.parent / ".checkout.lock", "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        if not dst.exists():
+            subprocess.run(["git", "clone", "-q", repo["url"], str(dst)], check=True)
+        subprocess.run(["git", "checkout", "-q", repo["commit"]], cwd=dst, check=True)
     return dst
 
 def fresh_copy(task):
@@ -40,6 +45,8 @@ def categorize(r):
     n = r.get("notes", {})
     d = r.get("diff", {})
     if d.get("added", 0) + d.get("removed", 0) == 0:
+        if n.get("last_stop_reason") == "max_tokens":
+            return "output_truncated"  # model hit the 16k output cap mid-answer
         return "apply_failure" if n.get("apply_errors") else "no_edit"
     tail = r.get("test_tail", "") + r.get("check_err", "")
     if any(k in tail for k in ("ImportError", "ModuleNotFoundError", "cannot import name")):
@@ -68,6 +75,9 @@ def run_one(task, strat, seed, out):
     rec["run_id"] = root.name
     tdir = Path(out).resolve().parent / "transcripts"; tdir.mkdir(parents=True, exist_ok=True)
     tpath = tdir / f"{Path(out).stem}__{strat}__{root.name}.json"
+    for x in reversed(rec.get("transcript") or []):
+        if isinstance(x, dict) and x.get("stop_reason"):
+            rec.setdefault("notes", {})["last_stop_reason"] = x["stop_reason"]; break
     tpath.write_text(json.dumps({"task": task["id"], "strategy": strat, "seed": seed,
                                  "transcript": rec.pop("transcript", None)}, default=str))
     rec["transcript_path"] = str(tpath.relative_to(ROOT))

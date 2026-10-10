@@ -42,6 +42,8 @@ MERGE_INTO_MAIN = {"hard": "main", "hard2": "main"}
 
 def last_stop_reason(r):
     """stop_reason of the final model response in the run transcript (None if unknown)."""
+    if (r.get("notes") or {}).get("last_stop_reason"):
+        return r["notes"]["last_stop_reason"]
     tp = r.get("transcript_path")
     if not tp or not (ROOT / tp).exists():
         return None

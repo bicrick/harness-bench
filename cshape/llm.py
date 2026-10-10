@@ -29,7 +29,7 @@ def call(system, messages, tools=None, max_tokens=16000, run_budget=None):
     global _client
     if spent() >= HARD_CAP_USD:
         raise BudgetExceeded(f"hard cap ${HARD_CAP_USD} reached")
-    _client = _client or anthropic.Anthropic(max_retries=4)
+    _client = _client or anthropic.Anthropic(max_retries=2, timeout=anthropic.Timeout(300.0, connect=15.0))  # 300s: a 16k-token answer takes ~2-3 min; the 600s SDK default let hung sockets stall runs 30+ min
     kw = dict(model=MODEL, max_tokens=max_tokens, system=system, messages=messages,
               extra_body={"cache_control": {"type": "ephemeral"}})
     if tools:
