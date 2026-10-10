@@ -64,3 +64,8 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 ## Later / notes
 - SWE-bench Verified: feasibility note in EXPERIMENT_PLAN (needs Docker; not run).
 - Resolve [verify] items in PRIOR_WORK.md.
+
+## Data/figures check, Oct 10 03:30 CT
+- Added `python -m cshape.audit` (runs first in `make figures`): checks required fields, transcripts, duplicates, and ledger reconciliation; writes `results/integrity.json`. Status OK: ledger $11.93 vs logged $11.79; the $0.14 gap is consistent with 3 runs in flight.
+- Found: single-shot strategies on `marshmallow-h03-rename-validationerror` (468 references) hit the 16k output cap (`stop_reason=max_tokens`) and were tagged `no_edit`. The report now retags these as `output_truncated` from the transcript, and summary.csv has `median_missed_callers` because those 468-miss rows inflate the means (~7-9) for single-shot configs. **Build sprint:** fix `categorize()` in `cshape/__main__.py` to log `output_truncated` at the source (store the last stop_reason in notes), and the article should note this ceiling is part of why single-shot loses on high-fan-out tasks; do not quote mean missed callers for single-shot configs.
+- Headline figure: fixed overlapping x labels, added value labels and an n footnote.

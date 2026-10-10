@@ -26,7 +26,7 @@ LABEL = {"full": "full repo (naive)", "touched": "touched files (oracle)", "skel
          "agentic_mask_tight": "drop old output (12k)", "agentic_skill": "refactor skill", "agentic_agentsmd": "AGENTS.md",
          "combined": "best combined harness", "ext_claude_code": "Claude Code (closed)", "ext_opencode": "OpenCode",
          "ext_aider": "Aider", "ext_mini_swe_agent": "mini-swe-agent"}
-FAILS = ["missed_caller", "broken_import", "apply_failure", "no_edit", "test_failure_other", "check_failed", "context_overflow", "error"]
+FAILS = ["missed_caller", "broken_import", "apply_failure", "output_truncated", "no_edit", "test_failure_other", "check_failed", "context_overflow", "error"]
 STYLE = dict(color="#3B6EA8", accent="#D2691E", grid="#DDDDDD")
 plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10, "axes.spines.top": False, "axes.spines.right": False,
                      "axes.grid": True, "grid.color": STYLE["grid"], "axes.axisbelow": True, "figure.dpi": 150})
@@ -40,6 +40,32 @@ def wilson(k, n, z=1.96):
 
 MERGE_INTO_MAIN = {"hard": "main", "hard2": "main"}
 
+def last_stop_reason(r):
+    """stop_reason of the final model response in the run transcript (None if unknown)."""
+    tp = r.get("transcript_path")
+    if not tp or not (ROOT / tp).exists():
+        return None
+    try:
+        t = json.loads((ROOT / tp).read_text()).get("transcript", [])
+    except Exception:
+        return None
+    if not isinstance(t, list):
+        return None
+    for x in reversed(t):
+        if not isinstance(x, dict):
+            continue
+        sr = x.get("response", {}).get("stop_reason") if isinstance(x.get("response"), dict) else x.get("stop_reason")
+        if sr:
+            return sr
+    return None
+
+def retag(r):
+    """The harness tagger calls a run 'no_edit' when it produced no diff. If the final response hit the
+    16k output cap, the model was mid-answer, so tag it 'output_truncated' instead (derived from the transcript)."""
+    if not r.get("passed") and r.get("failure_category") in ("no_edit", "apply_failure") and last_stop_reason(r) == "max_tokens":
+        r["failure_category"] = "output_truncated"
+    return r
+
 def load():
     """All result rows. hard*.jsonl are merged into "main". Duplicate (group, task, strategy, seed)
     rows (two resumable runs can cover the same job) are dropped, keeping the first non-error row."""
@@ -49,7 +75,7 @@ def load():
         if f.name.startswith("archive_"):
             continue
         for line in f.open():
-            r = json.loads(line); r["_file"] = MERGE_INTO_MAIN.get(f.stem, f.stem)
+            r = retag(json.loads(line)); r["_file"] = MERGE_INTO_MAIN.get(f.stem, f.stem)
             key = (r["_file"], r.get("task"), r.get("strategy"), r.get("seed"))
             if key not in best or (best[key].get("error") and not r.get("error")):
                 best[key] = r
@@ -63,6 +89,7 @@ def summarize(rs):
     fc = Counter(r.get("failure_category") for r in rs if not r.get("passed"))
     return dict(n=n, passed=k, pass_rate=round(k / n, 4), ci_lo=round(lo, 4), ci_hi=round(hi, 4),
                 mean_missed_callers=round(sum(r.get("missed_callers") or 0 for r in rs) / n, 3),
+                median_missed_callers=sorted(r.get("missed_callers") or 0 for r in rs)[n // 2],
                 mean_missed_code_refs=round(sum(r.get("missed_code_refs") or 0 for r in rs) / n, 3),
                 mean_diff_lines=round(sum((r.get("diff", {}).get("added", 0) + r.get("diff", {}).get("removed", 0)) for r in rs) / n, 1),
                 mean_input=round(tok("input")), mean_cache_read=round(tok("cache_read")), mean_cache_write=round(tok("cache_write")),
@@ -189,14 +216,22 @@ def main():
                                    baseline_cost_per_solve=base["cost_per_solve_usd"], best_cost_per_solve=best["cost_per_solve_usd"],
                                    baseline_ci=[base["ci_lo"], base["ci_hi"]], best_ci=[best["ci_lo"], best["ci_hi"]],
                                    n_baseline=base["n"], n_best=best["n"])
-        fig, axes = plt.subplots(1, 2, figsize=(8, 3.8))
-        names = ["naive baseline\n(full repo, single-shot)", f"best harness\n({LABEL.get(best_key, best_key)})"]
+        fig, axes = plt.subplots(1, 2, figsize=(9, 4.2))
+        names = ["naive baseline\nfull repo,\nsingle-shot", "best harness\n" + LABEL.get(best_key, best_key).replace(" + ", "\n+ ")]
         axes[0].bar(names, [base["pass_rate"], best["pass_rate"]], color=[STYLE["accent"], STYLE["color"]],
                     yerr=[[base["pass_rate"] - base["ci_lo"], best["pass_rate"] - best["ci_lo"]], [base["ci_hi"] - base["pass_rate"], best["ci_hi"] - best["pass_rate"]]], capsize=4)
         axes[0].set_ylim(0, 1.05); axes[0].set_title("pass rate (95% CI)")
         axes[1].bar(names, [base["cost_per_solve_usd"], best["cost_per_solve_usd"]], color=[STYLE["accent"], STYLE["color"]])
         axes[1].set_title("cost per solved task (USD)")
-        fig.suptitle("Same model (Haiku 5.5), better harness"); fig.tight_layout(); fig.savefig(FIG / "headline.png"); plt.close(fig)
+        for i, v in enumerate([base["pass_rate"], best["pass_rate"]]):
+            axes[0].text(i, v / 2, f"{100 * v:.0f}%", ha="center", color="white", fontweight="bold")
+        for i, v in enumerate([base["cost_per_solve_usd"], best["cost_per_solve_usd"]]):
+            axes[1].text(i, v, f"${v:.4f}", ha="center", va="bottom")
+        for ax in axes:
+            ax.tick_params(axis="x", labelsize=9)
+        axes[1].set_ylim(0, 1.15 * max(base["cost_per_solve_usd"], best["cost_per_solve_usd"]))
+        fig.text(0.5, 0.005, f"n = {base['n']} vs {best['n']} runs; multi-file refactors on tinydb, marshmallow, itsdangerous", ha="center", fontsize=8, color="#555555")
+        fig.suptitle("Same model (Haiku 5.5), better harness"); fig.tight_layout(rect=(0, 0.04, 1, 1)); fig.savefig(FIG / "headline.png"); plt.close(fig)
     # arm E: real harnesses vs naive vs best (same tasks only)
     e_s = {st: s for (src, st), s in summ.items() if src == "arm_e"}
     if e_s and main_s:
