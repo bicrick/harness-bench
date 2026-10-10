@@ -1,4 +1,4 @@
-<!-- last session: 6:17 AM CT build sprint -->
+<!-- last session: 6:38 AM CT build sprint -->
 # Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
 Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
@@ -28,7 +28,7 @@ Routine pickup: start with the first unchecked item in the current clock phase.
   `python -m cshape run --strategies full,touched,skel_L0,skel_L1,skel_L2,skel_L3,skel_retrieval,agentic,agentic_tools,agentic_c50,agentic_c90,agentic_mask,agentic_skill,agentic_agentsmd --seeds 3 --workers 6 --out results/main.jsonl`
 - Note: the org rate limit is 500k input tokens/min on Haiku 5.5, and marshmallow full-repo prompts are about 135k. llm.call retries with backoff on 429.
 - [x] (done: hard + hard2 tiers, 6 tasks) If agentic configs hit the ceiling (~100%), add a hard tier of tasks (signature changes with many call sites) so the configs can be told apart.
-- [ ] **FINAL COMBINED** config (rule in EXPERIMENT_PLAN; `python -m cshape.combine` then `python -m cshape run --strategies full,combined --seeds 5 --workers 6 --out results/final.jsonl`): the best option from each arm stacked, 19 tasks × ≥5 seeds. Reserve ~$10 for it, and run it last.
+- [x] (done 6:56 AM, 250/250 rows, 1 errored row re-run) **FINAL COMBINED** config (rule in EXPERIMENT_PLAN; `python -m cshape.combine` then `python -m cshape run --strategies full,combined --seeds 5 --workers 6 --out results/final.jsonl`): the best option from each arm stacked, 19 tasks × ≥5 seeds. Reserve ~$10 for it, and run it last.
 - [x] Arm A: 19 × 8 × 3 seeds (in main run).
 - [x] Arm T: 19 × 2 × 3.
 - [x] Arms B and C: 19 × (3 + 2) × 3 (in main run).
@@ -40,12 +40,12 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [x] Add an arm E figure to report.py (real harnesses vs naive vs best).
 - Budget plan: main run about $8, arm E about $1–3, final combined config ≤$10 (reserved), with the rest as slack under the $50 cap.
 
-- [ ] **IN PROGRESS** Arm B_tight: the 24k budget rarely triggered compaction (0.1–0.3 compactions/run), so the variants are re-run at a 12k budget: `--strategies agentic_c50_tight,agentic_c90_tight,agentic_mask_tight --seeds 3 --out results/main.jsonl`. Do NOT start two resumable runs on the same file at once; the resume step rewrites the file.
+- [x] (done 6:20) Arm B_tight: the 24k budget rarely triggered compaction (0.1–0.3 compactions/run), so the variants are re-run at a 12k budget: `--strategies agentic_c50_tight,agentic_c90_tight,agentic_mask_tight --seeds 3 --out results/main.jsonl`. Do NOT start two resumable runs on the same file at once; the resume step rewrites the file.
 - Early read (n≈25/config): agentic configs are near the ceiling (92–100%); full single-shot is 88% at about $0.056/solve vs agentic+structured tools at 96% and about $0.001/solve. The hard tasks are needed to separate the configs.
 
-- [ ] **IN PROGRESS** Hard-tier tasks × all main strategies × 3 seeds → results/hard.jsonl (report merges it into main).
+- [x] (done) Hard-tier tasks × all main strategies × 3 seeds → results/hard.jsonl (report merges it into main).
 - [x] (2:50 AM) Hard tier batch 1 early read: agentic configs still ~100% on h01/h02, so 3 more hard tasks were added and verified (reference passes, unmodified repo fails): tinydb-h02 `Table.insert`→`insert_document` (80 call sites, 8 files), marshmallow-h03 `ValidationError`→`SchemaValidationError` (468 refs, 19 files incl. examples/), itsdangerous-h01 `Serializer.loads`→`verify_and_load` (ambiguity trap: payload-serializer `loads` must survive). 25 tasks total.
-- [ ] **IN PROGRESS** Hard tier batch 2: those 3 tasks × 17 strategies × 3 seeds → results/hard2.jsonl (separate file so no two resumable runs share one; resume with the same command):
+- [x] (done 6:35) Hard tier batch 2: those 3 tasks × 17 strategies × 3 seeds → results/hard2.jsonl (separate file so no two resumable runs share one; resume with the same command):
   `python -m cshape run --tasks tinydb-h02-rename-table-insert,marshmallow-h03-rename-validationerror,itsdangerous-h01-rename-serializer-loads --strategies full,touched,skel_L0,skel_L1,skel_L2,skel_L3,skel_retrieval,agentic,agentic_tools,agentic_c50,agentic_c90,agentic_mask,agentic_skill,agentic_agentsmd,agentic_c50_tight,agentic_c90_tight,agentic_mask_tight --seeds 3 --workers 3 --out results/hard2.jsonl`
 - [x] report.load() now merges hard.jsonl and hard2.jsonl into main and dedupes (task, strategy, seed) per group, preferring non-error rows. Needed because the B_tight run (main.jsonl) and the hard run (hard.jsonl) both cover tight strategies on the hard tasks.
 - Note for FINAL COMBINED: run it only after main, B_tight, hard and hard2 finish, so combine.py sees all 25 tasks. With 25 tasks × 5 seeds, `full` costs roughly $8–10 (marshmallow full-repo prompts plus 468-edit output on h03); drop to 4 seeds if spend at that point leaves less than $12 of headroom.
@@ -97,6 +97,13 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - Status 6:20: B_tight complete (main.jsonl 947 rows). hard2 76/102, 26 left (all seed 1: tinydb-h02 × 17, marshmallow-h03 agentic family × 9). chain_final waiting; it then does resume passes, combine and FINAL (full vs combined, 25 tasks × 5 seeds). Spend $19.50 of $50. New ETA (if the box stays awake): hard2 ~6:50, FINAL ~8:00–8:15.
 - **6:35 update:** hard2 complete (102/102 rows; session stayed open 6:17–6:35 and throughput was normal the whole time, which confirms the freeze diagnosis). chain_final did its resume passes, `combine` picked **agentic + structured tools + no compaction + skill**, and FINAL (full vs combined, 25 tasks × 5 seeds = 250 runs, 6 workers) started 06:30:48 → results/final.jsonl. Spend $21.85 at 6:34. Next sprint: keep the box awake while FINAL runs; when results/FINAL_DONE exists, run `make figures`, commit, and wake the parent for the "runs done" milestone with the headline numbers.
 - Article/method note: wall_s for rows in flight during a freeze is inflated (e.g. 1380–1495 s rows in hard2.log/btight.log); do not quote wall time per run as harness speed without filtering rows whose interval overlaps a freeze gap in ledger_calls.ndjson (gaps > 5 min with no calls from any pid).
+
+## Build sprint 6:38 AM CT: FINAL done, all runs complete
+- [x] Kept the box awake 6:38–7:00 while FINAL ran; it finished at 06:56 (results/FINAL_DONE). One `combined` row on marshmallow-h03 seed 3 errored (API error, no retries logged) and was filled by a resume pass (passed, $0.0019).
+- [x] Ran audit + report: audit OK (1,536 runs, ledger $24.92, logged $23.91, the $1.00 gap is the pre-call-log residual, 0 in-flight/orphaned). Headline now comes from the final run, not provisional.
+- **Headline (results/article_numbers.json, source=final):** naive full-repo single-shot 63.2% pass (79/125, 95% CI 54–71%) at $0.0510 per solve vs combined harness (agentic + structured tools + no compaction + skill) 100% (125/125, CI 97–100%) at $0.00162 per solve. Lift +36.8 pp, ~31x cheaper per solve. Full-baseline failures: 38 missed_caller, 5 output_truncated, 2 broken_import, 1 check_failed.
+- Spend $24.92 of $50; ~$25 headroom. Arm D (prompt placement) is optional; skip unless the article editor asks for it. No further runs are required for the article.
+- Next: Phase 3. Article editor (7:53) drafts docs/CASE_STUDY.md; build sprint sessions should support it (fill gaps it lists, excerpts, verify numbers).
 
 ## Phase 3: write-up (~8:00–10:00 AM)
 - [ ] Headline number, tables, charts, failure examples, following the outline in EXPERIMENT_PLAN.
