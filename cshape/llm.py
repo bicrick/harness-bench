@@ -35,7 +35,14 @@ def call(system, messages, tools=None, max_tokens=16000, run_budget=None):
     if tools:
         kw["tools"] = tools
     t = time.time()
-    r = _client.messages.create(**kw)
+    for attempt in range(12):
+        try:
+            r = _client.messages.create(**kw)
+            break
+        except (anthropic.RateLimitError, anthropic.APIConnectionError, anthropic.InternalServerError) as e:
+            if attempt == 11:
+                raise
+            time.sleep(min(60, 5 * (attempt + 1)))
     u = dict(input=r.usage.input_tokens or 0, output=r.usage.output_tokens or 0,
              cache_read=getattr(r.usage, "cache_read_input_tokens", 0) or 0,
              cache_write=getattr(r.usage, "cache_creation_input_tokens", 0) or 0)

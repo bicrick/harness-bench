@@ -111,6 +111,16 @@ def main():
     if a.tasks != "all":
         want = a.tasks.split(","); tasks = [t for t in tasks if t["id"] in want]
     jobs = [(t, s, k) for k in range(a.seeds) for t in tasks for s in strats]
+    # resume: skip jobs already logged without an error; drop errored rows so they are re-run
+    if Path(a.out).exists():
+        keep, done = [], set()
+        for line in open(a.out):
+            r = json.loads(line)
+            if r.get("error"):
+                continue
+            keep.append(line); done.add((r["task"], r["strategy"], r["seed"]))
+        Path(a.out).write_text("".join(keep))
+        jobs = [j for j in jobs if (j[0]["id"], j[1], j[2]) not in done]
     print(f"{len(jobs)} runs; spent so far ${llm.spent():.4f}; cap ${llm.HARD_CAP_USD}")
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     with ThreadPoolExecutor(a.workers) as ex:

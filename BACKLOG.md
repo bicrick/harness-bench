@@ -6,9 +6,9 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 ## TOP PRIORITY (alongside the harness)
 - [x] Every run logs to results/*.jsonl: config, task, seed, pass, missed callers, diff, tokens (input/cache/output), cost, wall time, tool calls, plus a full transcript in results/transcripts/. Cumulative spend goes to results/ledger.json.
 - [x] `make figures` rebuilds results/summary.csv and figures/*.png from the raw logs.
-- [ ] Automatic `failure_category` tag per run (missed_caller, broken_import, apply_failure, no_edit, context_overflow, test_failure_other, error).
-- [ ] Excerpt extractor saves to results/excerpts/.
-- [ ] `results/article_numbers.json` holds every number the article uses. Consistent figure style. Pareto chart. Per-arm figures.
+- [x] Automatic `failure_category` tag per run (missed_caller, broken_import, apply_failure, no_edit, context_overflow, test_failure_other, error).
+- [x] Excerpt extractor saves to results/excerpts/.
+- [x] `results/article_numbers.json` holds every number the article uses. Consistent figure style. Pareto chart. Per-arm figures.
 - [x] docs/ARTICLE_SPEC.md and docs/HYPOTHESES.md (pre-registered before the main runs).
 
 ## Phase 1: build (until ~5:00 AM CT)
@@ -16,16 +16,20 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [x] Harness: cost ledger plus hard cap, ast skeleton L0–L3, SEARCH/REPLACE applier, grader with missed callers, one-command CLI.
 - [x] 19 verified tasks across tinydb, itsdangerous and marshmallow.
 - [x] Arm A strategies: full, touched, skel_L0–L3, skel_retrieval, agentic.
-- [ ] Pilot: 4 tasks × 8 strategies × 1 seed. Fix the bugs it turns up (the race in the base checkout is fixed; the src-layout skeleton is fixed).
-- [ ] Arm T: structured tools (find_references, rename_symbol, replace-all edit) as the strategy `agentic_tools`.
-- [ ] Arm B: compaction variants on agentic (24k budget; summary at 50%/90%, observation masking).
-- [ ] Arm C: refactor skill file and AGENTS.md doc variants.
-- [ ] `cshape report`: aggregate tables (pass, CI, missed, cost/solve) and charts written to results/.
+- [x] Pilot: 4 tasks × 8 strategies × 1 seed. Fix the bugs it turns up (the race in the base checkout is fixed; the src-layout skeleton is fixed).
+- [x] Arm T: structured tools (find_references, rename_symbol, replace-all edit) as the strategy `agentic_tools`.
+- [x] Arm B: compaction variants on agentic (24k budget; summary at 50%/90%, observation masking).
+- [x] Arm C: refactor skill file and AGENTS.md doc variants.
+- [x] `cshape report`: aggregate tables (pass, CI, missed, cost/solve) and charts written to results/.
 
-## Phase 2: runs (~5:00–8:00 AM)
+## Phase 2: runs (started early, ~1:45 AM)
+- [ ] **IN PROGRESS** main run: all 14 strategies (arms A/T/B/C) × 19 tasks × 3 seeds → results/main.jsonl. To resume, rerun the same command; it skips finished runs and re-runs errored ones:
+  `python -m cshape run --strategies full,touched,skel_L0,skel_L1,skel_L2,skel_L3,skel_retrieval,agentic,agentic_tools,agentic_c50,agentic_c90,agentic_mask,agentic_skill,agentic_agentsmd --seeds 3 --workers 6 --out results/main.jsonl`
+- Note: the org rate limit is 500k input tokens/min on Haiku 5.5, and marshmallow full-repo prompts are about 135k. llm.call retries with backoff on 429.
+- [ ] If agentic configs hit the ceiling (~100%), add a hard tier of tasks (signature changes with many call sites) so the configs can be told apart.
 - [ ] **FINAL COMBINED** config: the best option from each arm stacked, 19 tasks × ≥5 seeds. Reserve ~$10 for it, and run it last.
 - [ ] Arm A: 19 × 8 × 3 seeds.
-- [ ] Arm T: 19 × 2 × 3.
+- [x] Arm T: 19 × 2 × 3.
 - [ ] Arms B and C: 19 × (3 + 2) × 3.
 - [ ] Arm D, only if budget and time allow.
 - [ ] Commit results JSONL after each arm.
