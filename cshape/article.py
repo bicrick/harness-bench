@@ -176,6 +176,15 @@ def main():
     V["arme.ext_aider.n_no429"] = str(pc["arm_e:ext_aider"]["n"] - pc["arm_e:ext_aider"]["runs_rate_limited"])
     V["tools.ratio"] = f"{pc['main:agentic']['cost_per_solve_usd'] / pc['main:agentic_tools']['cost_per_solve_usd']:.1f}"
     V["tools.callratio"] = f"{pc['main:agentic']['mean_tool_calls'] / pc['main:agentic_tools']['mean_tool_calls']:.1f}"
+    # ---- prompt-cache sensitivity of the naive baseline (main run: seeds far apart, cold cache; final run: seeds closer, partly warm)
+    mf, ff, fc = pc["main:full"], pc["final:full"], pc["final:combined"]
+    claim(mf["cache_hit_ratio"] < 0.1 < ff["cache_hit_ratio"], "naive baseline: main run cold cache, final run partly cached")
+    claim(mf["cost_per_solve_usd"] > ff["cost_per_solve_usd"], "naive cost per solve higher with a cold cache")
+    V["cachefull.main"] = pct(mf["cache_hit_ratio"]); V["cachefull.final"] = pct(ff["cache_hit_ratio"])
+    V["cachefull.cold_ratio"] = f"{mf['cost_per_solve_usd'] / fc['cost_per_solve_usd']:.0f}"
+    ex["naive_cache"] = {"main_cache_hit": mf["cache_hit_ratio"], "final_cache_hit": ff["cache_hit_ratio"],
+                         "main_cps": mf["cost_per_solve_usd"], "final_cps": ff["cost_per_solve_usd"],
+                         "cold_ratio_vs_combined": round(mf["cost_per_solve_usd"] / fc["cost_per_solve_usd"], 1)}
     V["arme.cc_vs_combined"] = f"{panel['ext_claude_code']['cost_per_solve_usd'] / panel['combined']['cost_per_solve_usd']:.1f}"
     claim(pc["main:agentic_tools"]["pass_rate"] >= pc["main:agentic"]["pass_rate"], "H4 direction")
     claim(pc["main:agentic_mask_tight"]["pass_rate"] > pc["main:agentic_c50_tight"]["pass_rate"], "H5 mask > c50 tight")

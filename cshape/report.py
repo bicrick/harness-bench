@@ -134,7 +134,11 @@ def bar(ax, ss, keys, title):
     ax.bar(x, [v["pass_rate"] for v in s], color=[STYLE["accent"] if k in ("full", "combined") else STYLE["color"] for k in keys],
            yerr=[[v["pass_rate"] - v["ci_lo"] for v in s], [v["ci_hi"] - v["pass_rate"] for v in s]], capsize=3)
     for i, v in enumerate(s):
-        ax.text(i, 0.02, f"${v['cost_per_solve_usd']:.4f}/solve" if v["cost_per_solve_usd"] else "-", ha="center", fontsize=7, rotation=90, color="white")
+        lab = f"${v['cost_per_solve_usd']:.4f}/solve" if v["cost_per_solve_usd"] else "-"
+        if v["pass_rate"] < 0.45:  # short bar: the label would collide with the error bar, so put it above the CI
+            ax.text(i, v["ci_hi"] + 0.03, lab, ha="center", va="bottom", fontsize=7, rotation=90, color="#333333")
+        else:
+            ax.text(i, 0.02, lab, ha="center", fontsize=7, rotation=90, color="white")
     ax.set_xticks(list(x)); ax.set_xticklabels([LABEL.get(k, k) for k in keys], rotation=30, ha="right")
     ax.set_ylim(0, 1.05); ax.set_ylabel("pass rate (95% Wilson CI)"); ax.set_title(title)
 
@@ -291,7 +295,8 @@ def main():
         def sub(src, st):
             rs = [r for r in rows if r["_file"] == src and r["strategy"] == st and r["task"] in e_tasks and r["seed"] in e_seeds]
             return summarize(rs) if rs else None
-        panel = {"full": sub(MAIN, "full")}
+        # naive baseline from the same run as the combined harness when available (same cache conditions as the headline)
+        panel = {"full": sub("final", "full") if final_s.get("full") else sub(MAIN, "full")}
         panel.update({k: e_s[k] for k in sorted(e_s)})
         bk = "combined" if final_s.get("combined") else best_key
         if bk:

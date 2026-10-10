@@ -1,4 +1,4 @@
-<!-- last session: 8:41 AM CT build sprint -->
+<!-- last session: 9:09 AM CT build sprint -->
 # Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
 Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
@@ -169,3 +169,12 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [x] New `claim()` guards in cshape/article.py for prose that was unguarded: combined harness is the only Pareto point; ladder L0 < L1 >= L3; 24k compaction variants within 5 pts; mask is cheapest at 12k; summaries lower cache hit rate; OpenCode / mini-swe-agent / Claude Code are 90-96%, under $0.01/solve and below combined; Aider < 50%. All pass.
 - [x] Article + publish bundle regenerated; no TODOs remain in docs/CASE_STUDY.md. Final combined config confirmed run (FINAL_DONE).
 - [ ] **[editor 9:53]** Final read-through of the whole piece for tone, then hand off to the 10:08 publish step. No open data gaps block the article; API limit means arm E stays partial (already disclosed).
+
+## Build sprint 9:09 AM CT: number check fixes
+- [x] API still blocked (probe 9:09: HTTP 400 usage limit until Nov 1). No runs; ledger $28.53.
+- [x] **Arm E table mixed sources.** The naive row came from the main run while the combined row came from the final run. `report.py` now takes the naive baseline from final.jsonl (same run, same seeds 0–1 as the combined row): 64%, $0.0653/solve (was $0.0890 from main).
+- [x] **Naive cost depends on prompt-cache luck (new limitation + guards).** Full-repo cache hit rate was 3% in the main run (seeds of a task ran far apart, so every 135k-token prompt was a cache write) vs 54% in the final run. That is why main says $0.0833/solve and the headline says $0.0510 for the same config. New Limitations bullet says so and that 32x is the conservative number (~51x against the cold-cache baseline); H1 line notes "almost no cache hits". Numbers are `{{cachefull.*}}` placeholders with `claim()` guards; also in article_extras.json `naive_cache`.
+- [x] Arm E chart: the Aider cost label overlapped its error bar; short bars (<45%) now put the label above the CI.
+- [x] `docs/PUBLISH_HANDOFF.md`: ready-to-use brief for the 10:08 cloud-agent PR on bicrick/personal-website.
+- [ ] **[editor 9:53]** read the new Limitations bullet for tone (sprint wrote it).
+

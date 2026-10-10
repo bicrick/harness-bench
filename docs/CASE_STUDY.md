@@ -187,7 +187,7 @@ I ran four real harnesses headless on Haiku 5.5, behind a logging proxy so all o
 | mini-swe-agent | 94% | 33 | $0.0031 |
 | Claude Code | 91% | 34 | $0.0048 |
 | Aider (single-message mode) | 18% | 33 | $0.16 |
-| Naive full repo (same seeds) | 64% | 50 | $0.0890 |
+| Naive full repo (same seeds) | 64% | 50 | $0.0653 |
 
 The three autonomous agents land in the low-to-mid 90s for a fraction of a cent per solve: well above the naive harness, a little below a harness built for this one job. Claude Code cost 2.8x more per solve than the combined harness on matching seeds. My guess is that's the price of being general (a bigger system prompt, tools for everything rather than just renames), but I didn't measure it. Aider's low score mostly reflects the human-in-the-loop design described above. Even on its 16 runs with no rate-limit errors, it passed just 19%.
 
@@ -214,7 +214,7 @@ Most of these tools find usages with grep or the shell. Symbol-aware tooling, wh
 
 ## Pre-registered hypotheses: how they held up
 
-- **H1 (the oracle beats the naive full-repo prompt):** not supported. Touched files passed 68% and the full repo passed 69%. Full repo was the most expensive config ($0.0833 per solve).
+- **H1 (the oracle beats the naive full-repo prompt):** not supported. Touched files passed 68% and the full repo passed 69%. Full repo was the most expensive config ($0.0833 per solve, with almost no cache hits).
 - **H2 (pass rate rises from L0 to L2):** partly. L0 to L1 was the big step (45% to 61%), and L2 and L3 added nothing.
 - **H3 (agent loops beat every single-shot layout):** supported, 93% and 92% vs at most 69%. The skeleton did not reduce tool calls (39.1 vs 39.2).
 - **H4 (structured tools beat raw tools at equal or lower cost):** supported on cost (5.2x) and on the hardest task. The overall pass-rate gap is within noise.
@@ -227,6 +227,7 @@ Most of these tools find usages with grep or the shell. Symbol-aware tooling, wh
 - **Small, author-made tasks.** 25 refactors on three small Python repos, written by me. Renames dominate. Retrieval and skeletons may matter more on large repos, and other kinds of edits may favor other configs.
 - **The combined config was chosen on the same tasks it was tested on.** The final run was a separate run, but it used the same 25 tasks, so 100% is optimistic. The selection rule was fixed in advance, which limits the damage but doesn't remove it.
 - **The grader is strict about comments.** If I grade only code (tests pass, check passes, no leftover reference outside comments and strings), the naive harness rises from 63% to 75% (15 of its failures were comment-only), and the combined harness stays at 100%. The lift shrinks to about 25 points but is still large.
+- **The naive baseline's cost depends on the prompt cache.** Its whole-repo prompt is the same for every seed of a task, so it's cheap when seeds run close together and expensive when they don't. In the main runs the cache hit rate was 3% and it cost $0.0833 per solve. In the final run it was 54% and $0.0510. The headline uses the final run, so the 32x cost gap is the conservative number. Against the main-run baseline it would be about 51x.
 - **One model.** Haiku 5.5 always uses extended thinking. A model without it, or a bigger one, could respond differently to the same harness changes.
 - **Arm E is thin.** Mostly one seed, a partial second seed, out-of-the-box settings, and some rate-limit noise (see above).
 - **Bookkeeping.** The ledger shows $28.53 spent, and the per-run logs (including retried and duplicate rows) account for $27.52. The remaining $1.01 is API spend from runs I killed and restarted during the night, which never wrote a row. 36 runs were logged twice by overlapping jobs ($1.80); the stats keep one copy of each. One cell (L1 skeleton, one marshmallow task, seed 0) is missing, so that config has n=74.
