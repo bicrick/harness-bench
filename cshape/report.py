@@ -1,7 +1,8 @@
-"""Rebuild results/summary.csv and figures/*.png from all raw results/*.jsonl logs.
-Usage: python -m cshape.report   (or: make figures)"""
-import csv, glob, json, math
-from collections import defaultdict
+"""Rebuild every derived artifact from raw logs in results/*.jsonl:
+  results/summary.csv, results/failures.csv, results/article_numbers.json, results/excerpts/*.md, figures/*.png
+Usage: make figures   (python -m cshape.report)"""
+import csv, json, math, random
+from collections import Counter, defaultdict
 from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
@@ -9,6 +10,23 @@ import matplotlib.pyplot as plt
 
 ROOT = Path(__file__).resolve().parent.parent
 RES, FIG = ROOT / "results", ROOT / "figures"
+MAIN = "main"  # primary run file; 'pilot' and 'final' summarized too
+ARMS = {
+    "layout": ["full", "touched", "skel_L0", "skel_L1", "skel_L2", "skel_L3", "skel_retrieval", "agentic"],
+    "ladder": ["skel_L0", "skel_L1", "skel_L2", "skel_L3", "full"],
+    "tools": ["agentic", "agentic_tools"],
+    "compaction": ["agentic", "agentic_c50", "agentic_c90", "agentic_mask"],
+    "skills": ["agentic", "agentic_skill", "agentic_agentsmd"],
+}
+LABEL = {"full": "full repo (naive)", "touched": "touched files (oracle)", "skel_L0": "skeleton L0 tree", "skel_L1": "L1 +imports",
+         "skel_L2": "L2 +signatures", "skel_L3": "L3 +docstrings", "skel_retrieval": "skeleton + tools", "agentic": "agentic grep/read",
+         "agentic_tools": "agentic + structured tools", "agentic_c50": "summarize @50%", "agentic_c90": "summarize @90%",
+         "agentic_mask": "drop old tool output", "agentic_skill": "refactor skill", "agentic_agentsmd": "AGENTS.md",
+         "combined": "best combined harness"}
+FAILS = ["missed_caller", "broken_import", "apply_failure", "no_edit", "test_failure_other", "check_failed", "context_overflow", "error"]
+STYLE = dict(color="#3B6EA8", accent="#D2691E", grid="#DDDDDD")
+plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10, "axes.spines.top": False, "axes.spines.right": False,
+                     "axes.grid": True, "grid.color": STYLE["grid"], "axes.axisbelow": True, "figure.dpi": 150})
 
 def wilson(k, n, z=1.96):
     if n == 0:
@@ -17,58 +35,157 @@ def wilson(k, n, z=1.96):
     c = (p + z * z / (2 * n)) / d; h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
     return (max(0, c - h), min(1, c + h))
 
-def load(pattern="*.jsonl"):
+def load():
     rows = []
-    for f in sorted(RES.glob(pattern)):
+    for f in sorted(RES.glob("*.jsonl")):
         if f.name.startswith("archive_"):
             continue
         for line in f.open():
             r = json.loads(line); r["_file"] = f.stem; rows.append(r)
     return rows
 
-def summarize(rows):
-    g = defaultdict(list)
-    for r in rows:
-        g[(r["_file"], r["strategy"])].append(r)
-    out = []
-    for (src, strat), rs in sorted(g.items()):
-        n = len(rs); k = sum(bool(r.get("passed")) for r in rs)
-        cost = sum(r.get("cost_usd", 0) for r in rs)
-        tok = lambda key: sum(r.get("tokens", {}).get(key, 0) for r in rs) / n
-        lo, hi = wilson(k, n)
-        out.append(dict(source=src, strategy=strat, n=n, passed=k, pass_rate=round(k / n, 3), ci_lo=round(lo, 3), ci_hi=round(hi, 3),
-                        mean_missed_callers=round(sum(r.get("missed_callers") or 0 for r in rs) / n, 2),
-                        mean_diff_lines=round(sum((r.get("diff", {}).get("added", 0) + r.get("diff", {}).get("removed", 0)) for r in rs) / n, 1),
-                        mean_input=round(tok("input")), mean_cache_read=round(tok("cache_read")), mean_cache_write=round(tok("cache_write")),
-                        mean_output=round(tok("output")), total_cost_usd=round(cost, 4),
-                        cost_per_solve_usd=round(cost / k, 4) if k else None,
-                        mean_wall_s=round(sum(r.get("wall_s", 0) for r in rs) / n, 1),
-                        mean_tool_calls=round(sum(r.get("notes", {}).get("tool_calls", 0) for r in rs) / n, 1),
-                        errors=sum(1 for r in rs if r.get("error"))))
-    return out
+def summarize(rs):
+    n = len(rs); k = sum(bool(r.get("passed")) for r in rs)
+    cost = sum(r.get("cost_usd", 0) for r in rs)
+    tok = lambda key: sum(r.get("tokens", {}).get(key, 0) for r in rs) / n
+    lo, hi = wilson(k, n)
+    fc = Counter(r.get("failure_category") for r in rs if not r.get("passed"))
+    return dict(n=n, passed=k, pass_rate=round(k / n, 4), ci_lo=round(lo, 4), ci_hi=round(hi, 4),
+                mean_missed_callers=round(sum(r.get("missed_callers") or 0 for r in rs) / n, 3),
+                mean_missed_code_refs=round(sum(r.get("missed_code_refs") or 0 for r in rs) / n, 3),
+                mean_diff_lines=round(sum((r.get("diff", {}).get("added", 0) + r.get("diff", {}).get("removed", 0)) for r in rs) / n, 1),
+                mean_input=round(tok("input")), mean_cache_read=round(tok("cache_read")), mean_cache_write=round(tok("cache_write")),
+                mean_output=round(tok("output")), total_cost_usd=round(cost, 4), mean_cost_usd=round(cost / n, 5),
+                cost_per_solve_usd=round(cost / k, 5) if k else None,
+                mean_wall_s=round(sum(r.get("wall_s", 0) for r in rs) / n, 1),
+                mean_tool_calls=round(sum(r.get("notes", {}).get("tool_calls", 0) for r in rs) / n, 1),
+                mean_compactions=round(sum(r.get("notes", {}).get("compactions", 0) for r in rs) / n, 2),
+                **{f"fail_{c}": fc.get(c, 0) for c in FAILS})
+
+def bar(ax, ss, keys, title):
+    x = range(len(keys)); s = [ss[k] for k in keys]
+    ax.bar(x, [v["pass_rate"] for v in s], color=[STYLE["accent"] if k in ("full", "combined") else STYLE["color"] for k in keys],
+           yerr=[[v["pass_rate"] - v["ci_lo"] for v in s], [v["ci_hi"] - v["pass_rate"] for v in s]], capsize=3)
+    for i, v in enumerate(s):
+        ax.text(i, 0.02, f"${v['cost_per_solve_usd']:.4f}/solve" if v["cost_per_solve_usd"] else "-", ha="center", fontsize=7, rotation=90, color="white")
+    ax.set_xticks(list(x)); ax.set_xticklabels([LABEL.get(k, k) for k in keys], rotation=30, ha="right")
+    ax.set_ylim(0, 1.05); ax.set_ylabel("pass rate (95% Wilson CI)"); ax.set_title(title)
+
+def excerpt(r, maxlen=1200):
+    t = json.loads((ROOT / r["transcript_path"]).read_text())["transcript"]
+    if isinstance(t, dict):
+        msgs = t["messages"]
+        last_text = ""
+        for m in reversed(msgs):
+            if m["role"] == "assistant":
+                for b in m["content"]:
+                    if b.get("type") == "text" and b.get("text", "").strip():
+                        last_text = b["text"]; break
+            if last_text:
+                break
+        calls = [f"{b['name']}({json.dumps(b.get('input'))[:100]})" for m in msgs if m["role"] == "assistant" for b in m["content"] if b.get("type") == "tool_use"]
+        body = "Tool calls:\n" + "\n".join(f"- {c}" for c in calls[:15]) + ("\n..." if len(calls) > 15 else "") + f"\n\nFinal message:\n{last_text[:600]}"
+    else:
+        resp = "".join(b.get("text", "") for b in t[-1]["response"] if b.get("type") == "text")
+        body = "Model output (truncated):\n" + resp[:maxlen]
+    return (f"### {r['task']} / {r['strategy']} / seed {r['seed']} -> {r.get('failure_category')}\n"
+            f"Leftover refs: {r.get('missed', [])[:3]}\nApply errors: {r.get('notes', {}).get('apply_errors', [])[:3]}\n\n```\n{body}\n```\n")
 
 def main():
-    rows = load(); FIG.mkdir(exist_ok=True)
-    summ = summarize(rows)
+    rows = load(); FIG.mkdir(exist_ok=True); (RES / "excerpts").mkdir(exist_ok=True)
+    groups = defaultdict(list)
+    for r in rows:
+        groups[(r["_file"], r["strategy"])].append(r)
+    summ = {k: summarize(v) for k, v in sorted(groups.items())}
     with open(RES / "summary.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(summ[0].keys())); w.writeheader(); w.writerows(summ)
-    for src in sorted({s["source"] for s in summ}):
-        ss = [s for s in summ if s["source"] == src]
-        x = range(len(ss))
-        fig, ax = plt.subplots(figsize=(9, 4))
-        ax.bar(x, [s["pass_rate"] for s in ss], yerr=[[s["pass_rate"] - s["ci_lo"] for s in ss], [s["ci_hi"] - s["pass_rate"] for s in ss]], capsize=3)
-        ax.set_xticks(list(x)); ax.set_xticklabels([s["strategy"] for s in ss], rotation=30, ha="right")
-        ax.set_ylim(0, 1); ax.set_ylabel("pass rate (95% Wilson CI)"); ax.set_title(f"{src}: pass rate by strategy (Haiku 5.5)")
-        fig.tight_layout(); fig.savefig(FIG / f"{src}_pass_rate.png", dpi=150); plt.close(fig)
-        fig, ax = plt.subplots(figsize=(6, 4.5))
-        for s in ss:
-            if s["cost_per_solve_usd"]:
-                ax.scatter(s["cost_per_solve_usd"], s["pass_rate"]); ax.annotate(s["strategy"], (s["cost_per_solve_usd"], s["pass_rate"]), fontsize=8)
-        ax.set_xscale("log"); ax.set_xlabel("cost per solved task (USD, log)"); ax.set_ylabel("pass rate")
-        ax.set_title(f"{src}: pass rate vs cost per solve"); fig.tight_layout(); fig.savefig(FIG / f"{src}_pass_vs_cost.png", dpi=150); plt.close(fig)
-    print(f"{len(rows)} runs -> results/summary.csv, figures/*.png")
-    for s in summ:
-        print(f"{s['source']:<12} {s['strategy']:<16} n={s['n']:<3} pass={s['pass_rate']:.2f} [{s['ci_lo']:.2f},{s['ci_hi']:.2f}] missed={s['mean_missed_callers']} $/solve={s['cost_per_solve_usd']}")
+        w = None
+        for (src, st), s in summ.items():
+            row = dict(source=src, strategy=st, label=LABEL.get(st, st), **s)
+            if not w:
+                w = csv.DictWriter(f, fieldnames=list(row)); w.writeheader()
+            w.writerow(row)
+    # per-task-kind and per-repo breakdown for main
+    with open(RES / "breakdown.csv", "w", newline="") as f:
+        w = csv.writer(f); w.writerow(["source", "strategy", "repo", "n", "pass_rate"])
+        g2 = defaultdict(list)
+        for r in rows:
+            g2[(r["_file"], r["strategy"], r["task"].split("-")[0])].append(r)
+        for (src, st, repo), rs in sorted(g2.items()):
+            w.writerow([src, st, repo, len(rs), round(sum(bool(x.get("passed")) for x in rs) / len(rs), 3)])
+    main_s = {st: s for (src, st), s in summ.items() if src == MAIN}
+    numbers = {"model": "claude-haiku-5-5", "total_runs": len(rows), "total_logged_cost_usd": round(sum(r.get("cost_usd", 0) for r in rows), 4),
+               "ledger_usd": json.loads((RES / "ledger.json").read_text())["total_usd"] if (RES / "ledger.json").exists() else None,
+               "per_config": {f"{src}:{st}": s for (src, st), s in summ.items()}}
+    if main_s:
+        for arm, keys in ARMS.items():
+            keys = [k for k in keys if k in main_s]
+            if keys:
+                fig, ax = plt.subplots(figsize=(max(5, 1.0 * len(keys) + 2), 4.2))
+                bar(ax, main_s, keys, f"{arm}: pass rate by config (Haiku 5.5, n={main_s[keys[0]]['n']} each)")
+                fig.tight_layout(); fig.savefig(FIG / f"arm_{arm}.png"); plt.close(fig)
+        # Pareto
+        allc = {**{k: v for k, v in main_s.items()}, **{f"final:{st}": s for (src, st), s in summ.items() if src == "final"}}
+        pts = [(k, v["cost_per_solve_usd"], v["pass_rate"]) for k, v in allc.items() if v["cost_per_solve_usd"]]
+        front, best = [], -1
+        for k, c, p in sorted(pts, key=lambda t: (t[1], -t[2])):
+            if p > best:
+                front.append((k, c, p)); best = p
+        fig, ax = plt.subplots(figsize=(7, 5))
+        for k, c, p in pts:
+            on = k in [f[0] for f in front]
+            ax.scatter(c, p, color=STYLE["accent"] if on else STYLE["color"], s=40 if on else 25, zorder=3)
+            ax.annotate(LABEL.get(k.split(":")[-1], k), (c, p), fontsize=7, xytext=(4, 2), textcoords="offset points")
+        ax.plot([f[1] for f in front], [f[2] for f in front], color=STYLE["accent"], lw=1, ls="--")
+        ax.set_xscale("log"); ax.set_xlabel("cost per solved task (USD, log scale)"); ax.set_ylabel("pass rate")
+        ax.set_title("Cost/accuracy frontier, all configs (Haiku 5.5)"); fig.tight_layout(); fig.savefig(FIG / "pareto.png"); plt.close(fig)
+        numbers["pareto_frontier"] = [f[0] for f in front]
+        # failure taxonomy
+        keys = list(main_s)
+        fig, ax = plt.subplots(figsize=(10, 4.5)); bottom = [0] * len(keys)
+        cmap = plt.get_cmap("tab10")
+        for i, c in enumerate(FAILS):
+            vals = [main_s[k][f"fail_{c}"] for k in keys]
+            if sum(vals):
+                ax.bar(range(len(keys)), vals, bottom=bottom, label=c, color=cmap(i)); bottom = [b + v for b, v in zip(bottom, vals)]
+        ax.set_xticks(range(len(keys))); ax.set_xticklabels([LABEL.get(k, k) for k in keys], rotation=35, ha="right")
+        ax.set_ylabel("failed runs"); ax.set_title("Failure taxonomy by config"); ax.legend(fontsize=8)
+        fig.tight_layout(); fig.savefig(FIG / "failures.png"); plt.close(fig)
+        with open(RES / "failures.csv", "w", newline="") as f:
+            w = csv.writer(f); w.writerow(["strategy"] + FAILS)
+            for k in keys:
+                w.writerow([k] + [main_s[k][f"fail_{c}"] for c in FAILS])
+        # excerpts: one per failure category (deterministic sample)
+        rnd = random.Random(0)
+        fails = [r for r in rows if r["_file"] == MAIN and not r.get("passed") and r.get("transcript_path")]
+        out = ["# Failure excerpts (auto-generated by cshape.report; deterministic sample)\n"]
+        for c in FAILS:
+            cand = [r for r in fails if r.get("failure_category") == c]
+            for r in rnd.sample(cand, min(2, len(cand))):
+                out.append(excerpt(r))
+        (RES / "excerpts" / "failures.md").write_text("\n".join(out))
+    # headline: naive baseline vs best combined
+    final_s = {st: s for (src, st), s in summ.items() if src == "final"}
+    base = final_s.get("full") or main_s.get("full")
+    best_key = "combined" if "combined" in final_s else (max(main_s, key=lambda k: (main_s[k]["pass_rate"], -(main_s[k]["cost_per_solve_usd"] or 9))) if main_s else None)
+    best = final_s.get("combined") or (main_s.get(best_key) if best_key else None)
+    if base and best:
+        numbers["headline"] = dict(baseline="full", best=best_key, baseline_pass=base["pass_rate"], best_pass=best["pass_rate"],
+                                   lift_pp=round(100 * (best["pass_rate"] - base["pass_rate"]), 1),
+                                   baseline_cost_per_solve=base["cost_per_solve_usd"], best_cost_per_solve=best["cost_per_solve_usd"],
+                                   baseline_ci=[base["ci_lo"], base["ci_hi"]], best_ci=[best["ci_lo"], best["ci_hi"]],
+                                   n_baseline=base["n"], n_best=best["n"])
+        fig, axes = plt.subplots(1, 2, figsize=(8, 3.8))
+        names = ["naive baseline\n(full repo, single-shot)", f"best harness\n({LABEL.get(best_key, best_key)})"]
+        axes[0].bar(names, [base["pass_rate"], best["pass_rate"]], color=[STYLE["accent"], STYLE["color"]],
+                    yerr=[[base["pass_rate"] - base["ci_lo"], best["pass_rate"] - best["ci_lo"]], [base["ci_hi"] - base["pass_rate"], best["ci_hi"] - best["pass_rate"]]], capsize=4)
+        axes[0].set_ylim(0, 1.05); axes[0].set_title("pass rate (95% CI)")
+        axes[1].bar(names, [base["cost_per_solve_usd"], best["cost_per_solve_usd"]], color=[STYLE["accent"], STYLE["color"]])
+        axes[1].set_title("cost per solved task (USD)")
+        fig.suptitle("Same model (Haiku 5.5), better harness"); fig.tight_layout(); fig.savefig(FIG / "headline.png"); plt.close(fig)
+    (RES / "article_numbers.json").write_text(json.dumps(numbers, indent=1))
+    print(f"{len(rows)} runs -> results/summary.csv, results/article_numbers.json, figures/*.png")
+    for (src, st), s in summ.items():
+        print(f"{src:<7} {st:<17} n={s['n']:<3} pass={s['pass_rate']:.2f} [{s['ci_lo']:.2f},{s['ci_hi']:.2f}] missed={s['mean_missed_callers']} $/solve={s['cost_per_solve_usd']} calls={s['mean_tool_calls']} compact={s['mean_compactions']}")
 
 if __name__ == "__main__":
     main()
