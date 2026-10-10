@@ -124,7 +124,8 @@ def _tool(root, task, name, a):
         return ("PASSED\n" if ok else "FAILED\n") + tail
     return "unknown tool"
 
-def _agentic(root, task, preamble, tools=None, compaction=None):
+def _agentic(root, task, preamble, tools=None, compaction=None, budget=None):
+    budget = budget or COMPACT_BUDGET
     tools = tools or TOOLS
     stats = _new_stats()
     msgs = [{"role": "user", "content": f"{preamble}### TASK\n{task['instruction']}\n\nUse the tools to explore, edit, and verify. Call finish when done."}]
@@ -154,7 +155,7 @@ def _agentic(root, task, preamble, tools=None, compaction=None):
             break
         if compaction:
             mode, frac = compaction
-            if _prompt_tokens(u) > frac * COMPACT_BUDGET:
+            if _prompt_tokens(u) > frac * budget:
                 stats["transcript_archive"] = stats.get("transcript_archive", []) + [json.loads(json.dumps(msgs, default=str))]
                 msgs = _compact(stats, msgs, mode)
     stats["notes"].update(steps=steps, tool_calls=tool_calls, hit_step_cap=steps >= MAX_STEPS)
@@ -279,6 +280,15 @@ def agentic_c90(root, task):
 def agentic_mask(root, task):
     return _agentic(root, task, "", compaction=("mask", 0.5))
 
+def agentic_c50_tight(root, task):
+    return _agentic(root, task, "", compaction=("summary", 0.5), budget=12_000)
+
+def agentic_c90_tight(root, task):
+    return _agentic(root, task, "", compaction=("summary", 0.9), budget=12_000)
+
+def agentic_mask_tight(root, task):
+    return _agentic(root, task, "", compaction=("mask", 0.5), budget=12_000)
+
 def agentic_skill(root, task):
     return _agentic(root, task, SKILL + "\n")
 
@@ -292,6 +302,7 @@ STRATEGIES = {
     "agentic_tools": agentic_tools,
     "agentic_c50": agentic_c50, "agentic_c90": agentic_c90, "agentic_mask": agentic_mask,
     "agentic_skill": agentic_skill, "agentic_agentsmd": agentic_agentsmd,
+    "agentic_c50_tight": agentic_c50_tight, "agentic_c90_tight": agentic_c90_tight, "agentic_mask_tight": agentic_mask_tight,
 }
 from .external import EXTERNAL
 STRATEGIES.update(EXTERNAL)
@@ -300,5 +311,6 @@ ARMS = {
     "T": ["agentic", "agentic_tools"],
     "B": ["agentic", "agentic_c50", "agentic_c90", "agentic_mask"],
     "C": ["agentic", "agentic_skill", "agentic_agentsmd"],
+    "B_tight": ["agentic", "agentic_c50_tight", "agentic_c90_tight", "agentic_mask_tight"],
     "E": list(EXTERNAL),
 }

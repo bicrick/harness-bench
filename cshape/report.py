@@ -17,12 +17,15 @@ ARMS = {
     "tools": ["agentic", "agentic_tools"],
     "compaction": ["agentic", "agentic_c50", "agentic_c90", "agentic_mask"],
     "skills": ["agentic", "agentic_skill", "agentic_agentsmd"],
+    "compaction_tight": ["agentic", "agentic_c50_tight", "agentic_c90_tight", "agentic_mask_tight"],
 }
 LABEL = {"full": "full repo (naive)", "touched": "touched files (oracle)", "skel_L0": "skeleton L0 tree", "skel_L1": "L1 +imports",
          "skel_L2": "L2 +signatures", "skel_L3": "L3 +docstrings", "skel_retrieval": "skeleton + tools", "agentic": "agentic grep/read",
          "agentic_tools": "agentic + structured tools", "agentic_c50": "summarize @50%", "agentic_c90": "summarize @90%",
-         "agentic_mask": "drop old tool output", "agentic_skill": "refactor skill", "agentic_agentsmd": "AGENTS.md",
-         "combined": "best combined harness"}
+         "agentic_mask": "drop old tool output", "agentic_c50_tight": "summarize @50% (12k)", "agentic_c90_tight": "summarize @90% (12k)",
+         "agentic_mask_tight": "drop old output (12k)", "agentic_skill": "refactor skill", "agentic_agentsmd": "AGENTS.md",
+         "combined": "best combined harness", "ext_claude_code": "Claude Code (closed)", "ext_opencode": "OpenCode",
+         "ext_aider": "Aider", "ext_mini_swe_agent": "mini-swe-agent"}
 FAILS = ["missed_caller", "broken_import", "apply_failure", "no_edit", "test_failure_other", "check_failed", "context_overflow", "error"]
 STYLE = dict(color="#3B6EA8", accent="#D2691E", grid="#DDDDDD")
 plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10, "axes.spines.top": False, "axes.spines.right": False,
@@ -186,6 +189,22 @@ def main():
         axes[1].bar(names, [base["cost_per_solve_usd"], best["cost_per_solve_usd"]], color=[STYLE["accent"], STYLE["color"]])
         axes[1].set_title("cost per solved task (USD)")
         fig.suptitle("Same model (Haiku 5.5), better harness"); fig.tight_layout(); fig.savefig(FIG / "headline.png"); plt.close(fig)
+    # arm E: real harnesses vs naive vs best (same tasks only)
+    e_s = {st: s for (src, st), s in summ.items() if src == "arm_e"}
+    if e_s and main_s:
+        e_tasks = {r["task"] for r in rows if r["_file"] == "arm_e"}
+        def sub(src, st):
+            rs = [r for r in rows if r["_file"] == src and r["strategy"] == st and r["task"] in e_tasks and r["seed"] == 0]
+            return summarize(rs) if rs else None
+        panel = {"full": sub(MAIN, "full")}
+        panel.update({k: e_s[k] for k in sorted(e_s)})
+        bk = "combined" if final_s.get("combined") else best_key
+        if bk:
+            panel[bk] = sub("final" if final_s.get("combined") else MAIN, bk)
+        panel = {k: v for k, v in panel.items() if v}
+        fig, ax = plt.subplots(figsize=(8, 4.2)); bar(ax, panel, list(panel), "Real harnesses vs ours on Haiku 5.5 (seed 0, same tasks)")
+        fig.tight_layout(); fig.savefig(FIG / "arm_E_real_harnesses.png"); plt.close(fig)
+        numbers["arm_e_panel"] = panel
     (RES / "article_numbers.json").write_text(json.dumps(numbers, indent=1))
     print(f"{len(rows)} runs -> results/summary.csv, results/article_numbers.json, figures/*.png")
     for (src, st), s in summ.items():
