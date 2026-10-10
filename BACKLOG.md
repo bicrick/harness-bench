@@ -1,4 +1,4 @@
-<!-- last session: 3:41 AM CT build sprint -->
+<!-- last session: 4:15 AM CT build sprint -->
 # Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
 Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
@@ -59,6 +59,12 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [x] **`output_truncated` is now tagged at the source.** run_one stores `notes.last_stop_reason` from the transcript, and categorize() tags zero-diff runs whose last stop_reason is max_tokens as `output_truncated`. report.retag() reads the note first and falls back to the transcript for older rows.
 - [x] `base_checkout` is file-locked, because parallel `cshape run` starts raced on `git checkout` (the hard run died at its first restart with exit 128).
 - Early hard2 read: agentic_tools solved marshmallow-h03 (468 references, 19 files) for $0.0018 in 10s, while every single-shot layout misses all 468 (output cap). Expected ETA: B_tight/hard/hard2 by ~5:00 AM, then FINAL (~$8–10) by ~6:15 AM.
+
+## Build sprint 4:15 AM CT: API hang fix #2 (streaming)
+- [x] **Stalls were still happening after the 300s timeout.** Per-row `api_s` ≈ `wall_s`, e.g. 6 calls taking 1837s and a single `full` call taking 1949s, so the time is spent inside API calls (300s timeout × SDK retries × outer retries), not in tools. At 4:15, hard2 had only 28/153 rows done and B_tight/hard2 hadn't written a row in 25 min.
+- [x] `llm.call` now **streams** (`messages.stream(...).get_final_message()`) with `read=90s` (max gap between chunks) and SDK retries off. The outer loop retries 429/5xx and any transport error mid-stream, and still raises other 4xx and BudgetExceeded. Smoke-tested with a tool call through the proxy. Results don't change (same request, same parsed Message); only wall time does.
+- [x] Killed B_tight, hard, hard2 and chain_final at ~4:24 and restarted them with the same commands (resumable). In-flight rows were lost, and their spend is in the ledger only.
+- **Analysis note:** `wall_s`/`api_s` on rows written before ~4:25 AM include proxy/API hangs. Don't quote wall-clock time per config from those rows; use tokens, steps and cost. If time-to-solve matters for the article, use rows written after the fix or the FINAL run.
 
 ## Phase 3: write-up (~8:00–10:00 AM)
 - [ ] Headline number, tables, charts, failure examples, following the outline in EXPERIMENT_PLAN.

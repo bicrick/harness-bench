@@ -29,7 +29,7 @@ def call(system, messages, tools=None, max_tokens=16000, run_budget=None):
     global _client
     if spent() >= HARD_CAP_USD:
         raise BudgetExceeded(f"hard cap ${HARD_CAP_USD} reached")
-    _client = _client or anthropic.Anthropic(max_retries=2, timeout=anthropic.Timeout(300.0, connect=15.0))  # 300s: a 16k-token answer takes ~2-3 min; the 600s SDK default let hung sockets stall runs 30+ min
+    _client = _client or anthropic.Anthropic(max_retries=0, timeout=anthropic.Timeout(300.0, connect=15.0, read=90.0))  # streaming: read=90s is the max gap between chunks, so a hung socket fails in 90s instead of 300s x retries (4:15 AM fix; non-streaming calls through the proxy were hanging 300-1900s)
     kw = dict(model=MODEL, max_tokens=max_tokens, system=system, messages=messages,
               extra_body={"cache_control": {"type": "ephemeral"}})
     if tools:
@@ -37,12 +37,19 @@ def call(system, messages, tools=None, max_tokens=16000, run_budget=None):
     t = time.time()
     for attempt in range(12):
         try:
-            r = _client.messages.create(**kw)
+            with _client.messages.stream(**kw) as st:
+                r = st.get_final_message()
             break
-        except (anthropic.RateLimitError, anthropic.APIConnectionError, anthropic.InternalServerError) as e:
+        except anthropic.APIStatusError as e:
+            if e.status_code != 429 and e.status_code < 500:
+                raise
             if attempt == 11:
                 raise
             time.sleep(min(60, 5 * (attempt + 1)))
+        except Exception as e:  # connection drops / read timeouts mid-stream (anthropic or raw httpx errors)
+            if isinstance(e, BudgetExceeded) or attempt == 11:
+                raise
+            time.sleep(min(30, 3 * (attempt + 1)))
     u = dict(input=r.usage.input_tokens or 0, output=r.usage.output_tokens or 0,
              cache_read=getattr(r.usage, "cache_read_input_tokens", 0) or 0,
              cache_write=getattr(r.usage, "cache_creation_input_tokens", 0) or 0)
