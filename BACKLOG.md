@@ -1,4 +1,4 @@
-<!-- last session: 7:42 AM CT build sprint -->
+<!-- last session: 8:00 AM CT article editor -->
 # Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
 Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
@@ -121,8 +121,19 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - If Patrick raises the limit: resume with `bash scripts/chain_arm_e.sh` (resumable; ~67 arm E runs, ~$0.5–1) and one main resume pass for the skel_L1 gap, then `make figures`. Otherwise no further runs; Phase 3 proceeds on existing data (the headline, from final.jsonl, is complete).
 
 ## Phase 3: write-up (~8:00–10:00 AM)
-- [ ] Headline number, tables, charts, failure examples, following the outline in EXPERIMENT_PLAN.
-- [ ] Draft at docs/CASE_STUDY.md.
+- [x] (8:00 editor) Headline number, tables, charts, failure examples, following ARTICLE_SPEC.
+- [x] (8:00 editor) First full draft at docs/CASE_STUDY.md. It is GENERATED: edit `docs/CASE_STUDY.template.md`, then run `python -m cshape.article` (also the last step of `make figures`). Every number is a `{{placeholder}}` filled from results/article_numbers.json or computed from results/*.jsonl (derived extras land in results/article_extras.json). Missing placeholders and prose claims whose direction flips (`claim()` guards) fail the build loudly.
+- [x] One-command reproduction: `make reproduce` (scripts/reproduce.sh, resumable). Note `make` is not installed on the box; run `python -m cshape.audit && python -m cshape.report && python -m cshape.article` directly here.
+
+### Article TODOs from the 8:00 editor pass (for build / data routines)
+- [ ] **[data] Pareto figure shows two points both labeled "full repo (naive)"** (main run 69% and final run 63%). Label the final-run one "full repo (naive, final run)" or drop it, so the frontier chart isn't confusing.
+- [ ] **[data] Task-size facts are typed, not generated.** The setup section says "80 call sites across 8 files" (tinydb-h02) and "468 references across 19 files" (marshmallow-h03), copied from the 2:50 AM backlog verification note. Emit these from tasks/ (count old-name matches / files in the unmodified repo) into results/article_extras.json and swap the template text for placeholders.
+- [ ] **[verify] JetBrains "The Complexity Trap" (arXiv 2508.21433)** is marked [verify] in PRIOR_WORK.md. There's an HTML-comment TODO in the compaction finding; cite it only after re-reading the abstract.
+- [ ] **[data] Headline figure x labels** repeat themselves ("best harness / best combined harness"). Simplify to "naive: full repo, single-shot" and "combined harness".
+- [ ] **[editor] Length.** Draft is ~3.5k words; next pass should tighten Findings 1 and 3 and the tools-mapping section, and check tone.
+- [ ] **[publish] Figures use relative paths (`../figures/*.png`).** Publishing to bicrick.com needs the PNGs copied alongside the post and paths rewritten; needs Patrick's site access.
+- Confirmed: FINAL COMBINED config was run (results/FINAL_DONE, 250 rows, combined_choice.json = agentic + structured tools + no compaction + skill).
+
 
 ## Phase 4: polish and publish (~10:00–11:30 AM)
 - [ ] Check every number against results/.
