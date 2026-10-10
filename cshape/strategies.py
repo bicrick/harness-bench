@@ -71,7 +71,7 @@ TOOLS = [
 MAX_STEPS = 25
 MAX_TOOL_CHARS = 8000
 
-def _tool(root, name, a):
+def _tool(root, task, name, a):
     if name == "list_files":
         return "\n".join(str(p.relative_to(root)) for p in context.py_files(root))
     if name == "grep":
@@ -91,7 +91,7 @@ def _tool(root, name, a):
         err = edits.apply(root, [(a["path"], a["search"], a["replace"])])
         return err[0] if err else "ok"
     if name == "run_tests":
-        ok, tail = grade.run_tests(root)
+        ok, tail = grade.run_tests(root, task)
         return ("PASSED\n" if ok else "FAILED\n") + tail
     return "unknown tool"
 
@@ -114,7 +114,7 @@ def _agentic(root, task, preamble):
             if b.name == "finish":
                 done = True; out = "ok"
             else:
-                out = _tool(root, b.name, b.input)
+                out = _tool(root, task, b.name, b.input)
             if len(out) > MAX_TOOL_CHARS:
                 out = out[:MAX_TOOL_CHARS] + f"\n...[truncated {len(out)-MAX_TOOL_CHARS} chars]"
             results.append({"type": "tool_result", "tool_use_id": b.id, "content": out})

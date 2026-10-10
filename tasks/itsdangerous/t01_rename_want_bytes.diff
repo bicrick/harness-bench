@@ -1,0 +1,251 @@
+diff --git a/src/itsdangerous/__init__.py b/src/itsdangerous/__init__.py
+index 2ce2ef8..2e1ea77 100644
+--- a/src/itsdangerous/__init__.py
++++ b/src/itsdangerous/__init__.py
+@@ -1,6 +1,6 @@
+ from .encoding import base64_decode as base64_decode
+ from .encoding import base64_encode as base64_encode
+-from .encoding import want_bytes as want_bytes
++from .encoding import ensure_bytes as ensure_bytes
+ from .exc import BadData as BadData
+ from .exc import BadHeader as BadHeader
+ from .exc import BadPayload as BadPayload
+diff --git a/src/itsdangerous/encoding.py b/src/itsdangerous/encoding.py
+index f5ca80f..388bd40 100644
+--- a/src/itsdangerous/encoding.py
++++ b/src/itsdangerous/encoding.py
+@@ -8,7 +8,7 @@ import typing as t
+ from .exc import BadData
+ 
+ 
+-def want_bytes(
++def ensure_bytes(
+     s: str | bytes, encoding: str = "utf-8", errors: str = "strict"
+ ) -> bytes:
+     if isinstance(s, str):
+@@ -21,7 +21,7 @@ def base64_encode(string: str | bytes) -> bytes:
+     """Base64 encode a string of bytes or text. The resulting bytes are
+     safe to use in URLs.
+     """
+-    string = want_bytes(string)
++    string = ensure_bytes(string)
+     return base64.urlsafe_b64encode(string).rstrip(b"=")
+ 
+ 
+@@ -29,7 +29,7 @@ def base64_decode(string: str | bytes) -> bytes:
+     """Base64 decode a URL-safe string of bytes or text. The result is
+     bytes.
+     """
+-    string = want_bytes(string, encoding="ascii", errors="ignore")
++    string = ensure_bytes(string, encoding="ascii", errors="ignore")
+     string += b"=" * (-len(string) % 4)
+ 
+     try:
+diff --git a/src/itsdangerous/serializer.py b/src/itsdangerous/serializer.py
+index 5ed949c..9b68fb5 100644
+--- a/src/itsdangerous/serializer.py
++++ b/src/itsdangerous/serializer.py
+@@ -4,7 +4,7 @@ import collections.abc as cabc
+ import json
+ import typing as t
+ 
+-from .encoding import want_bytes
++from .encoding import ensure_bytes
+ from .exc import BadPayload
+ from .exc import BadSignature
+ from .signer import _make_keys_list
+@@ -208,7 +208,7 @@ class Serializer(t.Generic[_TSerialized]):
+         self.secret_keys: list[bytes] = _make_keys_list(secret_key)
+ 
+         if salt is not None:
+-            salt = want_bytes(salt)
++            salt = ensure_bytes(salt)
+             # if salt is None then the signer's default is used
+ 
+         self.salt = salt
+@@ -273,7 +273,7 @@ class Serializer(t.Generic[_TSerialized]):
+         If the internal serializer returns text, the value will be
+         encoded as UTF-8.
+         """
+-        return want_bytes(self.serializer.dumps(obj, **self.serializer_kwargs))
++        return ensure_bytes(self.serializer.dumps(obj, **self.serializer_kwargs))
+ 
+     def make_signer(self, salt: str | bytes | None = None) -> Signer:
+         """Creates a new instance of the signer to be used. The default
+@@ -311,7 +311,7 @@ class Serializer(t.Generic[_TSerialized]):
+         serializer. The return value can be either a byte or unicode
+         string depending on the format of the internal serializer.
+         """
+-        payload = want_bytes(self.dump_payload(obj))
++        payload = ensure_bytes(self.dump_payload(obj))
+         rv = self.make_signer(salt).sign(payload)
+ 
+         if self.is_text_serializer:
+@@ -331,7 +331,7 @@ class Serializer(t.Generic[_TSerialized]):
+         """Reverse of :meth:`dumps`. Raises :exc:`.BadSignature` if the
+         signature validation fails.
+         """
+-        s = want_bytes(s)
++        s = ensure_bytes(s)
+         last_exception = None
+ 
+         for signer in self.iter_unsigners(salt):
+diff --git a/src/itsdangerous/signer.py b/src/itsdangerous/signer.py
+index e324dc0..cf4b10e 100644
+--- a/src/itsdangerous/signer.py
++++ b/src/itsdangerous/signer.py
+@@ -8,7 +8,7 @@ import typing as t
+ from .encoding import _base64_alphabet
+ from .encoding import base64_decode
+ from .encoding import base64_encode
+-from .encoding import want_bytes
++from .encoding import ensure_bytes
+ from .exc import BadSignature
+ 
+ 
+@@ -68,9 +68,9 @@ def _make_keys_list(
+     secret_key: str | bytes | cabc.Iterable[str] | cabc.Iterable[bytes],
+ ) -> list[bytes]:
+     if isinstance(secret_key, (str, bytes)):
+-        return [want_bytes(secret_key)]
++        return [ensure_bytes(secret_key)]
+ 
+-    return [want_bytes(s) for s in secret_key]  # pyright: ignore
++    return [ensure_bytes(s) for s in secret_key]  # pyright: ignore
+ 
+ 
+ class Signer:
+@@ -141,7 +141,7 @@ class Signer:
+         #: This allows a key rotation system to keep a list of allowed
+         #: keys and remove expired ones.
+         self.secret_keys: list[bytes] = _make_keys_list(secret_key)
+-        self.sep: bytes = want_bytes(sep)
++        self.sep: bytes = ensure_bytes(sep)
+ 
+         if self.sep in _base64_alphabet:
+             raise ValueError(
+@@ -151,7 +151,7 @@ class Signer:
+             )
+ 
+         if salt is not None:
+-            salt = want_bytes(salt)
++            salt = ensure_bytes(salt)
+         else:
+             salt = b"itsdangerous.Signer"
+ 
+@@ -195,7 +195,7 @@ class Signer:
+         if secret_key is None:
+             secret_key = self.secret_keys[-1]
+         else:
+-            secret_key = want_bytes(secret_key)
++            secret_key = ensure_bytes(secret_key)
+ 
+         if self.key_derivation == "concat":
+             return t.cast(bytes, self.digest_method(self.salt + secret_key).digest())
+@@ -214,14 +214,14 @@ class Signer:
+ 
+     def get_signature(self, value: str | bytes) -> bytes:
+         """Returns the signature for the given value."""
+-        value = want_bytes(value)
++        value = ensure_bytes(value)
+         key = self.derive_key()
+         sig = self.algorithm.get_signature(key, value)
+         return base64_encode(sig)
+ 
+     def sign(self, value: str | bytes) -> bytes:
+         """Signs the given string."""
+-        value = want_bytes(value)
++        value = ensure_bytes(value)
+         return value + self.sep + self.get_signature(value)
+ 
+     def verify_signature(self, value: str | bytes, sig: str | bytes) -> bool:
+@@ -231,7 +231,7 @@ class Signer:
+         except Exception:
+             return False
+ 
+-        value = want_bytes(value)
++        value = ensure_bytes(value)
+ 
+         for secret_key in reversed(self.secret_keys):
+             key = self.derive_key(secret_key)
+@@ -243,7 +243,7 @@ class Signer:
+ 
+     def unsign(self, signed_value: str | bytes) -> bytes:
+         """Unsigns the given string."""
+-        signed_value = want_bytes(signed_value)
++        signed_value = ensure_bytes(signed_value)
+ 
+         if self.sep not in signed_value:
+             raise BadSignature(f"No {self.sep!r} found in value")
+diff --git a/src/itsdangerous/timed.py b/src/itsdangerous/timed.py
+index 52deeea..cc99325 100644
+--- a/src/itsdangerous/timed.py
++++ b/src/itsdangerous/timed.py
+@@ -10,7 +10,7 @@ from .encoding import base64_decode
+ from .encoding import base64_encode
+ from .encoding import bytes_to_int
+ from .encoding import int_to_bytes
+-from .encoding import want_bytes
++from .encoding import ensure_bytes
+ from .exc import BadSignature
+ from .exc import BadTimeSignature
+ from .exc import SignatureExpired
+@@ -44,9 +44,9 @@ class TimestampSigner(Signer):
+ 
+     def sign(self, value: str | bytes) -> bytes:
+         """Signs the given string and also attaches time information."""
+-        value = want_bytes(value)
++        value = ensure_bytes(value)
+         timestamp = base64_encode(int_to_bytes(self.get_timestamp()))
+-        sep = want_bytes(self.sep)
++        sep = ensure_bytes(self.sep)
+         value = value + sep + timestamp
+         return value + sep + self.get_signature(value)
+ 
+@@ -92,7 +92,7 @@ class TimestampSigner(Signer):
+             sig_error = e
+             result = e.payload or b""
+ 
+-        sep = want_bytes(self.sep)
++        sep = ensure_bytes(self.sep)
+ 
+         # If there is no timestamp in the result there is something
+         # seriously wrong. In case there was a signature error, we raise
+@@ -196,7 +196,7 @@ class TimedSerializer(Serializer[_TSerialized]):
+         raised. All arguments are forwarded to the signer's
+         :meth:`~TimestampSigner.unsign` method.
+         """
+-        s = want_bytes(s)
++        s = ensure_bytes(s)
+         last_exception = None
+ 
+         for signer in self.iter_unsigners(salt):
+diff --git a/tests/test_itsdangerous/test_encoding.py b/tests/test_itsdangerous/test_encoding.py
+index 268367e..e3fe620 100644
+--- a/tests/test_itsdangerous/test_encoding.py
++++ b/tests/test_itsdangerous/test_encoding.py
+@@ -4,13 +4,13 @@ from itsdangerous.encoding import base64_decode
+ from itsdangerous.encoding import base64_encode
+ from itsdangerous.encoding import bytes_to_int
+ from itsdangerous.encoding import int_to_bytes
+-from itsdangerous.encoding import want_bytes
++from itsdangerous.encoding import ensure_bytes
+ from itsdangerous.exc import BadData
+ 
+ 
+ @pytest.mark.parametrize("value", ("mañana", b"tomorrow"))
+ def test_want_bytes(value):
+-    out = want_bytes(value)
++    out = ensure_bytes(value)
+     assert isinstance(out, bytes)
+ 
+ 
+@@ -19,7 +19,7 @@ def test_base64(value):
+     enc = base64_encode(value)
+     assert isinstance(enc, bytes)
+     dec = base64_decode(enc)
+-    assert dec == want_bytes(value)
++    assert dec == ensure_bytes(value)
+ 
+ 
+ def test_base64_bad():

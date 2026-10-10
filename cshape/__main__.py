@@ -25,7 +25,7 @@ def base_checkout(repo):
     return dst
 
 def fresh_copy(task):
-    src = base_checkout(task["repo"])
+    src = WORK / "base" / task["repo"]["name"]
     dst = WORK / "runs" / f"{task['id']}-{uuid.uuid4().hex[:8]}"
     shutil.copytree(src, dst)
     return dst
@@ -63,6 +63,10 @@ def main():
     if a.cmd == "spend":
         print(f"spent ${llm.spent():.4f} of hard cap ${llm.HARD_CAP_USD}"); return
     tasks = load_tasks()
+    for repo in {t["repo"]["name"]: t["repo"] for t in tasks}.values():
+        base_checkout(repo)
+        subprocess.run(["git", "reset", "-q", "--hard"], cwd=WORK / "base" / repo["name"], check=True)
+        subprocess.run(["git", "clean", "-qfd"], cwd=WORK / "base" / repo["name"], check=True)
     if a.cmd == "verify":
         for t in tasks:
             root = fresh_copy(t)

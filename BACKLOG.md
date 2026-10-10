@@ -1,33 +1,34 @@
-# Backlog (3-day plan; see docs/EXPERIMENT_PLAN.md)
+# Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
-## Blockers (need Patrick)
-- [ ] ANTHROPIC_API_KEY (and optionally OPENAI_API_KEY) in a box env file. Budget cap $150.
-- [ ] Decide whether the repo goes public at publish time (Mon).
+Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
+Routine pickup: start with the first unchecked item in the current clock phase.
 
-## Sat Oct 10: build
-- [ ] Pick 2–3 small Python repos with fast tests and pin their commits. Check the RefactorBench license and format; it is optional.
-- [ ] Write ~20 tasks (6 rename, 5 signature, 5 move, 4 extract), each with task.yaml and a reference diff, and verify each reference passes.
-- [ ] Grader: apply the patch, run the tests, and count missed callers (AST + grep on old_symbols).
-- [ ] Context builders: full (budget-truncated), touched files (oracle), skeleton L0–L3 (tree-sitter; reuse Aider-style tags).
-- [ ] Single-shot runner (unified diff output) and agentic loop (read_file, grep, list_dir, edit, run_tests; 30-step cap).
-- [ ] Compaction: none, summarize at 50%, summarize at 90%, observation masking (32k artificial budget).
-- [ ] Skill injection: refactor skill file and AGENTS.md conventions doc.
-- [ ] Placement variants: key file at start vs end.
-- [ ] Usage/cost logger (including cache read/write), wall time, and a $ hard cap. JSONL output.
-- [ ] Pilot: 3 tasks × P0 arms × 1 seed.
+## Phase 1: build (until ~5:00 AM CT)
+- [x] Verify pricing and the model id `claude-haiku-5-5`.
+- [x] Harness: cost ledger plus hard cap, ast skeleton L0–L3, SEARCH/REPLACE applier, grader with missed callers, one-command CLI.
+- [x] 19 verified tasks across tinydb, itsdangerous and marshmallow.
+- [x] Arm A strategies: full, touched, skel_L0–L3, skel_retrieval, agentic.
+- [ ] Pilot: 4 tasks × 8 strategies × 1 seed. Fix the bugs it turns up (the race in the base checkout is fixed; the src-layout skeleton is fixed).
+- [ ] Arm T: structured tools (find_references, rename_symbol, replace-all edit) as the strategy `agentic_tools`.
+- [ ] Arm B: compaction variants on agentic (24k budget; summary at 50%/90%, observation masking).
+- [ ] Arm C: refactor skill file and AGENTS.md doc variants.
+- [ ] `cshape report`: aggregate tables (pass, CI, missed, cost/solve) and charts written to results/.
 
-## Sun Oct 11: run
-- [ ] P0, arm A × 20 tasks × 3 seeds.
-- [ ] P1, arms B and C.
-- [ ] P2, arm D. Optional second model on P0.
-- [ ] Aggregate: tables, Wilson CIs, McNemar tests, charts (pass rate vs cost per solve, the skeleton ladder curve).
-- [ ] Failure taxonomy from transcripts.
+## Phase 2: runs (~5:00–8:00 AM)
+- [ ] Arm A: 19 × 8 × 3 seeds.
+- [ ] Arm T: 19 × 2 × 3.
+- [ ] Arms B and C: 19 × (3 + 2) × 3.
+- [ ] Arm D, only if budget and time allow.
+- [ ] Commit results JSONL after each arm.
 
-## Mon Oct 12: write and publish
-- [ ] Draft the case study following the outline in EXPERIMENT_PLAN §7, and check numbers against results.
-- [ ] Clean up the README so reproduction is one command.
-- [ ] Publish on bicrick.com and draft a LinkedIn post.
+## Phase 3: write-up (~8:00–10:00 AM)
+- [ ] Headline number, tables, charts, failure examples, following the outline in EXPERIMENT_PLAN.
+- [ ] Draft at docs/CASE_STUDY.md.
 
-## Research follow-ups (if time)
-- [ ] Resolve [verify] items in PRIOR_WORK.md (SWE-bench retrieval ablation, Agentless, Complexity Trap, RefactorBench).
-- [ ] Confirm Claude Code's auto-compact %, Cursor internals, and Cline thresholds.
+## Phase 4: polish and publish (~10:00–11:30 AM)
+- [ ] Check every number against results/.
+- [ ] Publish on bicrick.com (needs Patrick: site access or approval) and decide on repo visibility.
+
+## Later / notes
+- SWE-bench Verified: feasibility note in EXPERIMENT_PLAN (needs Docker; not run).
+- Resolve [verify] items in PRIOR_WORK.md.

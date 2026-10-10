@@ -17,6 +17,8 @@ def full_repo(root: Path, files=None):
 
 def _module_name(rel: Path):
     parts = list(rel.with_suffix("").parts)
+    if parts and parts[0] == "src":
+        parts = parts[1:]
     if parts[-1] == "__init__":
         parts = parts[:-1]
     return ".".join(parts)

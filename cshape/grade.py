@@ -3,10 +3,14 @@ import re, subprocess, sys
 from pathlib import Path
 from .context import py_files
 
-def run_tests(root: Path, timeout=300):
-    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-x", "-c", "/dev/null", "-p", "no:cacheprovider", "tests"],
-                       cwd=root, capture_output=True, text=True, timeout=timeout,
-                       env={"PYTHONPATH": str(root), "PATH": "/usr/bin:/bin"})
+def _env(root, task):
+    pp = task.get("repo", {}).get("pythonpath", ".")
+    return {"PYTHONPATH": str(root / pp), "PATH": "/usr/bin:/bin"}
+
+def run_tests(root: Path, task, timeout=300):
+    args = task.get("repo", {}).get("pytest_args", ["-c", "/dev/null"])
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-x", *args, "-p", "no:cacheprovider", "tests"],
+                       cwd=root, capture_output=True, text=True, timeout=timeout, env=_env(root, task))
     tail = (r.stdout + r.stderr).strip().splitlines()[-15:]
     return r.returncode == 0, "\n".join(tail)
 
@@ -19,11 +23,11 @@ def missed_refs(root: Path, patterns):
                     hits.append(f"{p.relative_to(root)}:{i}: {line.strip()[:100]}")
     return hits
 
-def check_cmd(root: Path, cmd):
+def check_cmd(root: Path, cmd, task):
     if not cmd:
         return True, ""
     r = subprocess.run([sys.executable, "-c", cmd], cwd=root, capture_output=True, text=True, timeout=60,
-                       env={"PYTHONPATH": str(root), "PATH": "/usr/bin:/bin"})
+                       env=_env(root, task))
     return r.returncode == 0, (r.stderr or "")[-500:]
 
 def diffstat(root: Path):
@@ -38,8 +42,8 @@ def diffstat(root: Path):
     return dict(files=files, added=add, removed=rem)
 
 def grade(root: Path, task):
-    tests_ok, test_tail = run_tests(root)
+    tests_ok, test_tail = run_tests(root, task)
     missed = missed_refs(root, task.get("absent", []))
-    chk_ok, chk_err = check_cmd(root, task.get("check"))
+    chk_ok, chk_err = check_cmd(root, task.get("check"), task)
     return dict(passed=bool(tests_ok and not missed and chk_ok), tests_ok=tests_ok, missed_callers=len(missed),
                 missed=missed[:20], check_ok=chk_ok, check_err=chk_err, test_tail=test_tail, diff=diffstat(root))

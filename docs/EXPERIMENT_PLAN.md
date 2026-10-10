@@ -1,76 +1,68 @@
-# Experiment plan (3 days: Sat Oct 10 – Mon Oct 12, 2026)
+# Same model, better harness: experiment plan
 
-**Core question:** with the model held fixed and cheap, how much does *harness-side context management* change outcomes on multi-file refactors?
+**Question:** with Claude Haiku 5.5 held fixed, how much can harness-side context management and tool design raise success on multi-file refactors, and at what cost per solved task?
 
-Deliverable: a full case study published on bicrick.com on Mon Oct 12, with the repo, raw results, and charts.
+**Constraints:** Haiku 5.5 only (`claude-haiku-5-5`). **$50 hard cap.** Done by **11:30 AM CT, Sat Oct 10, 2026**.
 
-## 1. Task set (~20 refactors)
-- **Primary:** hand-made tasks on 2–3 small/medium pure-Python repos with fast, solid test suites (candidates: `attrs`, `click`, `rich`, or similar; pick at commits where `pytest` passes in under 60s). Hand-made is the default because we control the grader and can count callers exactly.
-- **Optional:** if RefactorBench (https://arxiv.org/abs/2503.07832, **[verify]** license/format) can be loaded in under 2 hours, take 5–10 of its tasks as an external check.
-- Mix (about 20 total): rename a public function/class used in ≥5 places (6); change a signature by adding, removing or reordering a parameter, then update the call sites (5); move a function or module and update imports (5); extract a helper or class from duplicated code (4).
-- Each task is `tasks/<id>/task.yaml`: repo, base commit, instruction, `old_symbols` (for caller checks), and the tests that must pass. Also store a reference solution diff, used to compute the "touched files" oracle.
-
-## 2. Arms (priority order; P0 must run, P2 only if time allows)
-Single-shot means the model gets context and returns a unified diff. Agentic means a tool loop (read_file, grep, list_dir, edit, run_tests) capped at 30 steps.
-
-| Arm | Conditions | Mode | Priority |
-|---|---|---|---|
-| **A. Layout** | A1 full repo (truncated to budget) · A2 touched files only (oracle) · A3 skeleton ladder: L0 tree → L1 +imports/dep graph → L2 +signatures → L3 +docstrings (L4 = full bodies = A1) · A4 L2 skeleton + on-demand read/grep · A5 agentic grep/read only | A1–A3 single-shot; A4–A5 agentic | **P0** |
-| **B. Compaction** | B0 none · B1 LLM summary at 50% of budget (Gemini CLI default) · B2 summary at 90% (Codex CLI default) · B3 drop old tool outputs (observation masking) | agentic on A5, artificial 32k budget so compaction actually fires | **P1** |
-| **C. Procedural context** | C0 no skill · C1 refactor skill file ("find all callers, update each, run tests, re-grep old name") · C2 repo conventions doc (AGENTS.md style) | agentic on A5 | **P1** |
-| **D. Placement** | D1 key file at start of prompt · D2 key file at end, with the rest of the repo in between | single-shot on A1 | **P2** |
-
-Total ≈ 15 configs (B0 and C0 reuse A5) × 20 tasks × **3 seeds** ≈ 900 runs.
-
-## 3. Metrics (per run → `results/*.jsonl`)
-- **Pass:** the patch applies and the specified tests pass.
-- **Missed callers:** references to `old_symbols` still left after the patch (AST plus grep, ignoring strings and comments), and new call sites that break the tests.
-- **Diff size:** lines added/removed, and files touched compared with the reference.
-- **Tokens:** input, cache-write, cache-read and output tokens taken from API usage fields.
-- **Cost:** computed from tokens at list price with caching applied. The headline metric is **cost per solved task** = total cost / passes.
-- **Time:** wall time, plus the number of tool calls and steps for agentic runs.
-- **Statistics:** pass rate with Wilson 95% CIs and paired comparisons per task (McNemar). Every claim is reported with n.
-
-## 4. Model
-- The cheapest *capable* current Anthropic Haiku-class model with prompt caching, used for all arms at temperature 0 (seeds vary only where sampling is non-deterministic; otherwise repeat runs measure API nondeterminism).
-- An OpenAI mini-class model is an optional second model, run only if budget and time allow and only on the P0 arms.
-- **Needs from Patrick:** an `ANTHROPIC_API_KEY` (and an `OPENAI_API_KEY` if we run the second model), stored in a box env file, never committed.
-- Prices are an **assumption** to confirm on the pricing page before running: about $1/M input, $0.10/M cache read, $1.25/M cache write and $5/M output.
-
-## 5. Budget estimate
-| Bucket | Runs | Tokens/run (assumed) | ≈ $/run | ≈ Total |
+## Model and prices (verified 2026-10-10, https://docs.anthropic.com/en/docs/about-claude/pricing)
+| Prompt size | Input | 5m cache write | Cache read | Output |
 |---|---|---|---|---|
-| Single-shot (A1–A3, D) | ~480 | 30k in / 3k out (A1 up to 100k in) | $0.05–0.12 | ~$30 |
-| Agentic (A4, A5, B, C) | ~420 | 300k in (~80% cached) / 10k out | ~$0.13 | ~$55 |
-| Pilot + reruns + summarizer calls | — | — | — | ~$15 |
-| **Total** | | | | **~$100** |
+| ≤100k tokens | $0.10/M | $0.125/M | $0.01/M | $0.50/M |
+| >100k tokens | $0.50/M | $0.625/M | $0.05/M | $2.50/M |
 
-Set a **hard cap of $150** in the harness so it refuses to start new runs past the cap. Adding a second model roughly doubles the P0 cost (+$40).
+Prompt length counts cache reads and writes. Haiku 5.5 always uses extended thinking, and thinking tokens are billed as output (https://docs.anthropic.com/en/docs/claude-code/costs). All arms use automatic prompt caching.
 
-## 6. Schedule
-**Sat Oct 10: build**
-- Choose the repos and pin their commits.
-- Write the 20 tasks and reference diffs, and check that every reference solution passes the tests.
-- Build the harness: the context builders (tree-sitter skeleton L0–L3, full, touched), the single-shot diff applier, the agentic loop with tools, the compaction strategies, the skill injection, the grader and missed-caller checker, and the cost logger.
-- Pilot: 3 tasks × the P0 arms × 1 seed. Fix bugs.
+## Tasks (19, all verified)
+Hand-made refactors on 3 pinned pure-Python repos, each with a fast test suite (under 2s):
+- tinydb, 7 tasks
+- itsdangerous, 5 tasks
+- marshmallow, 7 tasks; its full repo is about 135k tokens, which goes over the 100k price tier
 
-**Sun Oct 11: run**
-- Morning: P0, arm A, 3 seeds.
-- Afternoon: P1 arms B and C.
-- Evening: P2 arm D, plus the optional second model.
-- Then aggregate the results into tables and charts, and read failed transcripts to build a failure taxonomy (missed caller, bad diff, wrong file, context overflow, compaction lost the goal).
+The mix is class/function/method renames, a signature change, function moves to a new module, and a module rename. Every task has a reference diff. `python -m cshape verify` checks that each reference passes the grader and that the unmodified repo fails it.
 
-**Mon Oct 12: write**
-- Draft the case study and check every number against the results files.
-- Make the repo public if Patrick agrees, then publish on bicrick.com and draft a LinkedIn post.
+**Grader** (all three must hold):
+1. The repo's tests pass.
+2. No leftover references match the task's `absent` regexes. Each leftover counts as a **missed caller**.
+3. A task-specific Python check passes, e.g. the new name exists and the old one is gone.
 
-## 7. Case-study outline (bicrick.com)
-1. **Hook:** "We held the model fixed and changed only the harness." Headline chart: pass rate vs cost per solved task for each strategy.
-2. **Why context shaping matters:** context rot, lost in the middle, LongCodeBench (citing `docs/research/PRIOR_WORK.md`).
-3. **How today's harnesses do it:** the comparison table from `SUMMARY.md` (Claude Code, Cursor, Aider, Codex CLI, Gemini CLI, Cline, OpenHands, SWE-agent).
-4. **Setup:** the tasks, the model, the arms and metrics, and the threats to validity.
-5. **Results:** the A ladder, the B compaction results, the C skills results, the D placement results, each with CIs.
-6. **Failure analysis:** example transcripts, with missed callers as the signature refactor failure.
-7. **What I'd build into a harness:** concrete recommendations.
-8. **Limits and next steps**, including RL-environment framing: tasks plus graders as a reusable environment.
-9. **Repo link and how to reproduce:** one command.
+## Arms, in priority order
+1. **Naive baseline vs context layout (arm A)**, run first.
+   - Single-shot, SEARCH/REPLACE output: `full` (whole repo, the naive baseline), `touched` (oracle files).
+   - Skeleton ladder, two-step (the model picks files from the skeleton, then edits): `skel_L0` tree → `skel_L1` +imports/imported-by → `skel_L2` +signatures → `skel_L3` +docstrings.
+   - Agentic loop with list/grep/read/edit/run_tests, 25 steps max: `agentic` (raw tools), `skel_retrieval` (L2 skeleton plus tools).
+2. **Tool design (arm T):** raw grep/read/edit vs structured tools (`find_references` with AST/word-boundary matching split into definitions, imports, calls and strings; `rename_symbol` with a preview; `edit` that does replace-all with match counts). The context is the same in both.
+3. **Compaction (arm B)** and **procedural context (arm C)**.
+   - B: no compaction vs summarize at 50% vs summarize at 90% of an artificial 24k budget vs drop old tool outputs.
+   - C: no skill vs a refactor skill file vs an AGENTS.md-style conventions doc.
+4. **Placement (arm D), only if budget remains:** key file at the start vs the end of the full-repo prompt.
+
+## Metrics
+- Pass rate, with Wilson 95% CI.
+- Missed callers.
+- Diff size (files, lines added and removed).
+- Tokens: input, cache write, cache read, output.
+- Cost in USD from list prices, and **cost per solved task** = total cost / passes.
+- Wall time, steps and tool calls.
+- For skeleton arms, file-selection recall against the oracle.
+
+## Budget
+The pilot showed about **$0.002–0.007 per run** for the ≤100k-token arms. Full-repo marshmallow runs cost more, about $0.07, because they go over 100k tokens. Estimate:
+- Arm A, 19 tasks × 8 strategies × 3 seeds = 456 runs, about $5.
+- Arms T, B and C, each about 19 × 3–4 configurations × 3 seeds, about $5–10 total.
+
+The whole study should land **under $20**, well inside the $50 cap. The harness refuses new API calls once the ledger reaches $50.
+
+## SWE-bench Verified: feasibility note only (not run)
+- Needs Docker and per-instance environment images from the official `swebench` harness. **Docker is not installed on the box** (8 CPU, 15 GB RAM, about 94 GB free disk). Images run to several GB each, so a 500-task run is heavy on this machine; a 50-task subset is realistic.
+- Cost per task on Haiku 5.5 is a rough estimate from our agentic runs: 0.1–1M prompt tokens, mostly cached, comes to about $0.01–0.10 per task. That is about $5–50 for the full 500, or $1–5 for a 50-task subset.
+- Verdict: feasible later as a validation step. It is out of scope for today's deadline.
+
+## Write-up outline (bicrick.com)
+1. **Headline number:** best harness vs naive baseline, as pass-rate lift and change in cost per solve, both on Haiku 5.5.
+2. **Why the harness matters:** context rot, lost in the middle, and LongCodeBench, citing `PRIOR_WORK.md`.
+3. **How today's tools shape context:** the table from `SUMMARY.md`.
+4. **Setup:** tasks, grader, arms, threats to validity.
+5. **Results:** arm A ladder chart, tool design, compaction and skills.
+6. **Failure analysis:** missed callers, apply failures, wrong file selection.
+7. **What I'd put in a harness.**
+8. **Limits, the SWE-bench next step, reproduction.**

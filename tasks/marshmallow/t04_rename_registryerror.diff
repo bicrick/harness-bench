@@ -1,0 +1,119 @@
+diff --git a/src/marshmallow/class_registry.py b/src/marshmallow/class_registry.py
+index d2bedf7..3307f20 100644
+--- a/src/marshmallow/class_registry.py
++++ b/src/marshmallow/class_registry.py
+@@ -13,7 +13,7 @@ from __future__ import annotations
+ 
+ import typing
+ 
+-from marshmallow.exceptions import RegistryError
++from marshmallow.exceptions import ClassRegistryError
+ 
+ if typing.TYPE_CHECKING:
+     from marshmallow import Schema
+@@ -82,20 +82,20 @@ def get_class(
+ def get_class(classname: str, *, all: bool = False) -> list[SchemaType] | SchemaType:  # noqa: A002
+     """Retrieve a class from the registry.
+ 
+-    :raises: `marshmallow.exceptions.RegistryError` if the class cannot be found
++    :raises: `marshmallow.exceptions.ClassRegistryError` if the class cannot be found
+         or if there are multiple entries for the given class name.
+     """
+     try:
+         classes = _registry[classname]
+     except KeyError as error:
+-        raise RegistryError(
++        raise ClassRegistryError(
+             f"Class with name {classname!r} was not found. You may need "
+             "to import the class."
+         ) from error
+     if len(classes) > 1:
+         if all:
+             return _registry[classname]
+-        raise RegistryError(
++        raise ClassRegistryError(
+             f"Multiple classes with name {classname!r} "
+             "were found. Please use the full, "
+             "module-qualified path."
+diff --git a/src/marshmallow/exceptions.py b/src/marshmallow/exceptions.py
+index 67bdf73..be8a62f 100644
+--- a/src/marshmallow/exceptions.py
++++ b/src/marshmallow/exceptions.py
+@@ -56,7 +56,7 @@ class ValidationError(MarshmallowError):
+         return self.messages
+ 
+ 
+-class RegistryError(NameError):
++class ClassRegistryError(NameError):
+     """Raised when an invalid operation is performed on the serializer
+     class registry.
+     """
+diff --git a/src/marshmallow/fields.py b/src/marshmallow/fields.py
+index 4149a25..4aaea66 100644
+--- a/src/marshmallow/fields.py
++++ b/src/marshmallow/fields.py
+@@ -621,7 +621,7 @@ class Nested(Field):
+         ]
+ 
+     def _serialize(self, nested_obj, attr, obj, **kwargs):
+-        # Load up the schema first. This allows a RegistryError to be raised
++        # Load up the schema first. This allows a ClassRegistryError to be raised
+         # if an invalid schema name was passed
+         schema = self.schema
+         if nested_obj is None:
+diff --git a/tests/test_registry.py b/tests/test_registry.py
+index 02307b0..f005216 100644
+--- a/tests/test_registry.py
++++ b/tests/test_registry.py
+@@ -1,7 +1,7 @@
+ import pytest
+ 
+ from marshmallow import Schema, class_registry, fields
+-from marshmallow.exceptions import RegistryError
++from marshmallow.exceptions import ClassRegistryError
+ 
+ 
+ def test_serializer_has_class_registry():
+@@ -179,7 +179,7 @@ def test_invalid_class_name_in_nested_field_raises_error(user):
+ 
+     sch = MySchema()
+     msg = "Class with name {!r} was not found".format("notfound")
+-    with pytest.raises(RegistryError, match=msg):
++    with pytest.raises(ClassRegistryError, match=msg):
+         sch.dump({"nf": None})
+ 
+ 
+@@ -198,7 +198,7 @@ def test_multiple_classes_with_same_name_raises_error():
+     # two defined classes with the same name
+     sch = MySchema()
+     msg = "Multiple classes with name {!r} were found.".format("FooSerializer")
+-    with pytest.raises(RegistryError, match=msg):
++    with pytest.raises(ClassRegistryError, match=msg):
+         sch.dump({"foo": {"_id": 1}})
+ 
+ 
+diff --git a/tests/test_schema.py b/tests/test_schema.py
+index ff28117..36f43d6 100644
+--- a/tests/test_schema.py
++++ b/tests/test_schema.py
+@@ -19,7 +19,7 @@ from marshmallow import (
+     validates_schema,
+ )
+ from marshmallow.exceptions import (
+-    RegistryError,
++    ClassRegistryError,
+     StringNotCollectionError,
+     ValidationError,
+ )
+@@ -2513,9 +2513,9 @@ class TestFromDict:
+         Schema.from_dict({"foo": fields.Str()})
+         Schema.from_dict({"bar": fields.Str()}, name="MyGeneratedSchema")
+         assert len(class_registry._registry) == n_registry_entries
+-        with pytest.raises(RegistryError):
++        with pytest.raises(ClassRegistryError):
+             class_registry.get_class("GeneratedSchema")
+-        with pytest.raises(RegistryError):
++        with pytest.raises(ClassRegistryError):
+             class_registry.get_class("MyGeneratedSchema")
+ 
+     def test_meta_options_are_applied(self):
