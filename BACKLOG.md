@@ -1,4 +1,4 @@
-<!-- last session: 8:00 AM CT article editor -->
+<!-- last session: 8:11 AM CT build sprint -->
 # Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
 Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
@@ -126,10 +126,11 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [x] One-command reproduction: `make reproduce` (scripts/reproduce.sh, resumable). Note `make` is not installed on the box; run `python -m cshape.audit && python -m cshape.report && python -m cshape.article` directly here.
 
 ### Article TODOs from the 8:00 editor pass (for build / data routines)
-- [ ] **[data] Pareto figure shows two points both labeled "full repo (naive)"** (main run 69% and final run 63%). Label the final-run one "full repo (naive, final run)" or drop it, so the frontier chart isn't confusing.
-- [ ] **[data] Task-size facts are typed, not generated.** The setup section says "80 call sites across 8 files" (tinydb-h02) and "468 references across 19 files" (marshmallow-h03), copied from the 2:50 AM backlog verification note. Emit these from tasks/ (count old-name matches / files in the unmodified repo) into results/article_extras.json and swap the template text for placeholders.
-- [ ] **[verify] JetBrains "The Complexity Trap" (arXiv 2508.21433)** is marked [verify] in PRIOR_WORK.md. There's an HTML-comment TODO in the compaction finding; cite it only after re-reading the abstract.
-- [ ] **[data] Headline figure x labels** repeat themselves ("best harness / best combined harness"). Simplify to "naive: full repo, single-shot" and "combined harness".
+- [x] (8:11 sprint: final-run points get " (final run)"; combined label is now "combined harness") **[data] Pareto figure shows two points both labeled "full repo (naive)"** (main run 69% and final run 63%). Label the final-run one "full repo (naive, final run)" or drop it, so the frontier chart isn't confusing.
+- [x] (8:11 sprint: `fanout()` in cshape/article.py measures them from each task's reference diff and `absent` patterns, published as `fanout_h02`/`fanout_h03` in article_extras.json; template uses `{{fan.*}}`. h02 = 80 call sites / 8 files; h03 = 468 referencing lines (472 matches) / 19 files, so the prose now says "referenced on 468 lines") **[data] Task-size facts are typed, not generated.** The setup section says "80 call sites across 8 files" (tinydb-h02) and "468 references across 19 files" (marshmallow-h03), copied from the 2:50 AM backlog verification note. Emit these from tasks/ (count old-name matches / files in the unmodified repo) into results/article_extras.json and swap the template text for placeholders.
+- [x] (8:11 sprint: re-read abstract + Table 1 on arXiv; cited in the compaction finding as matching LLM-Summary solve rate and cheaper in 4 of 5 configs (Qwen3-32B is the exception); PRIOR_WORK row updated, [verify] removed) **[verify] JetBrains "The Complexity Trap" (arXiv 2508.21433)** is marked [verify] in PRIOR_WORK.md. There's an HTML-comment TODO in the compaction finding; cite it only after re-reading the abstract.
+- [x] (8:11 sprint: now "naive: full repo, single-shot" vs "combined harness") **[data] Headline figure x labels** repeat themselves ("best harness / best combined harness"). Simplify to "naive: full repo, single-shot" and "combined harness".
+- [ ] **[editor] Wording check (from 8:11 sprint):** Finding on h03 says grep-agent runs "hit the 25-step cap, averaging 451 tool calls". Both numbers are real (multiple tool calls per step), but readers will read 451 > 25 as a contradiction; say "25 model turns, ~451 tool calls (many per turn)" or similar.
 - [ ] **[editor] Length.** Draft is ~3.5k words; next pass should tighten Findings 1 and 3 and the tools-mapping section, and check tone.
 - [ ] **[publish] Figures use relative paths (`../figures/*.png`).** Publishing to bicrick.com needs the PNGs copied alongside the post and paths rewritten; needs Patrick's site access.
 - Confirmed: FINAL COMBINED config was run (results/FINAL_DONE, 250 rows, combined_choice.json = agentic + structured tools + no compaction + skill).

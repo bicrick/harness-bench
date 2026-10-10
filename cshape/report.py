@@ -24,7 +24,7 @@ LABEL = {"full": "full repo (naive)", "touched": "touched files (oracle)", "skel
          "agentic_tools": "agentic + structured tools", "agentic_c50": "summarize @50%", "agentic_c90": "summarize @90%",
          "agentic_mask": "drop old tool output", "agentic_c50_tight": "summarize @50% (12k)", "agentic_c90_tight": "summarize @90% (12k)",
          "agentic_mask_tight": "drop old output (12k)", "agentic_skill": "refactor skill", "agentic_agentsmd": "AGENTS.md",
-         "combined": "best combined harness", "ext_claude_code": "Claude Code (closed)", "ext_opencode": "OpenCode",
+         "combined": "combined harness", "ext_claude_code": "Claude Code (closed)", "ext_opencode": "OpenCode",
          "ext_aider": "Aider", "ext_mini_swe_agent": "mini-swe-agent"}
 FAILS = ["missed_caller", "broken_import", "apply_failure", "output_truncated", "no_edit", "test_failure_other", "check_failed", "context_overflow", "error"]
 STYLE = dict(color="#3B6EA8", accent="#D2691E", grid="#DDDDDD")
@@ -219,7 +219,8 @@ def main():
         ax.set_xscale("log"); ax.set_xlabel("cost per solved task (USD, log scale)"); ax.set_ylabel("pass rate")
         ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"${v:g}")); ax.xaxis.set_minor_formatter(NullFormatter())
         xs = [c for _, c, _ in pts]; ax.set_xlim(min(xs) / 1.4, max(xs) * 2.2)
-        texts = [ax.text(c, p, LABEL.get(k.split(":")[-1], k), fontsize=7.5) for k, c, p in pts]
+        plabel = lambda k: LABEL.get(k.split(":")[-1], k) + (" (final run)" if k.startswith("final:") and k != "final:combined" else "")
+        texts = [ax.text(c, p, plabel(k), fontsize=7.5) for k, c, p in pts]
         try:
             from adjustText import adjust_text  # requirements.txt; de-overlaps labels with leader lines
             adjust_text(texts, x=xs, y=[p for _, _, p in pts], ax=ax, arrowprops=dict(arrowstyle="-", lw=0.4, color="0.55"))
@@ -267,7 +268,7 @@ def main():
                                    baseline_ci=[base["ci_lo"], base["ci_hi"]], best_ci=[best["ci_lo"], best["ci_hi"]],
                                    n_baseline=base["n"], n_best=best["n"])
         fig, axes = plt.subplots(1, 2, figsize=(9, 4.2))
-        names = ["naive baseline\nfull repo,\nsingle-shot", "best harness\n" + LABEL.get(best_key, best_key).replace(" + ", "\n+ ")]
+        names = ["naive:\nfull repo,\nsingle-shot", "combined harness" if best_key == "combined" else "best config:\n" + LABEL.get(best_key, best_key).replace(" + ", "\n+ ")]
         axes[0].bar(names, [base["pass_rate"], best["pass_rate"]], color=[STYLE["accent"], STYLE["color"]],
                     yerr=[[base["pass_rate"] - base["ci_lo"], best["pass_rate"] - best["ci_lo"]], [base["ci_hi"] - base["pass_rate"], best["ci_hi"] - best["pass_rate"]]], capsize=4)
         axes[0].set_ylim(0, 1.05); axes[0].set_title("pass rate (95% CI)")

@@ -14,7 +14,7 @@ The short version: on this kind of task, the harness matters more than I expecte
 
 ## The setup
 
-**Tasks.** {{n_tasks}} refactors on three small, pinned, pure-Python libraries: tinydb ({{tasks.tinydb}} tasks), itsdangerous ({{tasks.itsdangerous}}) and marshmallow ({{tasks.marshmallow}}). Most are renames of a class, function or method, plus a signature change, function moves and a module move. {{n_hard}} of them form a hard tier I added once the agents started hitting the ceiling. That tier has ambiguous names (renaming `Table.search` while unrelated `search` methods must survive), a method with 80 call sites across 8 files, and an exception class with 468 references across 19 files.
+**Tasks.** {{n_tasks}} refactors on three small, pinned, pure-Python libraries: tinydb ({{tasks.tinydb}} tasks), itsdangerous ({{tasks.itsdangerous}}) and marshmallow ({{tasks.marshmallow}}). Most are renames of a class, function or method, plus a signature change, function moves and a module move. {{n_hard}} of them form a hard tier I added once the agents started hitting the ceiling. That tier has ambiguous names (renaming `Table.search` while unrelated `search` methods must survive), a method with {{fan.h02.matches}} call sites across {{fan.h02.files}} files, and an exception class referenced on {{fan.h03.lines}} lines across {{fan.h03.files}} files.
 
 **Grader.** A run passes only if three things hold: the repo's tests pass, no references to the old name remain (each leftover counts as a *missed caller*), and a task-specific check passes. Every task has a reference solution that passes the grader, and the unmodified repo fails it (`python -m cshape verify`).
 
@@ -47,7 +47,7 @@ The skeleton ladder mostly shows that a bare file tree is not enough: L0 passed 
 
 Same agent loop and same prompt; only the tools changed. Raw grep/read/edit passed {{main.agentic.pass}} at {{main.agentic.cps}} per solve. With `find_references` and `rename_symbol` it passed {{main.agentic_tools.pass}} at {{main.agentic_tools.cps}}, which is {{tools.ratio}}x cheaper. The structured agent also made {{tools.callratio}}x fewer tool calls ({{main.agentic_tools.tools}} vs {{main.agentic.tools}} per run).
 
-The pass-rate gap is inside the confidence intervals over all tasks. It shows up clearly on the biggest refactor, though. On the 468-reference `ValidationError` rename, the grep agent passed {{h03.agentic}} and the structured agent passed {{h03.agentic_tools}}. Doing that rename with grep means hundreds of small edits. All {{h03.agentic.capped}} grep-agent runs hit the 25-step cap, averaging {{h03.agentic.calls}} tool calls, and the prompt grew to as much as {{h03.agentic.peak}} tokens. The structured agent finished in about {{h03.agentic_tools.calls}} calls, and its prompt never went past {{h03.agentic_tools.peak}} tokens.
+The pass-rate gap is inside the confidence intervals over all tasks. It shows up clearly on the biggest refactor, though. On the `ValidationError` rename ({{fan.h03.lines}} referencing lines), the grep agent passed {{h03.agentic}} and the structured agent passed {{h03.agentic_tools}}. Doing that rename with grep means hundreds of small edits. All {{h03.agentic.capped}} grep-agent runs hit the 25-step cap, averaging {{h03.agentic.calls}} tool calls, and the prompt grew to as much as {{h03.agentic.peak}} tokens. The structured agent finished in about {{h03.agentic_tools.calls}} calls, and its prompt never went past {{h03.agentic_tools.peak}} tokens.
 
 The cost drop is about more than fewer calls. Each grep-and-read step adds tool output that later calls carry along as context. A tool that answers "where is this used?" exactly keeps the context small and focused on the task.
 
@@ -59,7 +59,7 @@ At a 24k-token budget, compaction barely triggered (about {{main.agentic_c50.com
 
 ![Compaction at a 12k budget](../figures/arm_compaction_tight.png)
 
-At 12k the variants separate. Summarizing at 50% averaged {{main.agentic_c50_tight.comp}} compactions per run and fell to {{main.agentic_c50_tight.pass}} at {{main.agentic_c50_tight.cps}} per solve. Summarizing at 90% held {{main.agentic_c90_tight.pass}}. Simply dropping old tool outputs held {{main.agentic_mask_tight.pass}} at {{main.agentic_mask_tight.cps}}, the best result of the three at the lowest cost. That matches the pre-registered hypothesis.<!-- TODO(verify): cite JetBrains 'The Complexity Trap' (arXiv 2508.21433) here only after re-reading it; PRIOR_WORK marks it [verify]. --> Each summary rewrites the prompt prefix, so the cache hit rate collapsed to {{main.agentic_c50_tight.cache}} for summarize-at-50%, versus {{main.agentic.cache}} with no compaction. Rewriting the prefix costs real money.
+At 12k the variants separate. Summarizing at 50% averaged {{main.agentic_c50_tight.comp}} compactions per run and fell to {{main.agentic_c50_tight.pass}} at {{main.agentic_c50_tight.cps}} per solve. Summarizing at 90% held {{main.agentic_c90_tight.pass}}. Simply dropping old tool outputs held {{main.agentic_mask_tight.pass}} at {{main.agentic_mask_tight.cps}}, the best result of the three at the lowest cost. That matches the pre-registered hypothesis, and it matches JetBrains Research's [The Complexity Trap](https://arxiv.org/abs/2508.21433), which found on SWE-bench Verified, across five model configurations, that simply masking old observations matched LLM summarization's solve rate and was the cheaper of the two in four of the five. Each summary rewrites the prompt prefix, so the cache hit rate collapsed to {{main.agentic_c50_tight.cache}} for summarize-at-50%, versus {{main.agentic.cache}} with no compaction. Rewriting the prefix costs real money.
 
 ## Finding 4: a five-line skill is a cost win, not an accuracy win
 
@@ -99,13 +99,13 @@ Every failed run gets an automatic tag from the grader output and the transcript
 
 Here are four real examples from the logs.
 
-**Missed callers (naive, full repo).** Renaming `Table.insert` to `insert_document` means touching 80 call sites. In the final run (seed {{ex.h02.seed}}), the full-repo prompt left {{ex.h02.missed}} references behind. Here are the first few:
+**Missed callers (naive, full repo).** Renaming `Table.insert` to `insert_document` means touching {{fan.h02.matches}} call sites. In the final run (seed {{ex.h02.seed}}), the full-repo prompt left {{ex.h02.missed}} references behind. Here are the first few:
 
 ```
 {{ex.h02.refs}}
 ```
 
-**Giving up (L3 skeleton, 468-reference rename).** Single-shot SEARCH/REPLACE output hits the 16k output cap on the biggest rename. In one run (seed {{ex.giveup.seed}}) the model didn't attempt the edits at all. It explained why and handed back a `grep | xargs sed` one-liner for me to run instead:
+**Giving up (L3 skeleton, the {{fan.h03.lines}}-line `ValidationError` rename).** Single-shot SEARCH/REPLACE output hits the 16k output cap on the biggest rename. In one run (seed {{ex.giveup.seed}}) the model didn't attempt the edits at all. It explained why and handed back a `grep | xargs sed` one-liner for me to run instead:
 
 {{ex.giveup}}
 

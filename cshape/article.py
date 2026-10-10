@@ -20,6 +20,20 @@ usd = lambda x: f"${x:.4f}" if x < 0.1 else f"${x:.2f}"
 ci = lambda v: f"{pct(v['ci_lo'])}–{pct(v['ci_hi'])}"
 is_hard = lambda task: bool(re.search(r"[-_]h\d\d", task or ""))
 
+def fanout(task_id):
+    """Size of a rename task, measured from its reference diff: files touched, matches of the task's
+    `absent` patterns on removed lines (call sites / references), and how many removed lines contain one."""
+    import yaml
+    for y in (ROOT / "tasks").glob("*/*.yaml"):
+        t = yaml.safe_load(y.read_text())
+        if isinstance(t, dict) and t.get("id") == task_id:
+            pats = [re.compile(x) for x in t["absent"]]
+            rem = [ln for ln in (y.parent / t["reference"]).read_text().splitlines() if ln.startswith("-") and not ln.startswith("---")]
+            return {"files": sum(1 for ln in (y.parent / t["reference"]).read_text().splitlines() if ln.startswith("diff --git")),
+                    "matches": sum(len(pt.findall(ln)) for ln in rem for pt in pats),
+                    "lines": sum(1 for ln in rem if any(pt.search(ln) for pt in pats))}
+    raise SystemExit(f"task not found: {task_id}")
+
 def claim(cond, msg):
     if not cond:
         raise SystemExit(f"article claim no longer holds, rewrite the prose: {msg}")
@@ -120,6 +134,10 @@ def main():
 
     # ---- grader sensitivity (code-only grading)
     ex = {}
+    for key, tid in (("h02", "tinydb-h02-rename-table-insert"), ("h03", "marshmallow-h03-rename-validationerror")):
+        f = fanout(tid); ex[f"fanout_{key}"] = f
+        for k, v in f.items():
+            V[f"fan.{key}.{k}"] = str(v)
     for st in ("full", "combined"):
         rs = [r for r in final if r["strategy"] == st]
         k = sum(map(lenient, rs)); ex[f"final_{st}_lenient_pass"] = round(k / len(rs), 4)

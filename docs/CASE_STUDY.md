@@ -15,7 +15,7 @@ The short version: on this kind of task, the harness matters more than I expecte
 
 ## The setup
 
-**Tasks.** 25 refactors on three small, pinned, pure-Python libraries: tinydb (9 tasks), itsdangerous (6) and marshmallow (10). Most are renames of a class, function or method, plus a signature change, function moves and a module move. 6 of them form a hard tier I added once the agents started hitting the ceiling. That tier has ambiguous names (renaming `Table.search` while unrelated `search` methods must survive), a method with 80 call sites across 8 files, and an exception class with 468 references across 19 files.
+**Tasks.** 25 refactors on three small, pinned, pure-Python libraries: tinydb (9 tasks), itsdangerous (6) and marshmallow (10). Most are renames of a class, function or method, plus a signature change, function moves and a module move. 6 of them form a hard tier I added once the agents started hitting the ceiling. That tier has ambiguous names (renaming `Table.search` while unrelated `search` methods must survive), a method with 80 call sites across 8 files, and an exception class referenced on 468 lines across 19 files.
 
 **Grader.** A run passes only if three things hold: the repo's tests pass, no references to the old name remain (each leftover counts as a *missed caller*), and a task-specific check passes. Every task has a reference solution that passes the grader, and the unmodified repo fails it (`python -m cshape verify`).
 
@@ -48,7 +48,7 @@ The skeleton ladder mostly shows that a bare file tree is not enough: L0 passed 
 
 Same agent loop and same prompt; only the tools changed. Raw grep/read/edit passed 93% at $0.0085 per solve. With `find_references` and `rename_symbol` it passed 97% at $0.0016, which is 5.2x cheaper. The structured agent also made 4.3x fewer tool calls (9.2 vs 39.2 per run).
 
-The pass-rate gap is inside the confidence intervals over all tasks. It shows up clearly on the biggest refactor, though. On the 468-reference `ValidationError` rename, the grep agent passed 0/3 and the structured agent passed 3/3. Doing that rename with grep means hundreds of small edits. All 3 grep-agent runs hit the 25-step cap, averaging 451 tool calls, and the prompt grew to as much as 122,762 tokens. The structured agent finished in about 8 calls, and its prompt never went past 9,785 tokens.
+The pass-rate gap is inside the confidence intervals over all tasks. It shows up clearly on the biggest refactor, though. On the `ValidationError` rename (468 referencing lines), the grep agent passed 0/3 and the structured agent passed 3/3. Doing that rename with grep means hundreds of small edits. All 3 grep-agent runs hit the 25-step cap, averaging 451 tool calls, and the prompt grew to as much as 122,762 tokens. The structured agent finished in about 8 calls, and its prompt never went past 9,785 tokens.
 
 The cost drop is about more than fewer calls. Each grep-and-read step adds tool output that later calls carry along as context. A tool that answers "where is this used?" exactly keeps the context small and focused on the task.
 
@@ -60,7 +60,7 @@ At a 24k-token budget, compaction barely triggered (about 1.0 compactions per ru
 
 ![Compaction at a 12k budget](../figures/arm_compaction_tight.png)
 
-At 12k the variants separate. Summarizing at 50% averaged 6.6 compactions per run and fell to 79% at $0.0397 per solve. Summarizing at 90% held 88%. Simply dropping old tool outputs held 93% at $0.0143, the best result of the three at the lowest cost. That matches the pre-registered hypothesis.<!-- TODO(verify): cite JetBrains 'The Complexity Trap' (arXiv 2508.21433) here only after re-reading it; PRIOR_WORK marks it [verify]. --> Each summary rewrites the prompt prefix, so the cache hit rate collapsed to 10% for summarize-at-50%, versus 85% with no compaction. Rewriting the prefix costs real money.
+At 12k the variants separate. Summarizing at 50% averaged 6.6 compactions per run and fell to 79% at $0.0397 per solve. Summarizing at 90% held 88%. Simply dropping old tool outputs held 93% at $0.0143, the best result of the three at the lowest cost. That matches the pre-registered hypothesis, and it matches JetBrains Research's [The Complexity Trap](https://arxiv.org/abs/2508.21433), which found on SWE-bench Verified, across five model configurations, that simply masking old observations matched LLM summarization's solve rate and was the cheaper of the two in four of the five. Each summary rewrites the prompt prefix, so the cache hit rate collapsed to 10% for summarize-at-50%, versus 85% with no compaction. Rewriting the prefix costs real money.
 
 ## Finding 4: a five-line skill is a cost win, not an accuracy win
 
@@ -153,7 +153,7 @@ Here are four real examples from the logs.
     tests/test_tinydb.py:158: db.insert(CustomDocument({'int': 1, 'char': 'a'}))
 ```
 
-**Giving up (L3 skeleton, 468-reference rename).** Single-shot SEARCH/REPLACE output hits the 16k output cap on the biggest rename. In one run (seed 2) the model didn't attempt the edits at all. It explained why and handed back a `grep | xargs sed` one-liner for me to run instead:
+**Giving up (L3 skeleton, the 468-line `ValidationError` rename).** Single-shot SEARCH/REPLACE output hits the 16k output cap on the biggest rename. In one run (seed 2) the model didn't attempt the edits at all. It explained why and handed back a `grep | xargs sed` one-liner for me to run instead:
 
 > I can't return a complete set of edit blocks for this rename. `ValidationError` appears roughly 400 times across about 20 files, including `fields.py`, `schema.py`, `validate.py`, the test suite, and the examples. Writing every occurrence as a SEARCH/REPLACE block would mean reproducing most of the codebase, and a partial set would leave imports broken. A mechanical rename is the reliable way to do this.
 
