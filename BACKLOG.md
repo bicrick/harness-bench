@@ -1,4 +1,4 @@
-<!-- last session: 4:44 AM CT build sprint -->
+<!-- last session: 5:09 AM CT build sprint -->
 # Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
 Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
@@ -72,6 +72,16 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [x] **Backoff accounting.** `llm.call` now records every retry sleep on the current job; `run_one` writes `notes.backoff_s`, `notes.n_retry_429`, `notes.n_retry_5xx`, `notes.n_retry_transport`. Takes effect for new `cshape run` processes (chain_final's resume passes and the FINAL run). Already-running processes keep the old code.
 - **Analysis rule:** never quote wall-clock or `api_s` per config from rows without `notes.backoff_s`. For rows that have it, latency = `api_s - backoff_s`. Prefer tokens, steps and cost for comparisons across configs; this is also a fair point for the article (the cheap model's practical throughput limit is the org ITPM cap, and agentic configs that re-read cached context burn that budget fastest).
 - ETA (token-bound, ~30M input tokens/hour): hard2 ~6:45 AM, then chain_final resume passes + combine + FINAL (~20–25M tokens) ~7:45 AM. If hard2 is still under ~110/153 at the 6:08 sprint, consider killing hard2 and resuming it with only seeds 0–1 for the remaining rows so FINAL starts by ~7 AM (chain_final will start FINAL automatically once no `cshape run` is left; its own hard2 resume pass uses --seeds 3, so edit chain_final.sh to --seeds 2 for hard2 before killing).
+
+## Build sprint 5:09 AM CT: cut seeds so FINAL starts by ~6:15
+- [x] **Throughput check.** From 4:45 to 5:09 only ~12 rows landed (B_tight 120→126, hard2 43→49) and the ledger moved $16.67→$17.11. Ledger token deltas over 30s showed ~525k input-side tokens/min (mostly cache writes), i.e. pinned at the 500k ITPM org limit. Hard2/tight rows average ~300–700k tokens each (agentic configs on the 80/468-call-site tasks), so 3 seeds would have run past 11 AM with FINAL never starting.
+- [x] **Cut B_tight and hard2 to 2 seeds** (seed 0 and 1; jobs are seed-major so seed 0 was already nearly complete). Killed chain_final + both runs at 5:10 (a few in-flight rows lost; spend in ledger only), edited `scripts/chain_final.sh` to `--seeds 2` for B_tight and hard2 (hard stays at 3, already complete), restarted both runs and chain_final. Remaining at restart: hard2 48 rows, B_tight 24 rows (~26M tokens, ETA ~6:10 AM), then chain_final runs combine + FINAL (full vs combined, 25 tasks × 5 seeds) automatically, ETA ~7:15 AM. Spend at restart $17.27.
+- Resume commands now (same file, resumable):
+  `python -m cshape run --strategies agentic_c50_tight,agentic_c90_tight,agentic_mask_tight --seeds 2 --workers 3 --out results/main.jsonl`
+  `python -m cshape run --tasks tinydb-h02-rename-table-insert,marshmallow-h03-rename-validationerror,itsdangerous-h01-rename-serializer-loads --strategies <ALL 17> --seeds 2 --workers 4 --out results/hard2.jsonl`
+- **Article note:** hard2 configs have n=6 per config (3 tasks × 2 seeds), hard batch 1 n=9; B_tight n=50 per config (25 tasks × 2 seeds). combine.py compares the arm options on equal coverage (every non-tight strategy has the same seeds on every task), so the selection rule is unaffected.
+- [ ] **Optional, only after FINAL_DONE and before ~9 AM:** if spend < $35, restore seed 2 for hard2 (rerun the hard2 command with `--seeds 3`, ~20M tokens / ~45 min / ~$2). Do not start it while FINAL is running (they share the rate limit).
+- Analysis observation for the write-up: cache_write tokens (59.7M) exceed cache_read (51.2M) across the whole study, so prompt caching is mostly writing, not hitting. That is a harness-design finding in itself (cache breakpoints vs. growing/compacted histories) and the reason compaction variants (which rewrite history) cost more per solve than expected. Worth one paragraph; do not change caching mid-study.
 
 ## Phase 3: write-up (~8:00–10:00 AM)
 - [ ] Headline number, tables, charts, failure examples, following the outline in EXPERIMENT_PLAN.
