@@ -12,12 +12,25 @@ replacement lines
 >>>>>>> REPLACE
 
 To create a new file, use an empty SEARCH section. To delete code, use an empty REPLACE section.
+To delete or rename a whole file, add a line `DELETE path/to/file.py` (and create the new file with an empty SEARCH block).
 Edit every file that needs to change, including tests. Do not output anything else after the edit blocks."""
 
 BLOCK = re.compile(r"^([^\n`]*?\.py)\s*\n(?:```[a-z]*\n)?<<<<<<< SEARCH\n(.*?)^=======\n(.*?)^>>>>>>> REPLACE", re.S | re.M)
 
+DELETE = re.compile(r"^DELETE\s+`?([^\s`]+\.py)`?\s*$", re.M)
+
 def parse(text):
     return [(m.group(1).strip().strip("`*# "), m.group(2), m.group(3)) for m in BLOCK.finditer(text)]
+
+def apply_deletes(root: Path, text):
+    errs = []
+    for m in DELETE.finditer(text):
+        p = (root / m.group(1)).resolve()
+        if root.resolve() in p.parents and p.is_file():
+            p.unlink()
+        else:
+            errs.append(f"{m.group(1)}: cannot delete")
+    return errs
 
 def apply(root: Path, blocks):
     errors = []

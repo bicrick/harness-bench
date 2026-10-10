@@ -41,9 +41,16 @@ def diffstat(root: Path):
         files += 1; add += len((root / f).read_text().splitlines())
     return dict(files=files, added=add, removed=rem)
 
+def _comment_only(hit, patterns):
+    line = hit.split(": ", 1)[1] if ": " in hit else hit
+    code = line.split("#", 1)[0]
+    return not any(re.search(p, code) for p in patterns) or line.lstrip().startswith((":", "`", "This", "Load"))
+
 def grade(root: Path, task):
     tests_ok, test_tail = run_tests(root, task)
     missed = missed_refs(root, task.get("absent", []))
     chk_ok, chk_err = check_cmd(root, task.get("check"), task)
+    code_missed = [m for m in missed if not _comment_only(m, task.get("absent", []))]
     return dict(passed=bool(tests_ok and not missed and chk_ok), tests_ok=tests_ok, missed_callers=len(missed),
+                missed_code_refs=len(code_missed),
                 missed=missed[:20], check_ok=chk_ok, check_err=chk_err, test_tail=test_tail, diff=diffstat(root))

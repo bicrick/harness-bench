@@ -30,6 +30,28 @@ def fresh_copy(task):
     shutil.copytree(src, dst)
     return dst
 
+def categorize(r):
+    """Auto-tag the failure mode of a run (None if passed)."""
+    if r.get("passed"):
+        return None
+    err = r.get("error") or ""
+    if err:
+        return "context_overflow" if ("prompt is too long" in err or "context" in err.lower()) else "error"
+    n = r.get("notes", {})
+    d = r.get("diff", {})
+    if d.get("added", 0) + d.get("removed", 0) == 0:
+        return "apply_failure" if n.get("apply_errors") else "no_edit"
+    tail = r.get("test_tail", "") + r.get("check_err", "")
+    if any(k in tail for k in ("ImportError", "ModuleNotFoundError", "cannot import name")):
+        return "broken_import"
+    if r.get("missed_callers", 0) > 0:
+        return "missed_caller"
+    if n.get("apply_errors"):
+        return "apply_failure"
+    if not r.get("tests_ok", True):
+        return "test_failure_other"
+    return "check_failed"
+
 def run_one(task, strat, seed, out):
     root = fresh_copy(task)
     rec = dict(task=task["id"], kind=task["kind"], strategy=strat, seed=seed, model=llm.MODEL, ts=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
@@ -44,11 +66,12 @@ def run_one(task, strat, seed, out):
         rec.update(error=f"{type(e).__name__}: {e}", trace=traceback.format_exc()[-1500:], passed=False)
     rec["wall_s"] = round(time.time() - t0, 1)
     rec["run_id"] = root.name
-    tdir = Path(out).parent / "transcripts"; tdir.mkdir(parents=True, exist_ok=True)
+    tdir = Path(out).resolve().parent / "transcripts"; tdir.mkdir(parents=True, exist_ok=True)
     tpath = tdir / f"{Path(out).stem}__{strat}__{root.name}.json"
     tpath.write_text(json.dumps({"task": task["id"], "strategy": strat, "seed": seed,
                                  "transcript": rec.pop("transcript", None)}, default=str))
     rec["transcript_path"] = str(tpath.relative_to(ROOT))
+    rec["failure_category"] = categorize(rec)
     rec["config"] = dict(strategy=strat, model=llm.MODEL, max_steps=__import__("cshape.strategies", fromlist=["x"]).MAX_STEPS)
     with open(out, "a") as f:
         f.write(json.dumps(rec) + "\n")
