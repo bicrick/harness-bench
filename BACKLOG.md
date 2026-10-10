@@ -168,7 +168,7 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [x] Tightened Finding 1 (fixed an overclaim: "the model sees the call site" was not true for skeleton layouts; now scoped to the full-repo prompt, which includes every .py file), Finding 3 (split cache point into its own paragraph, removed "costs real money"), arm E caveats (removed the repeated seed sentence; Aider wording softened to "mostly reflects"), and the tools-mapping section.
 - [x] New `claim()` guards in cshape/article.py for prose that was unguarded: combined harness is the only Pareto point; ladder L0 < L1 >= L3; 24k compaction variants within 5 pts; mask is cheapest at 12k; summaries lower cache hit rate; OpenCode / mini-swe-agent / Claude Code are 90-96%, under $0.01/solve and below combined; Aider < 50%. All pass.
 - [x] Article + publish bundle regenerated; no TODOs remain in docs/CASE_STUDY.md. Final combined config confirmed run (FINAL_DONE).
-- [ ] **[editor 9:53]** Final read-through of the whole piece for tone, then hand off to the 10:08 publish step. No open data gaps block the article; API limit means arm E stays partial (already disclosed).
+- [x] (10:01 editor) **[editor 9:53]** Final read-through of the whole piece for tone, then hand off to the 10:08 publish step. No open data gaps block the article; API limit means arm E stays partial (already disclosed).
 
 ## Build sprint 9:09 AM CT: number check fixes
 - [x] API still blocked (probe 9:09: HTTP 400 usage limit until Nov 1). No runs; ledger $28.53.
@@ -176,7 +176,7 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [x] **Naive cost depends on prompt-cache luck (new limitation + guards).** Full-repo cache hit rate was 3% in the main run (seeds of a task ran far apart, so every 135k-token prompt was a cache write) vs 54% in the final run. That is why main says $0.0833/solve and the headline says $0.0510 for the same config. New Limitations bullet says so and that 32x is the conservative number (~51x against the cold-cache baseline); H1 line notes "almost no cache hits". Numbers are `{{cachefull.*}}` placeholders with `claim()` guards; also in article_extras.json `naive_cache`.
 - [x] Arm E chart: the Aider cost label overlapped its error bar; short bars (<45%) now put the label above the CI.
 - [x] `docs/PUBLISH_HANDOFF.md`: ready-to-use brief for the 10:08 cloud-agent PR on bicrick/personal-website.
-- [ ] **[editor 9:53]** read the new Limitations bullet for tone (sprint wrote it).
+- [x] (10:01 editor: reads fine, kept) **[editor 9:53]** read the new Limitations bullet for tone (sprint wrote it).
 
 
 ## Build sprint 9:43 AM CT: prior-work verification
@@ -185,3 +185,9 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [x] Article: "What's next" RefactorBench mention is now a link plus one grounded sentence (its baseline solved no task needing >6 files, the same high-fan-out regime where structured tools mattered most here). Regenerated CASE_STUDY.md + publish bundle (3,602 words).
 - Idea for the editor (optional, not applied): SWE-bench's "oracle-collapsed" result (collapsing unedited code helped Claude 2 and GPT-4) is a close cousin of our skeleton ladder and could be one sentence in Finding 1 if it fits the tone.
 - Next: 9:53 editor final read-through, then the 10:08 sprint launches the bicrick.com PR from docs/PUBLISH_HANDOFF.md (do not merge).
+
+## Editor pass 10:01 AM CT (final read-through)
+- [x] Fixed an overclaim in the intro and Finding 2 heading: the data show two big levers (agent loop vs single-shot: 69% to 93%; structured tools vs grep: 5.2x cheaper and the only 3/3 on the 468-line rename), not one. Intro now names both; Finding 2 is "once the agent can explore, a real find-references tool is the biggest lever".
+- [x] Replaced internal jargon "Arm E" in Limitations with "the real-harness comparison"; softened the RL-environment line ("could be a training environment, not just an eval") since no training was done.
+- [x] Considered the SWE-bench oracle-collapsed sentence for Finding 1; skipped, since our ladder found signatures/docstrings added nothing, so the parallel would read as a stretch.
+- [x] Regenerated CASE_STUDY.md + publish bundle (claim guards pass, no TODOs). Article is final pending the 10:08 publish PR and Patrick's merge / repo-visibility decision.

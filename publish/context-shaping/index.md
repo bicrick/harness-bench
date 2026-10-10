@@ -16,7 +16,7 @@ tags: [llm, agents, evals, context-engineering]
 
 People argue a lot about which model writes the best code. I wanted to measure the other half: everything around the model. That's what goes into the context window, which tools the model gets, what happens when the context fills up, and whether a short how-to note helps. I picked one cheap model, wrote a small harness where each of those choices is a switch, and ran 1,632 graded runs for $28.53 in API spend.
 
-The short version: on this kind of task, the harness matters more than I expected, and one choice (a real find-references tool instead of grep) does most of the work.
+The short version: on this kind of task, the harness matters more than I expected, and two choices do most of the work: letting the model explore in a loop instead of answering in one shot, and giving it a real find-references tool instead of grep.
 
 ## The setup
 
@@ -47,7 +47,7 @@ Agent loops that can grep, run the tests and look again land at 93% (`agentic`) 
 
 On the ladder itself, a bare file tree isn't enough (L0, 45%) and adding imports helps (L1, 61%). Signatures (L2, 57%) and docstrings (L3, 59%) add nothing more. On repos this small, the extra detail just makes the prompt longer.
 
-## Finding 2: a real find-references tool is the biggest single lever
+## Finding 2: once the agent can explore, a real find-references tool is the biggest lever
 
 ![Raw grep/edit vs structured tools](./figures/arm_tools.png)
 
@@ -234,14 +234,14 @@ Most of these tools find usages with grep or the shell. Symbol-aware tooling, wh
 - **The grader is strict about comments.** If I grade only code (tests pass, check passes, no leftover reference outside comments and strings), the naive harness rises from 63% to 75% (15 of its failures were comment-only), and the combined harness stays at 100%. The lift shrinks to about 25 points but is still large.
 - **The naive baseline's cost depends on the prompt cache.** Its whole-repo prompt is the same for every seed of a task, so it's cheap when seeds run close together and expensive when they don't. In the main runs the cache hit rate was 3% and it cost $0.0833 per solve. In the final run it was 54% and $0.0510. The headline uses the final run, so the 32x cost gap is the conservative number. Against the main-run baseline it would be about 51x.
 - **One model.** Haiku 5.5 always uses extended thinking. A model without it, or a bigger one, could respond differently to the same harness changes.
-- **Arm E is thin.** Mostly one seed, a partial second seed, out-of-the-box settings, and some rate-limit noise (see above).
+- **The real-harness comparison is thin.** Mostly one seed, a partial second seed, out-of-the-box settings, and some rate-limit noise (see above).
 - **Bookkeeping.** The ledger shows $28.53 spent, and the per-run logs (including retried and duplicate rows) account for $27.52. The remaining $1.01 is API spend from runs I killed and restarted during the night, which never wrote a row. 36 runs were logged twice by overlapping jobs ($1.80); the stats keep one copy of each. One cell (L1 skeleton, one marshmallow task, seed 0) is missing, so that config has n=74.
 
 ## What's next
 
 - **A SWE-bench Verified subset** to check whether the tool-design result holds on real bug fixes. It needs Docker, which this box doesn't have yet.
 - **Bigger repos**, where retrieval should start to pay off, and [RefactorBench](https://arxiv.org/abs/2503.07832)-style tasks I didn't write myself (its baseline agent solved none of the tasks that needed edits in more than six files, the same high-fan-out regime where structured tools made the biggest difference here).
-- **The RL-environment angle.** Each task plus its grader is a small, cheap environment. "Missed callers" is a dense, verifiable signal instead of a single pass/fail bit, and an episode with the combined harness costs about $0.0016. That is enough to train a policy on harness behavior, not just evaluate it.
+- **The RL-environment angle.** Each task plus its grader is a small, cheap environment. "Missed callers" is a dense, verifiable signal instead of a single pass/fail bit, and an episode with the combined harness costs about $0.0016. At that price, the same setup could be a training environment, not just an eval.
 
 ## Reproduce it
 
