@@ -1,9 +1,11 @@
-import json, os, time, fcntl
+import json, os, time, fcntl, threading
 from pathlib import Path
 import anthropic
 from .pricing import MODEL, cost
 
 LEDGER = Path(__file__).resolve().parent.parent / "results" / "ledger.json"
+CALLS = LEDGER.parent / "ledger_calls.ndjson"  # .ndjson (not .jsonl) so run-log globs skip it; one line per billed API call, tagged with the run_id of the job that made it
+JOB = threading.local()  # run_one sets JOB.run_id / JOB.out so every billed call can be attributed to a logged row
 HARD_CAP_USD = float(os.environ.get("CSHAPE_HARD_CAP", "50"))
 
 class BudgetExceeded(RuntimeError):
@@ -22,6 +24,13 @@ def _add(usd, u):
         for k, v in u.items():
             d["tokens"][k] = d["tokens"].get(k, 0) + v
         f.seek(0); f.truncate(); f.write(json.dumps(d, indent=1))
+    # per-call log (added 4:31 AM CT by the data routine): lets the audit attribute ledger spend to runs, so spend from
+    # runs killed mid-flight (no row written) is measured instead of inferred from the ledger-vs-logged gap
+    line = dict(ts=time.strftime("%Y-%m-%dT%H:%M:%S%z"), pid=os.getpid(), run_id=getattr(JOB, "run_id", None),
+                out=getattr(JOB, "out", None), usd=round(usd, 6), **u)
+    with open(CALLS, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.write(json.dumps(line) + "\n")
 
 _client = None
 def call(system, messages, tools=None, max_tokens=16000, run_budget=None):

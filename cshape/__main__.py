@@ -61,6 +61,7 @@ def categorize(r):
 
 def run_one(task, strat, seed, out):
     root = fresh_copy(task)
+    llm.JOB.run_id, llm.JOB.out = root.name, Path(out).name
     rec = dict(task=task["id"], kind=task["kind"], strategy=strat, seed=seed, model=llm.MODEL, ts=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
     t0 = time.time()
     try:
@@ -123,12 +124,18 @@ def main():
     jobs = [(t, s, k) for k in range(a.seeds) for t in tasks for s in strats]
     # resume: skip jobs already logged without an error; drop errored rows so they are re-run
     if Path(a.out).exists():
-        keep, done = [], set()
+        keep, done, dropped = [], set(), []
         for line in open(a.out):
+            if not line.strip():
+                continue
             r = json.loads(line)
             if r.get("error"):
+                dropped.append(json.dumps(dict(r, retried_from=Path(a.out).name)) + "\n")
                 continue
             keep.append(line); done.add((r["task"], r["strategy"], r["seed"]))
+        if dropped:  # keep errored rows (and their spend) in an archive file instead of deleting them
+            with open(Path(a.out).parent / "archive_retried.jsonl", "a") as f:
+                f.writelines(dropped)
         Path(a.out).write_text("".join(keep))
         jobs = [j for j in jobs if (j[0]["id"], j[1], j[2]) not in done]
     print(f"{len(jobs)} runs; spent so far ${llm.spent():.4f}; cap ${llm.HARD_CAP_USD}")

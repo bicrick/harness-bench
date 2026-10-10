@@ -159,6 +159,8 @@ def main():
     main_s = {st: s for (src, st), s in summ.items() if src == MAIN}
     numbers = {"model": "claude-haiku-5-5", "total_runs": len(rows), "total_logged_cost_usd": round(sum(r.get("cost_usd", 0) for r in rows), 4),
                "ledger_usd": json.loads((RES / "ledger.json").read_text())["total_usd"] if (RES / "ledger.json").exists() else None,
+               "spend_reconciliation": {k: v for k, v in (json.loads((RES / "integrity.json").read_text()) if (RES / "integrity.json").exists() else {}).items()
+                                        if k in ("ledger_usd", "logged_usd", "unlogged_gap_usd", "call_attribution", "unattributed_pre_call_log_usd", "note")},
                "per_config": {f"{src}:{st}": s for (src, st), s in summ.items()}}
     if main_s:
         for arm, keys in ARMS.items():
@@ -174,13 +176,21 @@ def main():
         for k, c, p in sorted(pts, key=lambda t: (t[1], -t[2])):
             if p > best:
                 front.append((k, c, p)); best = p
-        fig, ax = plt.subplots(figsize=(7, 5))
+        from matplotlib.ticker import FuncFormatter, NullFormatter
+        fig, ax = plt.subplots(figsize=(9, 6))
         for k, c, p in pts:
             on = k in [f[0] for f in front]
             ax.scatter(c, p, color=STYLE["accent"] if on else STYLE["color"], s=40 if on else 25, zorder=3)
-            ax.annotate(LABEL.get(k.split(":")[-1], k), (c, p), fontsize=7, xytext=(4, 2), textcoords="offset points")
         ax.plot([f[1] for f in front], [f[2] for f in front], color=STYLE["accent"], lw=1, ls="--")
         ax.set_xscale("log"); ax.set_xlabel("cost per solved task (USD, log scale)"); ax.set_ylabel("pass rate")
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"${v:g}")); ax.xaxis.set_minor_formatter(NullFormatter())
+        xs = [c for _, c, _ in pts]; ax.set_xlim(min(xs) / 1.4, max(xs) * 2.2)
+        texts = [ax.text(c, p, LABEL.get(k.split(":")[-1], k), fontsize=7.5) for k, c, p in pts]
+        try:
+            from adjustText import adjust_text  # requirements.txt; de-overlaps labels with leader lines
+            adjust_text(texts, x=xs, y=[p for _, _, p in pts], ax=ax, arrowprops=dict(arrowstyle="-", lw=0.4, color="0.55"))
+        except ImportError:
+            pass
         ax.set_title("Cost/accuracy frontier, all configs (Haiku 5.5)"); fig.tight_layout(); fig.savefig(FIG / "pareto.png"); plt.close(fig)
         numbers["pareto_frontier"] = [f[0] for f in front]
         # failure taxonomy
