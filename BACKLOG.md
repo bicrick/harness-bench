@@ -27,20 +27,22 @@ Routine pickup: start with the first unchecked item in the current clock phase.
   `python -m cshape run --strategies full,touched,skel_L0,skel_L1,skel_L2,skel_L3,skel_retrieval,agentic,agentic_tools,agentic_c50,agentic_c90,agentic_mask,agentic_skill,agentic_agentsmd --seeds 3 --workers 6 --out results/main.jsonl`
 - Note: the org rate limit is 500k input tokens/min on Haiku 5.5, and marshmallow full-repo prompts are about 135k. llm.call retries with backoff on 429.
 - [ ] If agentic configs hit the ceiling (~100%), add a hard tier of tasks (signature changes with many call sites) so the configs can be told apart.
-- [ ] **FINAL COMBINED** config: the best option from each arm stacked, 19 tasks × ≥5 seeds. Reserve ~$10 for it, and run it last.
+- [ ] **FINAL COMBINED** config (rule in EXPERIMENT_PLAN; `python -m cshape.combine` then `python -m cshape run --strategies full,combined --seeds 5 --workers 6 --out results/final.jsonl`): the best option from each arm stacked, 19 tasks × ≥5 seeds. Reserve ~$10 for it, and run it last.
 - [ ] Arm A: 19 × 8 × 3 seeds.
 - [x] Arm T: 19 × 2 × 3.
 - [ ] Arms B and C: 19 × (3 + 2) × 3.
 - [ ] Arm D, only if budget and time allow.
 - [ ] Commit results JSONL after each arm.
 
-- [ ] **IN PROGRESS** Arm E (real harnesses): `python -m cshape run --strategies ext_claude_code,ext_aider,ext_mini_swe_agent,ext_opencode --seeds 1 --workers 4 --out results/arm_e.jsonl`. It is resumable, about $0.01/run, and costs are captured by cshape/proxy.py.
+- [x] Arm E (real harnesses), 88 runs done: `python -m cshape run --strategies ext_claude_code,ext_aider,ext_mini_swe_agent,ext_opencode --seeds 1 --workers 4 --out results/arm_e.jsonl`. It is resumable, about $0.01/run, and costs are captured by cshape/proxy.py.
 - [x] 3 hard tasks added (tinydb-h01 ambiguous `search`, marshmallow-h01 ambiguous `get_value`, marshmallow-h02 `load_default`), for 22 tasks total. After main finishes, re-run the main command to add the hard tasks (resume adds only the missing runs).
 - [x] Add an arm E figure to report.py (real harnesses vs naive vs best).
 - Budget plan: main run about $8, arm E about $1–3, final combined config ≤$10 (reserved), with the rest as slack under the $50 cap.
 
 - [ ] **IN PROGRESS** Arm B_tight: the 24k budget rarely triggered compaction (0.1–0.3 compactions/run), so the variants are re-run at a 12k budget: `--strategies agentic_c50_tight,agentic_c90_tight,agentic_mask_tight --seeds 3 --out results/main.jsonl`. Do NOT start two resumable runs on the same file at once; the resume step rewrites the file.
 - Early read (n≈25/config): agentic configs are near the ceiling (92–100%); full single-shot is 88% at about $0.056/solve vs agentic+structured tools at 96% and about $0.001/solve. The hard tasks are needed to separate the configs.
+
+- [ ] **IN PROGRESS** Hard-tier tasks × all main strategies × 3 seeds → results/hard.jsonl (report merges it into main).
 
 ## Phase 3: write-up (~8:00–10:00 AM)
 - [ ] Headline number, tables, charts, failure examples, following the outline in EXPERIMENT_PLAN.

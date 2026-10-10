@@ -295,6 +295,20 @@ def agentic_skill(root, task):
 def agentic_agentsmd(root, task):
     return _agentic(root, task, agents_md(root, task) + "\n")
 
+def combined(root, task):
+    """FINAL COMBINED config: options chosen by cshape.combine from main results (results/combined_choice.json)."""
+    c = json.loads((Path(__file__).resolve().parent.parent / "results" / "combined_choice.json").read_text())["choice"]
+    pre = context.skeleton(root, 2) + "\n\n" if c["layout"] == "skeleton_L2_upfront" else ""
+    if c["procedural"] == "skill":
+        pre = SKILL + "\n" + pre
+    elif c["procedural"] == "agents_md":
+        pre = agents_md(root, task) + "\n" + pre
+    comp = {"none": None, "summary50": ("summary", 0.5), "summary90": ("summary", 0.9), "mask": ("mask", 0.5)}[c["compaction"]]
+    tools = STRUCTURED_TOOLS if c["tools"] == "structured" else TOOLS
+    st = _agentic(root, task, pre, tools=tools, compaction=comp)
+    st["notes"]["combined_choice"] = c
+    return st
+
 STRATEGIES = {
     "full": full, "touched": touched,
     "skel_L0": make_skeleton(0), "skel_L1": make_skeleton(1), "skel_L2": make_skeleton(2), "skel_L3": make_skeleton(3),
@@ -302,6 +316,7 @@ STRATEGIES = {
     "agentic_tools": agentic_tools,
     "agentic_c50": agentic_c50, "agentic_c90": agentic_c90, "agentic_mask": agentic_mask,
     "agentic_skill": agentic_skill, "agentic_agentsmd": agentic_agentsmd,
+    "combined": combined,
     "agentic_c50_tight": agentic_c50_tight, "agentic_c90_tight": agentic_c90_tight, "agentic_mask_tight": agentic_mask_tight,
 }
 from .external import EXTERNAL

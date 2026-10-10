@@ -44,7 +44,7 @@ def load():
         if f.name.startswith("archive_"):
             continue
         for line in f.open():
-            r = json.loads(line); r["_file"] = f.stem; rows.append(r)
+            r = json.loads(line); r["_file"] = {"hard": "main"}.get(f.stem, f.stem); rows.append(r)
     return rows
 
 def summarize(rs):
