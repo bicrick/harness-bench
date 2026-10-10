@@ -15,8 +15,17 @@ SINGLE_SHOT = {"full", "touched", "skel_L0", "skel_L1", "skel_L2", "skel_L3"}  #
 TOLERANCE_USD = 0.25  # in-flight jobs bill the ledger per call but only log a row when the job finishes
 
 
-UNEXPLAINED_MAX_USD = 1.25  # spend from before the per-call log existed (rows lost when runs were killed at 3:43 and 4:24 AM)
+UNEXPLAINED_MAX_USD = 1.25  # spend from before the per-call log existed (rows lost when runs were killed at 3:43, 4:24 and 5:09 AM)
 
+
+
+def _first_call_ts():
+    p = RES / "ledger_calls.ndjson"
+    if not p.exists():
+        return None
+    with p.open() as fh:
+        line = fh.readline().strip()
+    return json.loads(line).get("ts") if line else None
 
 def runs_in_flight():
     try:
@@ -109,9 +118,10 @@ def main():
                ledger_usd=round(ledger, 4), logged_usd=round(logged, 4), unlogged_gap_usd=round(gap, 4),
                runs_in_flight=len(live), workers_in_flight=workers_in_flight(live), call_attribution=attr,
                unattributed_pre_call_log_usd=round(unexplained, 4),
+               call_log_first_ts=_first_call_ts(),
                note=("ledger = logged rows + in-flight + orphaned (killed mid-run, no row) + pre-call-log spend. Rows were "
-                     "lost when all runs were killed and restarted at ~3:43 and ~4:24 AM CT (API stall fixes); that spend "
-                     "predates results/ledger_calls.ndjson (started ~4:31 AM CT; first used by the next process start) so it is only known as the residual."),
+                     "lost when all runs were killed and restarted at ~3:43, ~4:24 and ~5:09 AM CT (API stall fixes, seed cuts); that spend "
+                     f"predates results/ledger_calls.ndjson (first logged call {_first_call_ts()}) so it is only known as the residual."),
                ok=not problems, problems=problems)
     (RES / "integrity.json").write_text(json.dumps(out, indent=1) + "\n")
     print(f"ledger ${ledger:.2f}  logged ${logged:.2f}  gap ${gap:.3f}  in-flight {len(live)} procs/{workers_in_flight(live)} workers"

@@ -27,140 +27,115 @@ Final message:
 All 228 tests pass. The only remaining "freeze" match is a prose comment in `queries.py` ("something we can't freeze"), which is a verb rather than a reference to the function, so I left it alone.
 ```
 
-### marshmallow-h01-rename-utils-get-value / touched / seed 0 -> missed_caller
-Leftover refs: ['src/marshmallow/fields.py:272: the object `obj`. Defaults to `marshmallow.utils.get_value`.']
+### itsdangerous-h01-rename-serializer-loads / agentic_c50_tight / seed 1 -> missed_caller
+Leftover refs: ['tests/test_itsdangerous/test_serializer.py:52: assert serializer.loads(serializer.dumps(value)) == value', 'tests/test_itsdangerous/test_serializer.py:65: assert serializer.loads(signed) == value', 'tests/test_itsdangerous/test_serializer.py:69: serializer.loads(changed)']
+Apply errors: []
+
+```
+Tool calls:
+
+
+Final message:
+
+```
+
+### marshmallow-t04_rename_registryerror / skel_L0 / seed 0 -> broken_import
+Leftover refs: ['src/marshmallow/fields.py:624: # Load up the schema first. This allows a RegistryError to be raised', 'tests/test_schema.py:22: RegistryError,', 'tests/test_schema.py:2516: with pytest.raises(RegistryError):']
 Apply errors: []
 
 ```
 Model output (truncated):
-src/marshmallow/utils.py
+src/marshmallow/exceptions.py
 <<<<<<< SEARCH
-def get_value(obj, key: str, default=missing):
+class RegistryError(NameError):
 =======
-def get_nested_value(obj, key: str, default=missing):
+class ClassRegistryError(NameError):
 >>>>>>> REPLACE
 
-src/marshmallow/fields.py
+src/marshmallow/class_registry.py
 <<<<<<< SEARCH
-        accessor_func = accessor or utils.get_value
+from marshmallow.exceptions import RegistryError
 =======
-        accessor_func = accessor or utils.get_nested_value
+from marshmallow.exceptions import ClassRegistryError
 >>>>>>> REPLACE
 
-src/marshmallow/schema.py
+src/marshmallow/class_registry.py
 <<<<<<< SEARCH
-from marshmallow.utils import (
-    get_value,
-    is_collection,
+    :raises: `marshmallow.exceptions.RegistryError` if the class cannot be found
 =======
-from marshmallow.utils import (
-    get_nested_value,
-    is_collection,
+    :raises: `marshmallow.exceptions.ClassRegistryError` if the class cannot be found
 >>>>>>> REPLACE
 
-src/marshmallow/schema.py
+src/marshmallow/class_registry.py
 <<<<<<< SEARCH
-        return get_value(obj, attr, default)
+        raise RegistryError(
+            f"Class with name {classname!r} was not found. You may need "
 =======
-        return get_nested_value(obj, attr, default)
+        raise ClassRegistryError(
+            f"Class with name {classname!r} was not found. You may need "
 >>>>>>> REPLACE
 
-tests/test_utils.py
+src/marshmallow/class_registry.py
 <<<<<<< SEARCH
-def test_get_value_from_object(obj):
-    assert utils.get_value(obj, "x") == 24
-    assert utils.get_value(obj, "y") == 42
-
-
-def test_get_value_from_namedtuple_with_default():
-    p = PointNT(x=42, y=None)
-    # Default is only returned if key is not found
-    assert utils.get_value(p, "z", default=123) == 123
-    # since 'y' is an attribute, None is returned instead of the default
-    assert utils.get_value(p, "y", default=123) is None
+        raise RegistryError(
+            f"Multiple classes with name {classname!r} "
 =======
-def t
+        raise ClassRegistryError(
+            f"Multiple classes with name {classname!r} "
+>>>>>>> REPLACE
+
+tests/test_registry.py
+<<<<<<< SEARCH
+from marshmallow.exceptions import RegistryError
+=======
+from marshma
 ```
 
-### marshmallow-t03_rename_orderedset_class / skel_L0 / seed 0 -> broken_import
-Leftover refs: ['src/marshmallow/orderedset.py:1: # OrderedSet', 'tests/test_fields.py:13: from marshmallow.orderedset import OrderedSet', 'tests/test_fields.py:338: # We mean to test the use of OrderedSet to specify it explicitly']
+### marshmallow-t04_rename_registryerror / skel_L0 / seed 2 -> broken_import
+Leftover refs: ['src/marshmallow/fields.py:624: # Load up the schema first. This allows a RegistryError to be raised', 'tests/test_schema.py:22: RegistryError,', 'tests/test_schema.py:2516: with pytest.raises(RegistryError):']
 Apply errors: []
 
 ```
 Model output (truncated):
-orderedset.py
+src/marshmallow/exceptions.py
 <<<<<<< SEARCH
-class OrderedSet(MutableSet):  # noqa: PLW1641
+class RegistryError(NameError):
 =======
-class InsertionOrderedSet(MutableSet):  # noqa: PLW1641
+class ClassRegistryError(NameError):
 >>>>>>> REPLACE
 
-orderedset.py
+src/marshmallow/class_registry.py
 <<<<<<< SEARCH
-        if isinstance(other, OrderedSet):
+from marshmallow.exceptions import RegistryError
 =======
-        if isinstance(other, InsertionOrderedSet):
+from marshmallow.exceptions import ClassRegistryError
 >>>>>>> REPLACE
 
-orderedset.py
+src/marshmallow/class_registry.py
 <<<<<<< SEARCH
-    s = OrderedSet("abracadaba")
-    t = OrderedSet("simsalabim")
+    :raises: `marshmallow.exceptions.RegistryError` if the class cannot be found
+        or if there are multiple entries for the given class name.
+    """
+    try:
+        classes = _registry[classname]
+    except KeyError as error:
+        raise RegistryError(
+            f"Class with name {classname!r} was not found. You may need "
+            "to import the class."
+        ) from error
+    if len(classes) > 1:
+        if all:
+            return _registry[classname]
+        raise RegistryError(
 =======
-    s = InsertionOrderedSet("abracadaba")
-    t = InsertionOrderedSet("simsalabim")
->>>>>>> REPLACE
-
-src/marshmallow/schema.py
-<<<<<<< SEARCH
-from marshmallow.orderedset import OrderedSet
-=======
-from marshmallow.orderedset import InsertionOrderedSet
->>>>>>> REPLACE
-
-src/marshmallow/schema.py
-<<<<<<< SEARCH
-    set_class = OrderedSet
-=======
-    set_class = InsertionOrderedSet
->>>>>>> REPLACE
-```
-
-### marshmallow-t03_rename_orderedset_class / skel_L0 / seed 1 -> broken_import
-Leftover refs: ['src/marshmallow/orderedset.py:1: # OrderedSet', 'src/marshmallow/orderedset.py:79: if isinstance(other, OrderedSet):', 'tests/test_fields.py:13: from marshmallow.orderedset import OrderedSet']
-Apply errors: []
-
-```
-Model output (truncated):
-src/marshmallow/orderedset.py
-<<<<<<< SEARCH
-class OrderedSet(MutableSet):  # noqa: PLW1641
-=======
-class InsertionOrderedSet(MutableSet):  # noqa: PLW1641
->>>>>>> REPLACE
-
-src/marshmallow/orderedset.py
-<<<<<<< SEARCH
-    s = OrderedSet("abracadaba")
-    t = OrderedSet("simsalabim")
-=======
-    s = InsertionOrderedSet("abracadaba")
-    t = InsertionOrderedSet("simsalabim")
->>>>>>> REPLACE
-
-src/marshmallow/schema.py
-<<<<<<< SEARCH
-from marshmallow.orderedset import OrderedSet
-=======
-from marshmallow.orderedset import InsertionOrderedSet
->>>>>>> REPLACE
-
-src/marshmallow/schema.py
-<<<<<<< SEARCH
-    set_class = OrderedSet
-=======
-    set_class = InsertionOrderedSet
->>>>>>> REPLACE
+    :raises: `marshmallow.exceptions.ClassRegistryError` if the class cannot be found
+        or if there are multiple entries for the given class name.
+    """
+    try:
+        classes = _registry[classname]
+    except KeyError as error:
+        raise ClassRegistryError(
+            f"Class with name {classname!r} was not
 ```
 
 ### marshmallow-h03-rename-validationerror / full / seed 0 -> output_truncated
