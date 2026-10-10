@@ -33,13 +33,13 @@ I wrote down seven hypotheses before the main runs (`docs/HYPOTHESES.md`) and fi
 
 ![Pass rate by context layout](../figures/arm_layout.png)
 
-Every single-shot layout tops out around {{best_single}}. The naive full-repo prompt passed {{main.full.pass}}, and the oracle that sees only the touched files passed {{main.touched.pass}}. Seeing the right files isn't the problem. The problem is writing every edit correctly in one pass, and {{single.missed_share}} of single-shot failures are missed callers. The model sees the call site and still doesn't change it.
+Every single-shot layout tops out around {{best_single}}: the naive full-repo prompt passed {{main.full.pass}}, and an oracle that sees only the files the reference solution touches passed {{main.touched.pass}}. So the bottleneck isn't finding the right files. It's writing every edit correctly in one pass. {{single.missed_share}} of single-shot failures are missed callers, and with the full repo in the prompt, the Python files it failed to update were already in front of it.
 
-The two agent loops, which can grep, run the tests and look again, land at {{main.agentic.pass}} (`agentic`) and {{main.skel_retrieval.pass}} (`skeleton + tools`). Giving the agent an L2 skeleton up front bought nothing on pass rate, and it doubled cost per solve ({{main.skel_retrieval.cps}} vs {{main.agentic.cps}}).
+Agent loops that can grep, run the tests and look again land at {{main.agentic.pass}} (`agentic`) and {{main.skel_retrieval.pass}} (`skeleton + tools`, the same loop with an L2 skeleton up front). The skeleton bought nothing on pass rate and doubled cost per solve ({{main.skel_retrieval.cps}} vs {{main.agentic.cps}}).
 
 ![Skeleton ladder](../figures/arm_ladder.png)
 
-The skeleton ladder mostly shows that a bare file tree is not enough: L0 passed {{main.skel_L0.pass}}. Adding imports (L1, {{main.skel_L1.pass}}) helped. Signatures (L2, {{main.skel_L2.pass}}) and docstrings (L3, {{main.skel_L3.pass}}) did not help further. On these small repos, the extra detail just made the prompt longer.
+On the ladder itself, a bare file tree isn't enough (L0, {{main.skel_L0.pass}}) and adding imports helps (L1, {{main.skel_L1.pass}}). Signatures (L2, {{main.skel_L2.pass}}) and docstrings (L3, {{main.skel_L3.pass}}) add nothing more. On repos this small, the extra detail just makes the prompt longer.
 
 ## Finding 2: a real find-references tool is the biggest single lever
 
@@ -55,11 +55,13 @@ The cost drop is about more than fewer calls. Each grep-and-read step adds tool 
 
 ![Compaction at a 24k budget](../figures/arm_compaction.png)
 
-At a 24k-token budget, compaction barely triggered (about {{main.agentic_c50.comp}} compactions per run for summarize-at-50%, {{main.agentic_c90.comp}} for summarize-at-90%). All four variants landed within a few points of each other ({{main.agentic_c50.pass}}, {{main.agentic_c90.pass}}, {{main.agentic_mask.pass}} vs {{main.agentic.pass}} with no compaction), so I re-ran them at 12k.
+At a 24k-token budget, compaction barely fired: about {{main.agentic_c50.comp}} compactions per run when summarizing at 50%, and {{main.agentic_c90.comp}} at 90%. All three variants landed within a few points of no compaction ({{main.agentic_c50.pass}}, {{main.agentic_c90.pass}} and {{main.agentic_mask.pass}} vs {{main.agentic.pass}}), so I re-ran them at 12k.
 
 ![Compaction at a 12k budget](../figures/arm_compaction_tight.png)
 
-At 12k the variants separate. Summarizing at 50% averaged {{main.agentic_c50_tight.comp}} compactions per run and fell to {{main.agentic_c50_tight.pass}} at {{main.agentic_c50_tight.cps}} per solve. Summarizing at 90% held {{main.agentic_c90_tight.pass}}. Simply dropping old tool outputs held {{main.agentic_mask_tight.pass}} at {{main.agentic_mask_tight.cps}}, the best result of the three at the lowest cost. That matches the pre-registered hypothesis, and it matches JetBrains Research's [The Complexity Trap](https://arxiv.org/abs/2508.21433), which found on SWE-bench Verified, across five model configurations, that simply masking old observations matched LLM summarization's solve rate and was the cheaper of the two in four of the five. Each summary rewrites the prompt prefix, so the cache hit rate collapsed to {{main.agentic_c50_tight.cache}} for summarize-at-50%, versus {{main.agentic.cache}} with no compaction. Rewriting the prefix costs real money.
+At 12k they separate. Summarizing at 50% fired {{main.agentic_c50_tight.comp}} times per run and dropped to {{main.agentic_c50_tight.pass}} at {{main.agentic_c50_tight.cps}} per solve. Summarizing at 90% held {{main.agentic_c90_tight.pass}}. Dropping old tool outputs held {{main.agentic_mask_tight.pass}} at {{main.agentic_mask_tight.cps}}, the best and cheapest of the three. That's what I pre-registered, and it lines up with JetBrains Research's [The Complexity Trap](https://arxiv.org/abs/2508.21433): on SWE-bench Verified, across five model configurations, plain observation masking matched LLM summarization's solve rate and was cheaper in four of the five.
+
+Part of the cost is the prompt cache. Every summary rewrites the prompt prefix, so summarizing at 50% dropped the cache hit rate to {{main.agentic_c50_tight.cache}}, against {{main.agentic.cache}} with no compaction.
 
 ## Finding 4: a five-step skill is a cost win, not an accuracy win
 
@@ -138,21 +140,21 @@ I ran four real harnesses headless on Haiku 5.5, behind a logging proxy so all o
 | Aider (single-message mode) | {{arme.ext_aider.pass}} | {{arme.ext_aider.n}} | {{arme.ext_aider.cps}} |
 | Naive full repo (same seeds) | {{panel.full.pass}} | {{panel.full.n}} | {{panel.full.cps}} |
 
-The good general-purpose agents land in the low-to-mid 90s for a fraction of a cent per solve. That's well above the naive harness, and a little below a harness built for this one job. Claude Code cost {{arme.cc_vs_combined}}x more per solve than the combined harness on matching seeds. My guess is that's the price of being general, with a bigger system prompt and tools for everything rather than just renames, but I didn't measure it. Aider's low score comes from the human-in-the-loop design described above, not from the model. Counting only its {{arme.ext_aider.n_no429}} runs with no rate-limit errors, it still passed just {{arme.ext_aider.no429}}.
+The three autonomous agents land in the low-to-mid 90s for a fraction of a cent per solve: well above the naive harness, a little below a harness built for this one job. Claude Code cost {{arme.cc_vs_combined}}x more per solve than the combined harness on matching seeds. My guess is that's the price of being general (a bigger system prompt, tools for everything rather than just renames), but I didn't measure it. Aider's low score mostly reflects the human-in-the-loop design described above. Even on its {{arme.ext_aider.n_no429}} runs with no rate-limit errors, it passed just {{arme.ext_aider.no429}}.
 
-Treat these numbers as indicative. Most cells have one seed. A second seed was partway through when my Anthropic account hit its monthly usage limit, so some cells have two seeds and most have one. Some runs also overlapped heavy traffic from the main experiment and saw 429 retries ({{arme.ext_mini_swe_agent.rl}} of mini-swe-agent's runs and {{arme.ext_aider.rl}} of Aider's).
+Treat these numbers as indicative. My Anthropic account hit its monthly usage limit partway through a second seed, so most cells have one seed and a few have two. Some runs also overlapped heavy traffic from the main experiment and hit 429 retries ({{arme.ext_mini_swe_agent.rl}} of mini-swe-agent's runs and {{arme.ext_aider.rl}} of Aider's).
 
 ## How this maps to the tools people actually use
 
 From my notes on each tool (`docs/research/`):
 
-- **Claude Code** explores on demand with grep, glob and read, loads CLAUDE.md up front, compacts near the context limit, and clears old tool results. That's close to the "agent loop + drop old tool output" corner that did well here.
-- **Cursor** pairs grep with semantic search over its own embedding index. Cursor reports that the combination beats grep alone, with bigger gains on repos of 1,000+ files. My repos are small, which probably understates the value of retrieval. I didn't run Cursor; it isn't in the headless panel.
-- **Aider** is the main tool that ships an always-on skeleton (a tree-sitter repo map ranked with PageRank). My skeleton ladder suggests a map helps a single-shot model a little but can't replace a search loop.
+- **Claude Code** explores on demand with grep, glob and read, loads CLAUDE.md up front, compacts near the context limit and clears old tool results. That's close to the agent-loop-plus-drop-old-output corner that did well here.
+- **Cursor** pairs grep with semantic search over its own embedding index, and reports that the pair beats grep alone, with bigger gains on repos of 1,000+ files. My repos are small, so this setup probably understates retrieval. I didn't run Cursor here.
+- **Aider** is the main tool that ships an always-on skeleton, a tree-sitter repo map ranked with PageRank. My ladder suggests a map helps a single-shot model a little but can't replace a search loop.
 - **Codex CLI** compacts at 90% of the window and **Gemini CLI** at 50%. At a tight budget in my runs, the earlier trigger cost the most and passed the least.
-- **SWE-agent**'s classic setup keeps only the last few tool outputs (observation masking). That's the cheapest kind of compaction, and it was the strongest variant here.
+- **SWE-agent**'s classic setup keeps only the last few tool outputs (observation masking), the cheapest kind of compaction and the strongest variant here.
 
-Most of these tools find usages with grep or the shell. Where symbol-aware tooling exists, it tends to be an add-on (Claude Code's LSP plugins, for example). I didn't audit every tool's defaults, so take that as a pattern rather than a census. For a cheap model doing refactors, the jump from grep to a real find-references tool was the biggest single gain I measured.
+Most of these tools find usages with grep or the shell. Symbol-aware tooling, where it exists, tends to be an add-on (Claude Code's LSP plugins, for example). That's a pattern from my notes, not an audit of every default. For a cheap model doing refactors, grep versus a real find-references tool was the biggest gap I measured.
 
 ## What I'd build into a harness, based on this
 

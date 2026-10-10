@@ -187,6 +187,16 @@ def main():
     best_single = max(pc[f"main:{s}"]["pass_rate"] for s in single)
     claim(min(pc["main:agentic"]["pass_rate"], pc["main:skel_retrieval"]["pass_rate"]) > best_single, "H3")
     V["best_single"] = pct(best_single)
+    # guards added by the 8:53 editor pass
+    claim(A["pareto_frontier"] == ["final:combined"], "combined harness is the only point on the Pareto frontier")
+    claim(pc["main:skel_L0"]["pass_rate"] < pc["main:skel_L1"]["pass_rate"] >= pc["main:skel_L3"]["pass_rate"], "ladder: L0 < L1, L3 adds nothing")
+    claim(all(abs(pc[f"main:{s}"]["pass_rate"] - pc["main:agentic"]["pass_rate"]) < 0.05 for s in ("agentic_c50", "agentic_c90", "agentic_mask")), "24k compaction within a few points")
+    claim(pc["main:agentic_mask_tight"]["cost_per_solve_usd"] < min(pc["main:agentic_c50_tight"]["cost_per_solve_usd"], pc["main:agentic_c90_tight"]["cost_per_solve_usd"]), "mask cheapest at 12k")
+    claim(pc["main:agentic_c50_tight"]["cache_hit_ratio"] < pc["main:agentic"]["cache_hit_ratio"], "summaries cut cache hit rate")
+    for h in ("ext_opencode", "ext_mini_swe_agent", "ext_claude_code"):
+        v = pc[f"arm_e:{h}"]
+        claim(0.9 <= v["pass_rate"] < 0.97 and v["cost_per_solve_usd"] < 0.01 and v["pass_rate"] < panel["combined"]["pass_rate"], f"arm E {h}: low-to-mid 90s, under a cent, below combined")
+    claim(pc["arm_e:ext_aider"]["pass_rate"] < 0.5, "Aider low")
     sf = sum(pc[f"main:{s}"]["fail_missed_caller"] for s in single); st_ = sum(sum(pc[f"main:{s}"][f"fail_{c}"] for c in report.FAILS) for s in single)
     V["single.missed_share"] = pct(sf / st_); ex["single_shot_missed_caller_share"] = round(sf / st_, 4)
 
