@@ -61,11 +61,26 @@ def last_stop_reason(r):
             return sr
     return None
 
+def rate_limit_events(r):
+    """Upstream 429s during an arm E run. New rows carry notes.rate_limit_events (counted by the proxy);
+    older rows are backfilled from the harness's own stdout/stderr ('rate_limit_error'), a lower bound."""
+    nt = r.get("notes") or {}
+    if "rate_limit_events" in nt:
+        return nt["rate_limit_events"]
+    if not str(r.get("strategy", "")).startswith("ext_") or not r.get("transcript_path"):
+        return 0
+    try:
+        t = json.loads(Path(r["transcript_path"]).read_text()); t = t.get("transcript", t)
+        return ((t.get("stdout") or "") + (t.get("stderr") or "")).count("rate_limit_error")
+    except Exception:
+        return 0
+
 def retag(r):
     """The harness tagger calls a run 'no_edit' when it produced no diff. If the final response hit the
     16k output cap, the model was mid-answer, so tag it 'output_truncated' instead (derived from the transcript)."""
     if not r.get("passed") and r.get("failure_category") in ("no_edit", "apply_failure") and last_stop_reason(r) == "max_tokens":
         r["failure_category"] = "output_truncated"
+    r["_rate_limit_events"] = rate_limit_events(r)
     return r
 
 def load():
@@ -102,6 +117,9 @@ def summarize(rs):
                 mean_wall_s=round(sum(r.get("wall_s", 0) for r in rs) / n, 1),
                 mean_tool_calls=round(sum(r.get("notes", {}).get("tool_calls", 0) for r in rs) / n, 1),
                 mean_compactions=round(sum(r.get("notes", {}).get("compactions", 0) for r in rs) / n, 2),
+                runs_rate_limited=sum(1 for r in rs if r.get("_rate_limit_events", 0) > 0),
+                pass_rate_no_429=(round(sum(bool(r.get("passed")) for r in rs if not r.get("_rate_limit_events")) / max(1, sum(1 for r in rs if not r.get("_rate_limit_events"))), 4)
+                                  if any(r.get("_rate_limit_events") for r in rs) else None),
                 **{f"fail_{c}": fc.get(c, 0) for c in FAILS})
 
 def bar(ax, ss, keys, title):
@@ -254,8 +272,9 @@ def main():
     e_s = {st: s for (src, st), s in summ.items() if src == "arm_e"}
     if e_s and main_s:
         e_tasks = {r["task"] for r in rows if r["_file"] == "arm_e"}
+        e_seeds = {r["seed"] for r in rows if r["_file"] == "arm_e"}
         def sub(src, st):
-            rs = [r for r in rows if r["_file"] == src and r["strategy"] == st and r["task"] in e_tasks and r["seed"] == 0]
+            rs = [r for r in rows if r["_file"] == src and r["strategy"] == st and r["task"] in e_tasks and r["seed"] in e_seeds]
             return summarize(rs) if rs else None
         panel = {"full": sub(MAIN, "full")}
         panel.update({k: e_s[k] for k in sorted(e_s)})
@@ -263,7 +282,7 @@ def main():
         if bk:
             panel[bk] = sub("final" if final_s.get("combined") else MAIN, bk)
         panel = {k: v for k, v in panel.items() if v}
-        fig, ax = plt.subplots(figsize=(8, 4.2)); bar(ax, panel, list(panel), "Real harnesses vs ours on Haiku 5.5 (seed 0, same tasks)")
+        fig, ax = plt.subplots(figsize=(8, 4.2)); bar(ax, panel, list(panel), f"Real harnesses vs ours on Haiku 5.5 (same tasks, seeds {sorted(e_seeds)})")
         fig.tight_layout(); fig.savefig(FIG / "arm_E_real_harnesses.png"); plt.close(fig)
         numbers["arm_e_panel"] = panel
     (RES / "article_numbers.json").write_text(json.dumps(numbers, indent=1))

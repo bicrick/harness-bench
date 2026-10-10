@@ -1,4 +1,4 @@
-<!-- last session: 6:38 AM CT build sprint -->
+<!-- last session: 7:14 AM CT build sprint -->
 # Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
 Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
@@ -33,7 +33,7 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [x] Arm T: 19 × 2 × 3.
 - [x] Arms B and C: 19 × (3 + 2) × 3 (in main run).
 - [ ] Arm D, only if budget and time allow.
-- [ ] Commit results JSONL after each arm.
+- [x] Commit results JSONL after each arm (all results/*.jsonl and transcripts are tracked).
 
 - [x] Arm E (real harnesses), 88 runs done: `python -m cshape run --strategies ext_claude_code,ext_aider,ext_mini_swe_agent,ext_opencode --seeds 1 --workers 4 --out results/arm_e.jsonl`. It is resumable, about $0.01/run, and costs are captured by cshape/proxy.py.
 - [x] 3 hard tasks added (tinydb-h01 ambiguous `search`, marshmallow-h01 ambiguous `get_value`, marshmallow-h02 `load_default`), for 22 tasks total. After main finishes, re-run the main command to add the hard tasks (resume adds only the missing runs).
@@ -80,7 +80,7 @@ Routine pickup: start with the first unchecked item in the current clock phase.
   `python -m cshape run --strategies agentic_c50_tight,agentic_c90_tight,agentic_mask_tight --seeds 2 --workers 3 --out results/main.jsonl`
   `python -m cshape run --tasks tinydb-h02-rename-table-insert,marshmallow-h03-rename-validationerror,itsdangerous-h01-rename-serializer-loads --strategies <ALL 17> --seeds 2 --workers 4 --out results/hard2.jsonl`
 - **Article note:** hard2 configs have n=6 per config (3 tasks × 2 seeds), hard batch 1 n=9; B_tight n=50 per config (25 tasks × 2 seeds). combine.py compares the arm options on equal coverage (every non-tight strategy has the same seeds on every task), so the selection rule is unaffected.
-- [ ] **Optional, only after FINAL_DONE and before ~9 AM:** if spend < $35, restore seed 2 for hard2 (rerun the hard2 command with `--seeds 3`, ~20M tokens / ~45 min / ~$2). Do not start it while FINAL is running (they share the rate limit).
+- [x] (started 7:15 at $24.92) **Optional, only after FINAL_DONE and before ~9 AM:** if spend < $35, restore seed 2 for hard2 (rerun the hard2 command with `--seeds 3`, ~20M tokens / ~45 min / ~$2). Do not start it while FINAL is running (they share the rate limit).
 - Analysis observation for the write-up: cache_write tokens (59.7M) exceed cache_read (51.2M) across the whole study, so prompt caching is mostly writing, not hitting. That is a harness-design finding in itself (cache breakpoints vs. growing/compacted histories) and the reason compaction variants (which rewrite history) cost more per solve than expected. Worth one paragraph; do not change caching mid-study.
 
 ## Build sprint 5:47 AM CT: health check, no intervention
@@ -104,6 +104,14 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - **Headline (results/article_numbers.json, source=final):** naive full-repo single-shot 63.2% pass (79/125, 95% CI 54–71%) at $0.0510 per solve vs combined harness (agentic + structured tools + no compaction + skill) 100% (125/125, CI 97–100%) at $0.00162 per solve. Lift +36.8 pp, ~31x cheaper per solve. Full-baseline failures: 38 missed_caller, 5 output_truncated, 2 broken_import, 1 check_failed.
 - Spend $24.92 of $50; ~$25 headroom. Arm D (prompt placement) is optional; skip unless the article editor asks for it. No further runs are required for the article.
 - Next: Phase 3. Article editor (7:53) drafts docs/CASE_STUDY.md; build sprint sessions should support it (fill gaps it lists, excerpts, verify numbers).
+
+## Build sprint 7:14 AM CT: hard2 seed 2 restored; arm E was rate-limit contaminated, re-running
+- [x] **hard2 seed 2 restore started 07:15** (51 runs, 4 workers, `results/hard2.log`). At 7:25 it was at 116/153 rows. Per-arm hard2 numbers will shift once it finishes; the headline (from final.jsonl) does not change.
+- [x] **Arm E data problem found.** Arm E seed 0 ran at ~2 AM concurrently with the main run and was hitting the 500k ITPM org limit. From the harnesses' own logs: 17/22 Aider runs and 18/22 mini-swe-agent runs saw 429s, and 5 Aider runs plus 1 OpenCode run ended mid-backoff (no edits or partial edits, tagged no_edit/broken_import). Aider's 22.7% pass rate is therefore not a fair number: on the 5 Aider runs with no 429s it passed 2/5. Claude Code and OpenCode don't print 429s, so their backfilled count (0) is only a lower bound.
+- [x] **Source fix:** the proxy now counts upstream HTTP statuses per run; new arm E rows carry `notes.http_status` and `notes.rate_limit_events`. `report.py` backfills older rows from stdout/stderr and adds summary columns `runs_rate_limited` and `pass_rate_no_429`. The arm E panel now uses the same seeds for full/combined as arm E has (was hard-coded to seed 0).
+- [ ] **Re-run in flight:** `scripts/chain_arm_e.sh` (log `results/arm_e.log`) waits for hard2 to exit, then adds arm E seed 1 on all 25 tasks plus seed 0 on the 3 hard2 tasks (112 runs, 3 workers, nothing else competing). Touches `results/ARM_E2_DONE`. Estimated ~$1.5–3, done ~8:45–9:15 AM if sessions keep the box awake. Then `make figures` and commit. Do not start other runs meanwhile.
+- **For the article (arm E section), regardless of the re-run:** (1) Report arm E with its `runs_rate_limited` column, or quote seed-1 numbers only, and say seed 0 overlapped the main run's rate-limit pressure. (2) Aider's genuine failure mode is real and worth a sentence: in headless `--message` mode it edits only the files it pulled in from its repo map, then ends with "If the grep finds matches in other files, add them to the chat and I'll update them" (tinydb-t01 transcript). It is built for a human to add files; there is no autonomous search loop, so missed callers are expected. That's a design difference, not a bug in our adapter. (3) Claude Code (closed) 95%, mini-swe-agent and OpenCode 91% on seed 0, vs our combined harness 100%; re-quote from summary.csv after the re-run.
+- Spend at 7:25: about $25.5 of $50.
 
 ## Phase 3: write-up (~8:00–10:00 AM)
 - [ ] Headline number, tables, charts, failure examples, following the outline in EXPERIMENT_PLAN.

@@ -17,7 +17,7 @@ UPSTREAM = "https://api.anthropic.com"
 
 class Recorder:
     def __init__(self):
-        self.lock = threading.Lock(); self.calls = []; self.bodies = []
+        self.lock = threading.Lock(); self.calls = []; self.bodies = []; self.status = {}
     def add(self, u, req, resp_text):
         with self.lock:
             self.calls.append(u); self.bodies.append({"request": req, "response": resp_text[:200000]})
@@ -63,6 +63,9 @@ def make_handler(rec: Recorder):
                         self.wfile.write(f"{len(chunk):X}\r\n".encode() + chunk + b"\r\n"); self.wfile.flush()
                     self.wfile.write(b"0\r\n\r\n"); self.wfile.flush()
             text = b"".join(buf).decode("utf-8", "replace")
+            if is_msg:
+                with rec.lock:
+                    rec.status[r.status_code] = rec.status.get(r.status_code, 0) + 1
             if is_msg and r.status_code == 200:
                 u = dict(input=0, output=0, cache_read=0, cache_write=0)
                 if text.lstrip().startswith("{"):

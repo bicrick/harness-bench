@@ -46,6 +46,9 @@ def _run(root, task, name, build_cmd):
             stats["tokens"][k] = stats["tokens"].get(k, 0) + v
         stats["cost_usd"] += cost(u)
     stats["calls"] = len(rec.calls); stats["notes"]["tool_calls"] = len(rec.calls)  # proxy sees model turns, not tool calls
+    # upstream 429s (org ITPM limit) seen by the proxy; harnesses retry these with their own backoff and some give up
+    stats["notes"]["http_status"] = {str(k): v for k, v in rec.status.items()}
+    stats["notes"]["rate_limit_events"] = rec.status.get(429, 0)
     stats["api_s"] = round(time.time() - t0, 1)
     # remove harness droppings that would count as diffs
     for junk in [".aider.chat.history.md", ".aider.input.history", ".aider.tags.cache.v4", ".aider.tags.cache.v3"]:
