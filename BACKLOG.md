@@ -1,4 +1,4 @@
-<!-- last session: 5:47 AM CT build sprint -->
+<!-- last session: 6:17 AM CT build sprint -->
 # Backlog: Same model, better harness (deadline 11:30 AM CT Sat Oct 10)
 
 Haiku 5.5 only · $50 hard cap (`python -m cshape spend`) · priority order: A → T → B/C → D.
@@ -90,6 +90,12 @@ Routine pickup: start with the first unchecked item in the current clock phase.
 - [x] **New summary column `cache_hit_ratio`** = cache_read / (cache_read + cache_write + uncached input), per config, in `summarize()` (so summary.csv / article_numbers pick it up on the next `make figures`).
 - **Article finding (from logged rows, main.jsonl, 5:48 snapshot):** compaction wrecks prompt caching. Cache hit ratio: agentic 0.83, agentic_tools 0.75, agentic_c90 0.74, agentic_mask 0.58, agentic_c50 0.55; at the 12k budget c90_tight 0.45, mask_tight 0.21, c50_tight 0.10. Cost per solve moves the opposite way (agentic $0.0047 vs c50_tight $0.035). Every compaction rewrites the prefix, so the next call pays cache-write prices on the whole history. This explains why compaction "saves tokens" but costs more on a cheap model with caching. Re-quote final numbers from summary.csv after FINAL, not these.
 - Next sprint (6:08): just confirm chain_final moved to FINAL (`tail results/chain_final.log`). If hard2 still has >10 rows left at 6:38, leave it; FINAL waits on it by design.
+
+## Build sprint 6:17 AM CT: the box freezes between sessions (real throughput killer)
+- [x] **Diagnosis.** No ledger write from 05:53 to 06:17 (24 min), then calls resumed the moment this routine fired; the open sockets had last received data ~42 s after the fire. `ps -o lstart` now reports the hard2 process as started at 06:03, but its own ledger rows from 05:52 carry the same pid. That is suspended-VM clock skew: the box (and its monotonic clock) is frozen whenever no agent session is active, so `ps` start times drift later by the frozen time. The "mystery restart at ~5:38" in the 5:47 note was the same skew (real start 5:10 from the 5:09 sprint, plus a ~28 min freeze). **No one restarted anything; runs only progress while some routine session is alive.** About 50 min of run time has been lost to freezes so far.
+- [x] **Mitigation.** Added a keep-alive routine (fires at :13/:28/:43/:58 through 11 AM) that just holds a session open ~12 min while `cshape run`/chain_final is active, and told this build sprint to stay in session monitoring (AwaitShell) until shortly before its next fire whenever runs are in flight. Do not interpret future lstart jumps as restarts.
+- Status 6:20: B_tight complete (main.jsonl 947 rows). hard2 76/102, 26 left (all seed 1: tinydb-h02 × 17, marshmallow-h03 agentic family × 9). chain_final waiting; it then does resume passes, combine and FINAL (full vs combined, 25 tasks × 5 seeds). Spend $19.50 of $50. New ETA (if the box stays awake): hard2 ~6:50, FINAL ~8:00–8:15.
+- Article/method note: wall_s for rows in flight during a freeze is inflated (e.g. 1380–1495 s rows in hard2.log/btight.log); do not quote wall time per run as harness speed without filtering rows whose interval overlaps a freeze gap in ledger_calls.ndjson (gaps > 5 min with no calls from any pid).
 
 ## Phase 3: write-up (~8:00–10:00 AM)
 - [ ] Headline number, tables, charts, failure examples, following the outline in EXPERIMENT_PLAN.
