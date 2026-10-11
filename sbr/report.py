@@ -43,8 +43,10 @@ def load():
         if r["instance_id"] in skip or r.get("excluded") or r.get("notes") == "excluded: infra (httpbin unreachable)":
             continue  # infra-broken tasks stay out of scoring for every harness
         k = (r["instance_id"], r["harness"])
-        if k not in rows or (rows[k].get("error") and not r.get("error")) or rows[k].get("resolved") is None:
-            rows[k] = r  # keep the latest good row per pair
+        good = not r.get("error") and r.get("resolved") is not None
+        prev_good = k in rows and not rows[k].get("error") and rows[k].get("resolved") is not None
+        if good or not prev_good:
+            rows[k] = r  # keep the latest good row per pair (reruns replace earlier rows)
     return list(rows.values())
 
 def summarize(rows):

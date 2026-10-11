@@ -1,0 +1,101 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..475f0481a5 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -550,9 +550,96 @@ class Query(BaseExpression):
+         Perform a COUNT() query using the current filter constraints.
+         """
+         obj = self.clone()
++        obj.strip_unused_annotations()
+         obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+         return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++    def strip_unused_annotations(self):
++        """
++        Remove annotations that cannot affect the result of the query, i.e.
++        those not referenced by the WHERE clause, the ORDER BY clause or by
++        another retained annotation, along with the joins that only they
++        required. Queries whose row set depends on the selected columns
++        (distinct, slicing, combinators) or whose GROUP BY is explicitly
++        specified are left untouched.
++        """
++        if (
++            not self.annotations
++            or self.distinct
++            or self.is_sliced
++            or self.combinator
++            or isinstance(self.group_by, tuple)
++        ):
++            return
++        alias_by_id = {id(expr): alias for alias, expr in self.annotations.items()}
++        referenced = set()
++        used_aliases = set()
++        opaque = False
++        pending = list(self.where.children)
++        for item in self.order_by:
++            if isinstance(item, str):
++                name = item[1:] if item.startswith("-") else item
++                pending.append(Ref(name, None))
++            else:
++                pending.append(item)
++        while pending:
++            node = pending.pop()
++            alias = None
++            if isinstance(node, Ref):
++                alias = node.refs
++            elif id(node) in alias_by_id:
++                alias = alias_by_id[id(node)]
++            if alias is not None:
++                if alias in referenced or alias not in self.annotations:
++                    continue
++                referenced.add(alias)
++                pending.extend(self.annotations[alias].get_source_expressions())
++            elif isinstance(node, Col):
++                used_aliases.add(node.alias)
++            elif isinstance(node, Query):
++                # Subqueries may reference aliases of this query which can't
++                # be discovered without walking them.
++                opaque = True
++            elif isinstance(node, WhereNode):
++                pending.extend(node.children)
++            elif hasattr(node, "get_source_expressions"):
++                pending.extend(node.get_source_expressions())
++
++        if opaque or len(referenced) == len(self.annotations):
++            # Subqueries may reference the joins of stripped annotations, so
++            # the query is left untouched.
++            return
++        self.annotations = {
++            alias: expr
++            for alias, expr in self.annotations.items()
++            if alias in referenced
++        }
++        if self.annotation_select_mask is not None:
++            self.set_annotation_mask(
++                self.annotation_select_mask.intersection(self.annotations)
++            )
++        # Release the joins that are no longer referenced, otherwise they
++        # would still multiply the rows of the query.
++        needed = self._with_parent_aliases(used_aliases | {self.base_table})
++        for alias in self.alias_map:
++            if alias not in needed:
++                self.alias_refcount[alias] = 0
++        if self.group_by is True and not any(
++            getattr(expr, "contains_aggregate", False)
++            for expr in self.annotations.values()
++        ):
++            # GROUP BY was only required to aggregate the stripped annotations.
++            self.group_by = None
++
++    def _with_parent_aliases(self, aliases):
++        result = set()
++        for alias in aliases:
++            while alias is not None and alias not in result:
++                result.add(alias)
++                join = self.alias_map.get(alias)
++                alias = getattr(join, "parent_alias", None)
++        return result
++
+     def has_filters(self):
+         return self.where
+ 

@@ -1,0 +1,307 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "keep_attrs" xarray/core/variable.py | head -50; grep -n "def quantile" -A5 xarray/core/variable.py xarray/core/dataarray.py xarray/core/dataset.py
+22:from .options import _get_keep_attrs
+1404:        keep_attrs=None,
+1424:        keep_attrs : bool, optional
+1476:        if keep_attrs is None:
+1477:            keep_attrs = _get_keep_attrs(default=False)
+1478:        attrs = self._attrs if keep_attrs else None
+1879:            keep_attrs = _get_keep_attrs(default=False)
+1880:            attrs = self._attrs if keep_attrs else None
+xarray/core/variable.py:1595:    def quantile(self, q, dim=None, interpolation="linear"):
+xarray/core/variable.py-1596-        """Compute the qth quantile of the data along the specified dimension.
+xarray/core/variable.py-1597-
+xarray/core/variable.py-1598-        Returns the qth quantiles(s) of the array elements.
+xarray/core/variable.py-1599-
+xarray/core/variable.py-1600-        Parameters
+--
+xarray/core/dataarray.py:2827:    def quantile(
+xarray/core/dataarray.py-2828-        self,
+xarray/core/dataarray.py-2829-        q: Any,
+xarray/core/dataarray.py-2830-        dim: Union[Hashable, Sequence[Hashable], None] = None,
+xarray/core/dataarray.py-2831-        interpolation: str = "linear",
+xarray/core/dataarray.py-2832-        keep_attrs: bool = None,
+--
+xarray/core/dataset.py:4694:    def quantile(
+xarray/core/dataset.py-4695-        self, q, dim=None, interpolation="linear", numeric_only=False, keep_attrs=None
+xarray/core/dataset.py-4696-    ):
+xarray/core/dataset.py-4697-        """Compute the qth quantile of the data along the specified dimension.
+xarray/core/dataset.py-4698-
+xarray/core/dataset.py-4699-        Returns the qth quantiles(s) of the array elements for each variable
+[0m
+[0m$ [0mcd /testbed && sed -n 1595,1660p xarray/core/variable.py; sed -n 2827,2900p xarray/core/dataarray.py | grep -n "quantile\|keep_attrs" ; sed -n 4694,4790p xarray/core/dataset.py | grep -n "keep_attrs\|quantile\|return\|_quantile"; grep -n "def _quantile" -A40 xarray/core/dataset.py | grep -n "attrs\|Variable\|quantile"
+def quantile(self, q, dim=None, interpolation="linear"):
+        """Compute the qth quantile of the data along the specified dimension.
+
+        Returns the qth quantiles(s) of the array elements.
+
+        Parameters
+        ----------
+        q : float in range of [0,1] (or sequence of floats)
+            Quantile to compute, which must be between 0 and 1
+            inclusive.
+        dim : str or sequence of str, optional
+            Dimension(s) over which to apply quantile.
+        interpolation : {'linear', 'lower', 'higher', 'midpoint', 'nearest'}
+            This optional parameter specifies the interpolation method to
+            use when the desired quantile lies between two data points
+            ``i < j``:
+                * linear: ``i + (j - i) * fraction``, where ``fraction`` is
+                  the fractional part of the index surrounded by ``i`` and
+                  ``j``.
+                * lower: ``i``.
+                * higher: ``j``.
+                * nearest: ``i`` or ``j``, whichever is nearest.
+                * midpoint: ``(i + j) / 2``.
+
+        Returns
+        -------
+        quantiles : Variable
+            If `q` is a single quantile, then the result
+            is a scalar. If multiple percentiles are given, first axis of
+            the result corresponds to the quantile and a quantile dimension
+            is added to the return array. The other dimensions are the
+             dimensions that remain after the reduction of the array.
+
+        See Also
+        --------
+        numpy.nanpercentile, pandas.Series.quantile, Dataset.quantile,
+        DataArray.quantile
+        """
+        if isinstance(self.data, dask_array_type):
+            raise TypeError(
+                "quantile does not work for arrays stored as dask "
+                "arrays. Load the data via .compute() or .load() "
+                "prior to calling this method."
+            )
+
+        q = np.asarray(q, dtype=np.float64)
+
+        new_dims = list(self.dims)
+        if dim is not None:
+            axis = self.get_axis_num(dim)
+            if utils.is_scalar(dim):
+                new_dims.remove(dim)
+            else:
+                for d in dim:
+                    new_dims.remove(d)
+        else:
+            axis = None
+            new_dims = []
+
+        # only add the quantile dimension if q is array like
+        if q.ndim != 0:
+            new_dims = ["quantile"] + new_dims
+
+        qs = np.nanpercentile(
+            self.data, q * 100.0, axis=axis, interpolation=interpolation
+        )
+1:    def quantile(
+6:        keep_attrs: bool = None,
+8:        """Compute the qth quantile of the data along the specified dimension.
+10:        Returns the qth quantiles(s) of the array elements.
+17:            Dimension(s) over which to apply quantile.
+20:            use when the desired quantile lies between two data points
+30:        keep_attrs : bool, optional
+37:        quantiles : DataArray
+38:            If `q` is a single quantile, then the result
+40:            the result corresponds to the quantile and a quantile dimension
+46:        numpy.nanpercentile, pandas.Series.quantile, Dataset.quantile
+49:        ds = self._to_temp_dataset().quantile(
+50:            q, dim=dim, keep_attrs=keep_attrs, interpolation=interpolation
+55:        self, dim: Hashable, pct: bool = False, keep_attrs: bool = None
+73:        keep_attrs : bool, optional
+1:    def quantile(
+2:        self, q, dim=None, interpolation="linear", numeric_only=False, keep_attrs=None
+4:        """Compute the qth quantile of the data along the specified dimension.
+6:        Returns the qth quantiles(s) of the array elements for each variable
+14:            Dimension(s) over which to apply quantile.
+17:            use when the desired quantile lies between two data points
+27:        keep_attrs : bool, optional
+30:            object will be returned without attributes.
+36:        quantiles : Dataset
+37:            If `q` is a single quantile, then the result is a scalar for each
+39:            axis of the result corresponds to the quantile and a quantile
+40:            dimension is added to the return Dataset. The other dimensions are
+45:        numpy.nanpercentile, pandas.Series.quantile, DataArray.quantile
+77:                        variables[name] = var.quantile(
+87:        if keep_attrs is None:
+88:            keep_attrs = _get_keep_attrs(default=False)
+89:        attrs = self.attrs if keep_attrs else None
+93:        if "quantile" in new.dims:
+94:            new.coords["quantile"] = Variable("quantile", q)
+96:            new.coords["quantile"] = q
+97:        return new
+[0m
+[0m$ [0mcd /testbed && sed -n 1660,1670p xarray/core/variable.py; sed -n 4760,4790p xarray/core/dataset.py
+)
+        return Variable(new_dims, qs)
+
+    def rank(self, dim, pct=False):
+        """Ranks the data.
+
+        Equal values are assigned a rank that is the average of the ranks that
+        would have been otherwise assigned to all of the values within that
+        set.  Ranks begin at 1, not 0. If `pct`, computes percentage ranks.
+
+        NaNs in the input array are returned as NaNs.
+                    if (
+                        not numeric_only
+                        or np.issubdtype(var.dtype, np.number)
+                        or var.dtype == np.bool_
+                    ):
+                        if len(reduce_dims) == var.ndim:
+                            # prefer to aggregate over axis=None rather than
+                            # axis=(0, 1) if they will be equivalent, because
+                            # the former is often more efficient
+                            reduce_dims = None
+                        variables[name] = var.quantile(
+                            q, dim=reduce_dims, interpolation=interpolation
+                        )
+
+            else:
+                variables[name] = var
+
+        # construct the new dataset
+        coord_names = {k for k in self.coords if k in variables}
+        indexes = OrderedDict((k, v) for k, v in self.indexes.items() if k in variables)
+        if keep_attrs is None:
+            keep_attrs = _get_keep_attrs(default=False)
+        attrs = self.attrs if keep_attrs else None
+        new = self._replace_with_new_dims(
+            variables, coord_names=coord_names, attrs=attrs, indexes=indexes
+        )
+        if "quantile" in new.dims:
+            new.coords["quantile"] = Variable("quantile", q)
+        else:
+            new.coords["quantile"] = q
+        return new
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+import re
+p='xarray/core/variable.py'
+s=open(p).read()
+s=s.replace('''    def quantile(self, q, dim=None, interpolation="linear"):''','''    def quantile(self, q, dim=None, interpolation="linear", keep_attrs=None):''',1)
+s=s.replace('''                * midpoint: ``(i + j) / 2``.
+
+        Returns
+        -------
+        quantiles : Variable''','''                * midpoint: ``(i + j) / 2``.
+        keep_attrs : bool, optional
+            If True, the variable's attributes (`attrs`) will be copied from
+            the original object to the new one.  If False (default), the new
+            object will be returned without attributes.
+
+        Returns
+        -------
+        quantiles : Variable''',1)
+s=s.replace('''        return Variable(new_dims, qs)
+
+    def rank(''','''        if keep_attrs is None:
+            keep_attrs = _get_keep_attrs(default=False)
+        attrs = self._attrs if keep_attrs else None
+
+        return Variable(new_dims, qs, attrs)
+
+    def rank(''',1)
+open(p,'w').write(s)
+
+p='xarray/core/dataset.py'
+s=open(p).read()
+s=s.replace('''                        variables[name] = var.quantile(
+                            q, dim=reduce_dims, interpolation=interpolation
+                        )''','''                        variables[name] = var.quantile(
+                            q,
+                            dim=reduce_dims,
+                            interpolation=interpolation,
+                            keep_attrs=keep_attrs,
+                        )''',1)
+s=s.replace('''        # construct the new dataset
+        coord_names = {k for k in self.coords if k in variables}
+        indexes = OrderedDict((k, v) for k, v in self.indexes.items() if k in variables)
+        if keep_attrs is None:
+            keep_attrs = _get_keep_attrs(default=False)
+        attrs = self.attrs if keep_attrs else None
+        new = self._replace_with_new_dims(
+            variables, coord_names=coord_names, attrs=attrs, indexes=indexes
+        )
+        if "quantile" in new.dims:''','''        # construct the new dataset
+        coord_names = {k for k in self.coords if k in variables}
+        indexes = OrderedDict((k, v) for k, v in self.indexes.items() if k in variables)
+        attrs = self.attrs if keep_attrs else None
+        new = self._replace_with_new_dims(
+            variables, coord_names=coord_names, attrs=attrs, indexes=indexes
+        )
+        if "quantile" in new.dims:''',1)
+open(p,'w').write(s)
+EOF
+grep -n "keep_attrs is None" xarray/core/dataset.py | head -3; sed -n 4725,4745p xarray/core/dataset.py
+3830:        if keep_attrs is None:
+3922:        if keep_attrs is None:
+4833:        if keep_attrs is None:
+            If True, only apply ``func`` to variables with a numeric dtype.
+
+        Returns
+        -------
+        quantiles : Dataset
+            If `q` is a single quantile, then the result is a scalar for each
+            variable in data_vars. If multiple percentiles are given, first
+            axis of the result corresponds to the quantile and a quantile
+            dimension is added to the return Dataset. The other dimensions are
+            the dimensions that remain after the reduction of the array.
+
+        See Also
+        --------
+        numpy.nanpercentile, pandas.Series.quantile, DataArray.quantile
+        """
+
+        if isinstance(dim, str):
+            dims = {dim}
+        elif dim is None:
+            dims = set(self.dims)
+        else:
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+p='xarray/core/dataset.py'
+s=open(p).read()
+old='''        numpy.nanpercentile, pandas.Series.quantile, DataArray.quantile
+        """
+
+        if isinstance(dim, str):
+            dims = {dim}
+        elif dim is None:
+            dims = set(self.dims)'''
+assert s.count(old)==1
+s=s.replace(old,'''        numpy.nanpercentile, pandas.Series.quantile, DataArray.quantile
+        """
+
+        if keep_attrs is None:
+            keep_attrs = _get_keep_attrs(default=False)
+
+        if isinstance(dim, str):
+            dims = {dim}
+        elif dim is None:
+            dims = set(self.dims)''')
+open(p,'w').write(s)
+EOF
+python -c "
+import xarray as xr
+da = xr.DataArray([0, 0], dims='x', attrs={'units':'K'})
+print(da.quantile(.9, dim='x', keep_attrs=True).attrs)
+print(da.quantile(.9, dim='x').attrs)
+print(da.quantile([.1,.9], dim='x', keep_attrs=True).attrs)
+ds = da.to_dataset(name='a'); ds.attrs['g']=1
+print(ds.quantile(.5, keep_attrs=True).a.attrs, ds.quantile(.5, keep_attrs=True).attrs)
+" && python -m pytest -q xarray/tests/test_dataarray.py xarray/tests/test_dataset.py xarray/tests/test_variable.py -k quantile 2>&1 | tail -3
+/testbed/xarray/plot/plot.py:287: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if args is ():
+OrderedDict([('units', 'K')])
+OrderedDict()
+OrderedDict([('units', 'K')])
+OrderedDict([('units', 'K')]) OrderedDict([('g', 1)])
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+4 passed, 1791 deselected, 117 warnings in 4.17s
+[0m

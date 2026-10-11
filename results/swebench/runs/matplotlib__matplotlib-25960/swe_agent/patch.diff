@@ -1,0 +1,57 @@
+diff --git a/lib/matplotlib/figure.py b/lib/matplotlib/figure.py
+index dab2bc4a5a..6c6455dd08 100644
+--- a/lib/matplotlib/figure.py
++++ b/lib/matplotlib/figure.py
+@@ -2138,6 +2138,32 @@ default: %(va)s
+         a.set_transform(self.transSubfigure)
+ 
+ 
++def _subgrid_extent(ratios, span, space):
++    """
++    Return ``(size, start, stop)`` of the cells in *span* as grid fractions.
++
++    The grid has cells of relative sizes *ratios* separated by *space*, which
++    is the spacing as a fraction of the average cell size.  *start* and *stop*
++    are the positions of the beginning and end of *span*, measured from the
++    beginning of the grid.  With ``space == 0`` this is the plain ratio-based
++    layout.
++    """
++    ratios = np.asarray(ratios, dtype=float)
++    if space == 0:
++        size = ratios[span].sum() / ratios.sum()
++        start = ratios[:span.start].sum() / ratios.sum()
++        stop = ratios[:span.stop].sum() / ratios.sum()
++        return size, start, stop
++    # Lengths in units of the average cell, including the gaps.
++    n = len(ratios)
++    cells = n * ratios / ratios.sum()
++    total = n + space * (n - 1)
++    size = (cells[span].sum() + space * (len(span) - 1)) / total
++    start = (cells[:span.start].sum() + space * span.start) / total
++    stop = (cells[:span.stop].sum() + space * (span.stop - 1)) / total
++    return size, start, stop
++
++
+ @_docstring.interpd
+ class SubFigure(FigureBase):
+     """
+@@ -2276,10 +2302,15 @@ class SubFigure(FigureBase):
+         gs = self._subplotspec.get_gridspec()
+         wr = np.asarray(gs.get_width_ratios())
+         hr = np.asarray(gs.get_height_ratios())
+-        dx = wr[self._subplotspec.colspan].sum() / wr.sum()
+-        dy = hr[self._subplotspec.rowspan].sum() / hr.sum()
+-        x0 = wr[:self._subplotspec.colspan.start].sum() / wr.sum()
+-        y0 = 1 - hr[:self._subplotspec.rowspan.stop].sum() / hr.sum()
++        # Spacing between the cells of the grid, as a fraction of the average
++        # cell size.  No spacing is used unless it was explicitly given.
++        wspace = gs.wspace or 0
++        hspace = gs.hspace or 0
++        dx, x0, _ = _subgrid_extent(wr, self._subplotspec.colspan, wspace)
++        dy, _, y_bottom = _subgrid_extent(
++            hr, self._subplotspec.rowspan, hspace)
++        # Rows are counted from the top of the grid, figure y from the bottom.
++        y0 = 1 - y_bottom
+         if self.bbox_relative is None:
+             self.bbox_relative = Bbox.from_bounds(x0, y0, dx, dy)
+         else:

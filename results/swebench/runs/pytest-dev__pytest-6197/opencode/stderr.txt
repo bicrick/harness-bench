@@ -1,0 +1,192 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && git log --oneline -1 && grep -n "_collectfile\|def _recurse\|def _collect\|ihook.pytest_collect_file\|isinitpath\|def pytest_collect_file" src/_pytest/main.py
+4eecc5156 SWE-bench
+419:    def isinitpath(self, path):
+495:    def _collect(self, arg):
+514:                            col = self._collectfile(pkginit, handle_dupes=False)
+536:                        for x in self._collectfile(pkginit):
+544:                for x in self._collectfile(path):
+558:                col = collect_root._collectfile(argpath, handle_dupes=False)
+577:    def _collectfile(self, path, handle_dupes=True):
+584:        if not self.isinitpath(path):
+597:        return ihook.pytest_collect_file(path=path, parent=self)
+599:    def _recurse(self, dirpath):
+[0m
+[0m$ [0mcd /testbed && sed -n 495,640p src/_pytest/main.py
+def _collect(self, arg):
+        from _pytest.python import Package
+
+        names = self._parsearg(arg)
+        argpath = names.pop(0)
+
+        # Start with a Session root, and delve to argpath item (dir or file)
+        # and stack all Packages found on the way.
+        # No point in finding packages when collecting doctests
+        if not self.config.getoption("doctestmodules", False):
+            pm = self.config.pluginmanager
+            for parent in reversed(argpath.parts()):
+                if pm._confcutdir and pm._confcutdir.relto(parent):
+                    break
+
+                if parent.isdir():
+                    pkginit = parent.join("__init__.py")
+                    if pkginit.isfile():
+                        if pkginit not in self._node_cache:
+                            col = self._collectfile(pkginit, handle_dupes=False)
+                            if col:
+                                if isinstance(col[0], Package):
+                                    self._pkg_roots[parent] = col[0]
+                                # always store a list in the cache, matchnodes expects it
+                                self._node_cache[col[0].fspath] = [col[0]]
+
+        # If it's a directory argument, recurse and look for any Subpackages.
+        # Let the Package collector deal with subnodes, don't collect here.
+        if argpath.check(dir=1):
+            assert not names, "invalid arg {!r}".format(arg)
+
+            seen_dirs = set()
+            for path in argpath.visit(
+                fil=self._visit_filter, rec=self._recurse, bf=True, sort=True
+            ):
+                dirpath = path.dirpath()
+                if dirpath not in seen_dirs:
+                    # Collect packages first.
+                    seen_dirs.add(dirpath)
+                    pkginit = dirpath.join("__init__.py")
+                    if pkginit.exists():
+                        for x in self._collectfile(pkginit):
+                            yield x
+                            if isinstance(x, Package):
+                                self._pkg_roots[dirpath] = x
+                if dirpath in self._pkg_roots:
+                    # Do not collect packages here.
+                    continue
+
+                for x in self._collectfile(path):
+                    key = (type(x), x.fspath)
+                    if key in self._node_cache:
+                        yield self._node_cache[key]
+                    else:
+                        self._node_cache[key] = x
+                        yield x
+        else:
+            assert argpath.check(file=1)
+
+            if argpath in self._node_cache:
+                col = self._node_cache[argpath]
+            else:
+                collect_root = self._pkg_roots.get(argpath.dirname, self)
+                col = collect_root._collectfile(argpath, handle_dupes=False)
+                if col:
+                    self._node_cache[argpath] = col
+            m = self.matchnodes(col, names)
+            # If __init__.py was the only file requested, then the matched node will be
+            # the corresponding Package, and the first yielded item will be the __init__
+            # Module itself, so just use that. If this special case isn't taken, then all
+            # the files in the package will be yielded.
+            if argpath.basename == "__init__.py":
+                try:
+                    yield next(m[0].collect())
+                except StopIteration:
+                    # The package collects nothing with only an __init__.py
+                    # file in it, which gets ignored by the default
+                    # "python_files" option.
+                    pass
+                return
+            yield from m
+
+    def _collectfile(self, path, handle_dupes=True):
+        assert (
+            path.isfile()
+        ), "{!r} is not a file (isdir={!r}, exists={!r}, islink={!r})".format(
+            path, path.isdir(), path.exists(), path.islink()
+        )
+        ihook = self.gethookproxy(path)
+        if not self.isinitpath(path):
+            if ihook.pytest_ignore_collect(path=path, config=self.config):
+                return ()
+
+        if handle_dupes:
+            keepduplicates = self.config.getoption("keepduplicates")
+            if not keepduplicates:
+                duplicate_paths = self.config.pluginmanager._duplicatepaths
+                if path in duplicate_paths:
+                    return ()
+                else:
+                    duplicate_paths.add(path)
+
+        return ihook.pytest_collect_file(path=path, parent=self)
+
+    def _recurse(self, dirpath):
+        if dirpath.basename == "__pycache__":
+            return False
+        ihook = self.gethookproxy(dirpath.dirpath())
+        if ihook.pytest_ignore_collect(path=dirpath, config=self.config):
+            return False
+        for pat in self._norecursepatterns:
+            if dirpath.check(fnmatch=pat):
+                return False
+        ihook = self.gethookproxy(dirpath)
+        ihook.pytest_collect_directory(path=dirpath, parent=self)
+        return True
+
+    @staticmethod
+    def _visit_filter(f):
+        return f.check(file=1)
+
+    def _tryconvertpyarg(self, x):
+        """Convert a dotted module name to path."""
+        try:
+            spec = importlib.util.find_spec(x)
+        # AttributeError: looks like package module, but actually filename
+        # ImportError: module does not exist
+        # ValueError: not a module name
+        except (AttributeError, ImportError, ValueError):
+            return x
+        if spec is None or spec.origin in {None, "namespace"}:
+            return x
+        elif spec.submodule_search_locations:
+            return os.path.dirname(spec.origin)
+        else:
+            return spec.origin
+
+    def _parsearg(self, arg):
+        """ return (fspath, names) tuple after checking the file exists. """
+        parts = str(arg).split("::")
+        if self.config.option.pyargs:
+            parts[0] = self._tryconvertpyarg(parts[0])
+        relpath = parts[0].replace("/", os.sep)
+        path = self.config.invocation_dir.join(relpath, abs=True)
+        if not path.check():
+            if self.config.option.pyargs:
+[0m
+[0m$ [0mcd /testbed && grep -n "def pytest_collect_file" -A 22 src/_pytest/python.py
+176:def pytest_collect_file(path, parent):
+177-    ext = path.ext
+178-    if ext == ".py":
+179-        if not parent.session.isinitpath(path):
+180-            if not path_matches_patterns(
+181-                path, parent.config.getini("python_files") + ["__init__.py"]
+182-            ):
+183-                return
+184-        ihook = parent.session.gethookproxy(path)
+185-        return ihook.pytest_pycollect_makemodule(path=path, parent=parent)
+186-
+187-
+188-def path_matches_patterns(path, patterns):
+189-    """Returns True if the given py.path.local matches one of the patterns in the list of globs given"""
+190-    return any(path.fnmatch(pattern) for pattern in patterns)
+191-
+192-
+193-def pytest_pycollect_makemodule(path, parent):
+194-    if path.basename == "__init__.py":
+195-        return Package(path, parent)
+196-    return Module(path, parent)
+197-
+198-
+[0m
+[93m[1m! [0mpermission requested: external_directory (/tmp/rep/*, /tmp/*); auto-rejecting
+[0m✗ [0mcd /testbed && mkdir -p /tmp/rep/foobar && cd /tmp/rep && echo 'assert False' > foobar/__init__.py && echo 'def test_a(): pass' > test_foo.py && python -m pytest -q 2>&1 | tail -15; cd /testbed && grep -n "class Package" -A 60 src/_pytest/python.py | grep -n "def \|setup\|collect"  failed
+[91m[1mError: [0mThe user rejected permission to use this specific tool call.

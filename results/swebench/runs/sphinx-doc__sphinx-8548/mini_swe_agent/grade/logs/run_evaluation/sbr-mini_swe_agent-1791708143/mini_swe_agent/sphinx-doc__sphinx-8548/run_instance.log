@@ -1,0 +1,271 @@
+2026-10-11 03:42:25,483 - INFO - Creating container for sphinx-doc__sphinx-8548...
+2026-10-11 03:42:25,511 - INFO - Container for sphinx-doc__sphinx-8548 created: ab6db3f9f651d1034881b7732f12a06b6ce9339355a7040ae75d92bf11a598df
+2026-10-11 03:42:25,934 - INFO - Container for sphinx-doc__sphinx-8548 started: ab6db3f9f651d1034881b7732f12a06b6ce9339355a7040ae75d92bf11a598df
+2026-10-11 03:42:25,935 - INFO - Intermediate patch for sphinx-doc__sphinx-8548 written to logs/run_evaluation/sbr-mini_swe_agent-1791708143/mini_swe_agent/sphinx-doc__sphinx-8548/patch.diff, now applying to container...
+2026-10-11 03:42:26,096 - INFO - >>>>> Applied Patch:
+Checking patch sphinx/ext/autodoc/__init__.py...
+Applied patch sphinx/ext/autodoc/__init__.py cleanly.
+
+2026-10-11 03:42:26,633 - INFO - Git diff before:
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..0cafb52d4 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -606,6 +606,17 @@ class Documenter:
+ 
+                     for i, line in enumerate(self.process_doc(docstrings)):
+                         self.add_line(line, sourcename, i)
++                else:
++                    # the attribute may be inherited from a base class
++                    # (its docstring is cached in the base class's module)
++                    inherited_doc = get_attribute_comment_in_mro(self.parent,
++                                                                 self.objpath[-1])
++                    if inherited_doc is not None:
++                        no_docstring = True
++                        docstrings = [inherited_doc]
++
++                        for i, line in enumerate(self.process_doc(docstrings)):
++                            self.add_line(line, sourcename, i)
+ 
+         # add content from docstrings
+         if not no_docstring:
+@@ -746,7 +757,8 @@ class Documenter:
+                         keep = has_doc or self.options.undoc_members
+                 else:
+                     keep = False
+-            elif (namespace, membername) in attr_docs:
++            elif ((namespace, membername) in attr_docs or
++                  get_attribute_comment_in_mro(self.object, membername) is not None):
+                 if want_all and isprivate:
+                     if self.options.private_members is None:
+                         keep = False
+@@ -1697,6 +1709,30 @@ class ExceptionDocumenter(ClassDocumenter):
+         return isinstance(member, type) and issubclass(member, BaseException)
+ 
+ 
++def get_attribute_comment_in_mro(parent: Any, attrname: str) -> Optional[List[str]]:
++    """Return the attribute documentation of *attrname* defined in *parent* or
++    one of its base classes (searched in MRO order), or None if not found.
++    """
++    if not inspect.isclass(parent):
++        return None
++
++    for cls in inspect.getmro(parent):
++        try:
++            module = safe_getattr(cls, '__module__')
++            qualname = safe_getattr(cls, '__qualname__')
++
++            analyzer = ModuleAnalyzer.for_module(module)
++            analyzer.analyze()
++            if qualname:
++                key = (qualname, attrname)
++                if key in analyzer.attr_docs:
++                    return list(analyzer.attr_docs[key])
++        except (AttributeError, PycodeError):
++            pass
++
++    return None
++
++
+ class DataDocumenterMixinBase:
+     # define types of instance variables
+     config = None  # type: Config
+@@ -2161,24 +2197,10 @@ class UninitializedInstanceAttributeMixin(DataDocumenterMixinBase):
+     """
+ 
+     def get_attribute_comment(self, parent: Any) -> Optional[List[str]]:
+-        try:
+-            for cls in inspect.getmro(parent):
+-                try:
+-                    module = safe_getattr(cls, '__module__')
+-                    qualname = safe_getattr(cls, '__qualname__')
+-
+-                    analyzer = ModuleAnalyzer.for_module(module)
+-                    analyzer.analyze()
+-                    if qualname and self.objpath:
+-                        key = (qualname, self.objpath[-1])
+-                        if key in analyzer.attr_docs:
+-                            return list(analyzer.attr_docs[key])
+-                except (AttributeError, PycodeError):
+-                    pass
+-        except (AttributeError, PycodeError):
+-            pass
+-
+-        return None
++        if self.objpath:
++            return get_attribute_comment_in_mro(parent, self.objpath[-1])
++        else:
++            return None
+ 
+     def is_uninitialized_instance_attribute(self, parent: Any) -> bool:
+         """Check the subject is an attribute defined in __init__()."""
+2026-10-11 03:42:26,633 - INFO - Eval script for sphinx-doc__sphinx-8548 written to logs/run_evaluation/sbr-mini_swe_agent-1791708143/mini_swe_agent/sphinx-doc__sphinx-8548/eval.sh; copying to container...
+2026-10-11 03:42:32,066 - INFO - Test runtime: 5.33 seconds
+2026-10-11 03:42:32,067 - INFO - Test output for sphinx-doc__sphinx-8548 written to logs/run_evaluation/sbr-mini_swe_agent-1791708143/mini_swe_agent/sphinx-doc__sphinx-8548/test_output.txt
+2026-10-11 03:42:32,222 - INFO - Git diff after:
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..0cafb52d4 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -606,6 +606,17 @@ class Documenter:
+ 
+                     for i, line in enumerate(self.process_doc(docstrings)):
+                         self.add_line(line, sourcename, i)
++                else:
++                    # the attribute may be inherited from a base class
++                    # (its docstring is cached in the base class's module)
++                    inherited_doc = get_attribute_comment_in_mro(self.parent,
++                                                                 self.objpath[-1])
++                    if inherited_doc is not None:
++                        no_docstring = True
++                        docstrings = [inherited_doc]
++
++                        for i, line in enumerate(self.process_doc(docstrings)):
++                            self.add_line(line, sourcename, i)
+ 
+         # add content from docstrings
+         if not no_docstring:
+@@ -746,7 +757,8 @@ class Documenter:
+                         keep = has_doc or self.options.undoc_members
+                 else:
+                     keep = False
+-            elif (namespace, membername) in attr_docs:
++            elif ((namespace, membername) in attr_docs or
++                  get_attribute_comment_in_mro(self.object, membername) is not None):
+                 if want_all and isprivate:
+                     if self.options.private_members is None:
+                         keep = False
+@@ -1697,6 +1709,30 @@ class ExceptionDocumenter(ClassDocumenter):
+         return isinstance(member, type) and issubclass(member, BaseException)
+ 
+ 
++def get_attribute_comment_in_mro(parent: Any, attrname: str) -> Optional[List[str]]:
++    """Return the attribute documentation of *attrname* defined in *parent* or
++    one of its base classes (searched in MRO order), or None if not found.
++    """
++    if not inspect.isclass(parent):
++        return None
++
++    for cls in inspect.getmro(parent):
++        try:
++            module = safe_getattr(cls, '__module__')
++            qualname = safe_getattr(cls, '__qualname__')
++
++            analyzer = ModuleAnalyzer.for_module(module)
++            analyzer.analyze()
++            if qualname:
++                key = (qualname, attrname)
++                if key in analyzer.attr_docs:
++                    return list(analyzer.attr_docs[key])
++        except (AttributeError, PycodeError):
++            pass
++
++    return None
++
++
+ class DataDocumenterMixinBase:
+     # define types of instance variables
+     config = None  # type: Config
+@@ -2161,24 +2197,10 @@ class UninitializedInstanceAttributeMixin(DataDocumenterMixinBase):
+     """
+ 
+     def get_attribute_comment(self, parent: Any) -> Optional[List[str]]:
+-        try:
+-            for cls in inspect.getmro(parent):
+-                try:
+-                    module = safe_getattr(cls, '__module__')
+-                    qualname = safe_getattr(cls, '__qualname__')
+-
+-                    analyzer = ModuleAnalyzer.for_module(module)
+-                    analyzer.analyze()
+-                    if qualname and self.objpath:
+-                        key = (qualname, self.objpath[-1])
+-                        if key in analyzer.attr_docs:
+-                            return list(analyzer.attr_docs[key])
+-                except (AttributeError, PycodeError):
+-                    pass
+-        except (AttributeError, PycodeError):
+-            pass
+-
+-        return None
++        if self.objpath:
++            return get_attribute_comment_in_mro(parent, self.objpath[-1])
++        else:
++            return None
+ 
+     def is_uninitialized_instance_attribute(self, parent: Any) -> bool:
+         """Check the subject is an attribute defined in __init__()."""
+diff --git a/tests/test_ext_autodoc_autoclass.py b/tests/test_ext_autodoc_autoclass.py
+index c36305de3..6130f233a 100644
+--- a/tests/test_ext_autodoc_autoclass.py
++++ b/tests/test_ext_autodoc_autoclass.py
+@@ -51,6 +51,61 @@ def test_classes(app):
+     ]
+ 
+ 
++@pytest.mark.sphinx('html', testroot='ext-autodoc')
++def test_instance_variable(app):
++    options = {'members': True}
++    actual = do_autodoc(app, 'class', 'target.instance_variable.Bar', options)
++    assert list(actual) == [
++        '',
++        '.. py:class:: Bar()',
++        '   :module: target.instance_variable',
++        '',
++        '',
++        '   .. py:attribute:: Bar.attr2',
++        '      :module: target.instance_variable',
++        '',
++        '      docstring bar',
++        '',
++        '',
++        '   .. py:attribute:: Bar.attr3',
++        '      :module: target.instance_variable',
++        '',
++        '      docstring bar',
++        '',
++    ]
++
++
++@pytest.mark.sphinx('html', testroot='ext-autodoc')
++def test_inherited_instance_variable(app):
++    options = {'members': True,
++               'inherited-members': True}
++    actual = do_autodoc(app, 'class', 'target.instance_variable.Bar', options)
++    assert list(actual) == [
++        '',
++        '.. py:class:: Bar()',
++        '   :module: target.instance_variable',
++        '',
++        '',
++        '   .. py:attribute:: Bar.attr1',
++        '      :module: target.instance_variable',
++        '',
++        '      docstring foo',
++        '',
++        '',
++        '   .. py:attribute:: Bar.attr2',
++        '      :module: target.instance_variable',
++        '',
++        '      docstring bar',
++        '',
++        '',
++        '   .. py:attribute:: Bar.attr3',
++        '      :module: target.instance_variable',
++        '',
++        '      docstring bar',
++        '',
++    ]
++
++
+ def test_decorators(app):
+     actual = do_autodoc(app, 'class', 'target.decorator.Baz')
+     assert list(actual) == [
+2026-10-11 03:42:32,222 - INFO - Git diff changed after running eval script
+2026-10-11 03:42:32,222 - INFO - Grading answer for sphinx-doc__sphinx-8548...
+2026-10-11 03:42:32,224 - INFO - report: {'sphinx-doc__sphinx-8548': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'infra_failure': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['tests/test_ext_autodoc_autoclass.py::test_inherited_instance_variable']}, 'PASS_TO_PASS': {'success': ['tests/test_ext_autodoc_autoclass.py::test_classes', 'tests/test_ext_autodoc_autoclass.py::test_instance_variable', 'tests/test_ext_autodoc_autoclass.py::test_decorators', 'tests/test_ext_autodoc_autoclass.py::test_slots_attribute', 'tests/test_ext_autodoc_autoclass.py::test_show_inheritance_for_subclass_of_generic_type'], 'failure': []}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for sphinx-doc__sphinx-8548: resolved: False
+2026-10-11 03:42:32,224 - INFO - Attempting to stop container sweb.eval.sphinx-doc__sphinx-8548.sbr-mini_swe_agent-1791708143...
+2026-10-11 03:42:47,421 - INFO - Container sweb.eval.sphinx-doc__sphinx-8548.sbr-mini_swe_agent-1791708143 stopped successfully.
+2026-10-11 03:42:47,421 - INFO - Attempting to remove container sweb.eval.sphinx-doc__sphinx-8548.sbr-mini_swe_agent-1791708143...
+2026-10-11 03:42:47,460 - INFO - Container sweb.eval.sphinx-doc__sphinx-8548.sbr-mini_swe_agent-1791708143 removed successfully.

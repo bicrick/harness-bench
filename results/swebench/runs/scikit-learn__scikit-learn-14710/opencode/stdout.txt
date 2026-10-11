@@ -1,0 +1,9 @@
+The root cause: `fit` encodes `y` to floats `0..n_classes-1` via `_encode_y`, but the early-stopping scorer calls `predict`, which returns the original string labels, so `accuracy_score` compares strings with floats. I'll decode the encoded targets before scoring, as the issue suggests.
+The reproduction now runs. The full test suite timed out, so I'll run just the early-stopping tests.
+I fixed the string-target crash in `HistGradientBoostingClassifier` with early stopping. The reproduction from the issue now fits without error, and multiclass string targets work too.
+
+**Cause:** `fit` encodes `y` to floats `0..n_classes-1`, but the early-stopping scorer calls `predict`, which returns the original labels. `accuracy_score` then compared strings against floats.
+
+**Fix:** In `_check_early_stopping_scorer` in `sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py`, I decode `y_small_train` and `y_val` back to the original classes via `self.classes_` before scoring. This is the same approach as the patch proposed in the issue. The check is `hasattr(self, 'classes_')`, so the regressor is unaffected. I added a comment explaining why.
+
+**Verification:** I ran the issue's example (object-dtype `'x'`/`'y'` targets with `n_iter_no_change=10`), which fits and scores at 0.75. A three-class string target also fits. The full `_hist_gradient_boosting` test run exceeded the 2-minute limit, and the early-stopping subset produced no clear pass/fail summary, so I have not confirmed the existing test suite passes.

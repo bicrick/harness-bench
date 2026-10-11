@@ -1,0 +1,136 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "exp\|Function" sympy/physics/units/unitsystem.py | head -50
+8:from sympy.core.function import (Derivative, Function)
+130:    def get_dimensional_expr(self, expr):
+132:        if isinstance(expr, Mul):
+133:            return Mul(*[self.get_dimensional_expr(i) for i in expr.args])
+134:        elif isinstance(expr, Pow):
+135:            return self.get_dimensional_expr(expr.base) ** expr.exp
+136:        elif isinstance(expr, Add):
+137:            return self.get_dimensional_expr(expr.args[0])
+138:        elif isinstance(expr, Derivative):
+139:            dim = self.get_dimensional_expr(expr.expr)
+140:            for independent, count in expr.variable_count:
+141:                dim /= self.get_dimensional_expr(independent)**count
+143:        elif isinstance(expr, Function):
+144:            args = [self.get_dimensional_expr(arg) for arg in expr.args]
+147:            return expr.func(*args)
+148:        elif isinstance(expr, Quantity):
+149:            return self.get_quantity_dimension(expr).name
+152:    def _collect_factor_and_dimension(self, expr):
+154:        Return tuple with scale factor expression and dimension expression.
+157:        if isinstance(expr, Quantity):
+158:            return expr.scale_factor, expr.dimension
+159:        elif isinstance(expr, Mul):
+162:            for arg in expr.args:
+167:        elif isinstance(expr, Pow):
+168:            factor, dim = self._collect_factor_and_dimension(expr.base)
+169:            exp_factor, exp_dim = self._collect_factor_and_dimension(expr.exp)
+170:            if self.get_dimension_system().is_dimensionless(exp_dim):
+171:                exp_dim = 1
+172:            return factor ** exp_factor, dim ** (exp_factor * exp_dim)
+173:        elif isinstance(expr, Add):
+174:            factor, dim = self._collect_factor_and_dimension(expr.args[0])
+175:            for addend in expr.args[1:]:
+185:        elif isinstance(expr, Derivative):
+186:            factor, dim = self._collect_factor_and_dimension(expr.args[0])
+187:            for independent, count in expr.variable_count:
+192:        elif isinstance(expr, Function):
+194:                arg) for arg in expr.args]
+195:            return (expr.func(*(f[0] for f in fds)),
+197:        elif isinstance(expr, Dimension):
+198:            return S.One, expr
+200:            return expr, Dimension(1)
+[0m
+[0m$ [0mcd /testbed && sed -n 190,200p sympy/physics/units/unitsystem.py
+dim /= idim**count
+            return factor, dim
+        elif isinstance(expr, Function):
+            fds = [self._collect_factor_and_dimension(
+                arg) for arg in expr.args]
+            return (expr.func(*(f[0] for f in fds)),
+                    *(d[1] for d in fds))
+        elif isinstance(expr, Dimension):
+            return S.One, expr
+        else:
+            return expr, Dimension(1)
+[0m
+[0m← [0mEdit sympy/physics/units/unitsystem.py
+Index: /testbed/sympy/physics/units/unitsystem.py
+===================================================================
+--- /testbed/sympy/physics/units/unitsystem.py
++++ /testbed/sympy/physics/units/unitsystem.py
+@@ -191,10 +191,16 @@
+     return factor, dim
+ elif isinstance(expr, Function):
+     fds = [self._collect_factor_and_dimension(
+         arg) for arg in expr.args]
+-    return (expr.func(*(f[0] for f in fds)),
+-            *(d[1] for d in fds))
++    dims = [Dimension(1) if self.get_dimension_system().is_dimensionless(d[1])
++            else d[1] for d in fds]
++    for arg, dim in zip(expr.args, dims):
++        if dim != Dimension(1):
++            raise ValueError(
++                "Argument of function \"%s\" must be dimensionless, "
++                "but has dimension %s" % (expr.func, dim))
++    return expr.func(*(f[0] for f in fds)), Dimension(1)
+ elif isinstance(expr, Dimension):
+     return S.One, expr
+ else:
+     return expr, Dimension(1)
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy import exp
+from sympy.physics import units
+from sympy.physics.units.systems.si import SI
+expr = units.second / (units.ohm * units.farad)
+dim = SI._collect_factor_and_dimension(expr)[1]
+assert SI.get_dimension_system().is_dimensionless(dim)
+print(SI._collect_factor_and_dimension(100 + exp(expr)))
+" && python -m pytest -q sympy/physics/units 2>&1 | tail -3
+(E + 100, Dimension(1))
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed && python bin/test sympy/physics/units 2>&1 | tail -5
+raise ValueError(
+ValueError: Argument of function "Abs" must be dimensionless, but has dimension Dimension(length/time)
+
+= tests finished: 69 passed, 1 expected to fail, 1 exceptions, in 0.65 seconds =
+DO *NOT* COMMIT!
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+import re
+p='sympy/physics/units/unitsystem.py'
+s=open(p).read()
+old=s[s.index('        elif isinstance(expr, Function):\n            fds'):s.index('        elif isinstance(expr, Dimension):')]
+new='''        elif isinstance(expr, Function):
+            fds = [self._collect_factor_and_dimension(
+                arg) for arg in expr.args]
+            dims = [d[1] for d in fds]
+            if all(self.get_dimension_system().is_dimensionless(d)
+                   for d in dims):
+                return expr.func(*(f[0] for f in fds)), Dimension(1)
+            if len(dims) == 1:
+                # Single-argument functions such as Abs preserve the dimension
+                return expr.func(fds[0][0]), dims[0]
+            raise ValueError(
+                "Arguments of function \\"%s\\" must be dimensionless, "
+                "but have dimensions %s" % (expr.func, dims))
+'''
+s=s.replace(old,new)
+open(p,'w').write(s)
+EOF
+python bin/test sympy/physics/units 2>&1 | tail -2
+python -c "
+from sympy import exp
+from sympy.physics import units
+from sympy.physics.units.systems.si import SI
+expr = units.second / (units.ohm * units.farad)
+print(SI._collect_factor_and_dimension(100 + exp(expr)))"
+======== tests finished: 70 passed, 1 expected to fail, in 0.73 seconds ========
+(E + 100, Dimension(1))
+[0m

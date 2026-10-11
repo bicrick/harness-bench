@@ -1,5 +1,5 @@
 diff --git a/django/db/migrations/recorder.py b/django/db/migrations/recorder.py
-index 1a37c6b7d0..d638d44208 100644
+index 1a37c6b7d0..7d22ac3b51 100644
 --- a/django/db/migrations/recorder.py
 +++ b/django/db/migrations/recorder.py
 @@ -1,5 +1,5 @@
@@ -15,32 +15,34 @@ index 1a37c6b7d0..d638d44208 100644
  
 +    def allow_migrate(self):
 +        """
-+        Return True if the router allows the django_migrations table to be
-+        created and written to on this connection.
++        Return whether the django_migrations table may be managed on this
++        connection, according to the database routers.
 +        """
 +        return router.allow_migrate_model(self.connection.alias, self.Migration)
 +
      def has_table(self):
          """Return True if the django_migrations table exists."""
          with self.connection.cursor() as cursor:
-@@ -58,6 +65,8 @@ class MigrationRecorder:
+@@ -58,6 +65,10 @@ class MigrationRecorder:
  
      def ensure_schema(self):
          """Ensure the table exists and has the correct schema."""
++        # The table may only be created on connections the routers allow it
++        # to be migrated on.
 +        if not self.allow_migrate():
 +            return
          # If the table's there, that's fine - we've never changed its schema
          # in the codebase.
          if self.has_table():
-@@ -74,6 +83,8 @@ class MigrationRecorder:
+@@ -74,7 +85,7 @@ class MigrationRecorder:
          Return a dict mapping (app_name, migration_name) to Migration instances
          for all applied migrations.
          """
-+        if not self.allow_migrate():
-+            return {}
-         if self.has_table():
+-        if self.has_table():
++        if self.allow_migrate() and self.has_table():
              return {(migration.app, migration.name): migration for migration in self.migration_qs}
          else:
+             # If the django_migrations table doesn't exist, then no migrations
 @@ -83,14 +94,20 @@ class MigrationRecorder:
  
      def record_applied(self, app, name):

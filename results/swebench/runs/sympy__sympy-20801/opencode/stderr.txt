@@ -1,0 +1,86 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && python -c "from sympy import *; print(S(0.0) == S.false, S.false == S(0.0))"; grep -n "def __eq__" -A12 sympy/logic/boolalg.py | head -80; grep -n "class BooleanFalse" -A60 sympy/logic/boolalg.py | grep -n "__eq__\|__hash__\|def " 
+True False
+44:393-    def __bool__(self):
+47:396-    def __hash__(self):
+51:400-    def negated(self):
+54:403-    def as_set(self):
+[0m
+[0m$ [0mcd /testbed && grep -n "def __eq__" -A30 sympy/core/numbers.py | sed -n '/class Float/,$p' | head -5; awk '/^class Float/{f=1} f && /def __eq__/{p=1} p{print NR": "$0; n++} n>40{exit}' sympy/core/numbers.py
+1383:     def __eq__(self, other):
+1384:         from sympy.logic.boolalg import Boolean
+1385:         try:
+1386:             other = _sympify(other)
+1387:         except SympifyError:
+1388:             return NotImplemented
+1389:         if not self:
+1390:             return not other
+1391:         if isinstance(other, Boolean):
+1392:             return False
+1393:         if other.is_NumberSymbol:
+1394:             if other.is_irrational:
+1395:                 return False
+1396:             return other.__eq__(self)
+1397:         if other.is_Float:
+1398:             # comparison is exact
+1399:             # so Float(.1, 3) != Float(.1, 33)
+1400:             return self._mpf_ == other._mpf_
+1401:         if other.is_Rational:
+1402:             return other.__eq__(self)
+1403:         if other.is_Number:
+1404:             # numbers should compare at the same precision;
+1405:             # all _as_mpf_val routines should be sure to abide
+1406:             # by the request to change the prec if necessary; if
+1407:             # they don't, the equality test will fail since it compares
+1408:             # the mpf tuples
+1409:             ompf = other._as_mpf_val(self._prec)
+1410:             return bool(mlib.mpf_eq(self._mpf_, ompf))
+1411:         return False    # Float != non-Number
+1412: 
+1413:     def __ne__(self, other):
+1414:         return not self == other
+1415: 
+1416:     def _Frel(self, other, op):
+1417:         from sympy.core.numbers import prec_to_dps
+1418:         try:
+1419:             other = _sympify(other)
+1420:         except SympifyError:
+1421:             return NotImplemented
+1422:         if other.is_Rational:
+1423:             # test self*other.q <?> other.p without losing precision
+[0m
+[0m← [0mEdit sympy/core/numbers.py
+Index: /testbed/sympy/core/numbers.py
+===================================================================
+--- /testbed/sympy/core/numbers.py
++++ /testbed/sympy/core/numbers.py
+@@ -1385,12 +1385,12 @@
+ try:
+     other = _sympify(other)
+ except SympifyError:
+     return NotImplemented
+-if not self:
+-    return not other
+ if isinstance(other, Boolean):
+     return False
++if not self:
++    return not other
+ if other.is_NumberSymbol:
+     if other.is_irrational:
+         return False
+     return other.__eq__(self)
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy import *
+print(S(0.0) == S.false, S.false == S(0.0), S(0.0)==S.true, S(0.0)==0, Float(0)==0, S(0)==S.false)" && python -m pytest -q sympy/core/tests/test_numbers.py sympy/logic/tests/test_boolalg.py 2>&1 | tail -3
+False False False True True False
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed && python bin/test sympy/core/tests/test_numbers.py sympy/logic/tests/test_boolalg.py 2>&1 | tail -3
+...f................w........                                               [OK]
+
+== tests finished: 166 passed, 2 skipped, 2 expected to fail, in 8.57 seconds ==
+[0m

@@ -1,0 +1,181 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && git log --oneline -1 && grep -n "pytestmark" -r src/_pytest/mark/structures.py src/_pytest/python.py | head -50
+ff198e35c SWE-bench
+src/_pytest/mark/structures.py:360:    mark_list = getattr(obj, "pytestmark", [])
+src/_pytest/mark/structures.py:389:    # Always reassign name to avoid updating pytestmark in a reference that
+src/_pytest/mark/structures.py:391:    obj.pytestmark = [*get_unpacked_marks(obj), mark]
+[0m
+[0m$ [0mcd /testbed && sed -n 340,400p src/_pytest/mark/structures.py && grep -n "get_unpacked_marks\|store_mark\|iter_markers" -r src/_pytest | head -30
+def __call__(self, arg: Markable) -> Markable:  # type: ignore[misc]
+        pass
+
+    @overload
+    def __call__(self, *args: object, **kwargs: object) -> "MarkDecorator":
+        pass
+
+    def __call__(self, *args: object, **kwargs: object):
+        """Call the MarkDecorator."""
+        if args and not kwargs:
+            func = args[0]
+            is_class = inspect.isclass(func)
+            if len(args) == 1 and (istestfunc(func) or is_class):
+                store_mark(func, self.mark)
+                return func
+        return self.with_args(*args, **kwargs)
+
+
+def get_unpacked_marks(obj: object) -> Iterable[Mark]:
+    """Obtain the unpacked marks that are stored on an object."""
+    mark_list = getattr(obj, "pytestmark", [])
+    if not isinstance(mark_list, list):
+        mark_list = [mark_list]
+    return normalize_mark_list(mark_list)
+
+
+def normalize_mark_list(
+    mark_list: Iterable[Union[Mark, MarkDecorator]]
+) -> Iterable[Mark]:
+    """
+    Normalize an iterable of Mark or MarkDecorator objects into a list of marks
+    by retrieving the `mark` attribute on MarkDecorator instances.
+
+    :param mark_list: marks to normalize
+    :returns: A new list of the extracted Mark objects
+    """
+    for mark in mark_list:
+        mark_obj = getattr(mark, "mark", mark)
+        if not isinstance(mark_obj, Mark):
+            raise TypeError(f"got {repr(mark_obj)} instead of Mark")
+        yield mark_obj
+
+
+def store_mark(obj, mark: Mark) -> None:
+    """Store a Mark on an object.
+
+    This is used to implement the Mark declarations/decorators correctly.
+    """
+    assert isinstance(mark, Mark), mark
+    # Always reassign name to avoid updating pytestmark in a reference that
+    # was only borrowed.
+    obj.pytestmark = [*get_unpacked_marks(obj), mark]
+
+
+# Typing for builtin pytest marks. This is cheating; it gives builtin marks
+# special privilege, and breaks modularity. But practicality beats purity...
+if TYPE_CHECKING:
+    from _pytest.scope import _ScopeName
+
+    class _SkipMarkDecorator(MarkDecorator):
+        @overload  # type: ignore[override,misc,no-overload-impl]
+src/_pytest/mark/structures.py:353:                store_mark(func, self.mark)
+src/_pytest/mark/structures.py:358:def get_unpacked_marks(obj: object) -> Iterable[Mark]:
+src/_pytest/mark/structures.py:383:def store_mark(obj, mark: Mark) -> None:
+src/_pytest/mark/structures.py:391:    obj.pytestmark = [*get_unpacked_marks(obj), mark]
+src/_pytest/mark/__init__.py:170:        mapped_names.update(mark.name for mark in item.iter_markers())
+src/_pytest/mark/__init__.py:215:        mark_names = {mark.name for mark in item.iter_markers()}
+src/_pytest/fixtures.py:1429:        for marker in node.iter_markers(name="parametrize"):
+src/_pytest/fixtures.py:1447:            arg for mark in node.iter_markers(name="usefixtures") for arg in mark.args
+src/_pytest/fixtures.py:1557:                for mark in metafunc.definition.iter_markers("parametrize")
+src/_pytest/warnings.py:57:            for mark in item.iter_markers(name="filterwarnings"):
+src/_pytest/nodes.py:363:    def iter_markers(self, name: Optional[str] = None) -> Iterator[Mark]:
+src/_pytest/nodes.py:369:        return (x[1] for x in self.iter_markers_with_node(name=name))
+src/_pytest/nodes.py:371:    def iter_markers_with_node(
+src/_pytest/nodes.py:401:        return next(self.iter_markers(name=name), default)
+src/_pytest/pytester.py:953:        for extra_element in self._request.node.iter_markers("pytester_example_path"):
+src/_pytest/skipping.py:169:    for mark in item.iter_markers(name="skipif"):
+src/_pytest/skipping.py:186:    for mark in item.iter_markers(name="skip"):
+src/_pytest/skipping.py:207:    for mark in item.iter_markers(name="xfail"):
+src/_pytest/python.py:66:from _pytest.mark.structures import get_unpacked_marks
+src/_pytest/python.py:149:    for marker in metafunc.definition.iter_markers(name="parametrize"):
+src/_pytest/python.py:314:                self.own_markers.extend(get_unpacked_marks(self.obj))
+src/_pytest/python.py:1717:        self.own_markers.extend(get_unpacked_marks(self.obj))
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+import re
+p='src/_pytest/mark/structures.py'
+s=open(p).read()
+old='''def get_unpacked_marks(obj: object) -> Iterable[Mark]:
+    """Obtain the unpacked marks that are stored on an object."""
+    mark_list = getattr(obj, "pytestmark", [])
+    if not isinstance(mark_list, list):
+        mark_list = [mark_list]
+    return normalize_mark_list(mark_list)
+'''
+new='''def get_unpacked_marks(obj: object, *, consider_mro: bool = True) -> List[Mark]:
+    """Obtain the unpacked marks that are stored on an object.
+
+    If obj is a class and consider_mro is true, return marks applied to this
+    class and all of its super-classes in MRO order.
+    """
+    if isinstance(obj, type):
+        if not consider_mro:
+            mark_lists = [obj.__dict__.get("pytestmark", [])]
+        else:
+            mark_lists = [
+                x.__dict__.get("pytestmark", []) for x in reversed(obj.__mro__)
+            ]
+        mark_list = []
+        for item in mark_lists:
+            if isinstance(item, list):
+                mark_list.extend(item)
+            else:
+                mark_list.append(item)
+    else:
+        mark_attribute = getattr(obj, "pytestmark", [])
+        if isinstance(mark_attribute, list):
+            mark_list = mark_attribute
+        else:
+            mark_list = [mark_attribute]
+    return list(normalize_mark_list(mark_list))
+'''
+assert old in s
+s=s.replace(old,new)
+s=s.replace("obj.pytestmark = [*get_unpacked_marks(obj), mark]","obj.pytestmark = [*get_unpacked_marks(obj, consider_mro=False), mark]")
+open(p,'w').write(s)
+EOF
+grep -n "^from typing\|^import" src/_pytest/mark/structures.py
+1:import collections.abc
+2:import inspect
+3:import warnings
+4:from typing import Any
+5:from typing import Callable
+6:from typing import Collection
+7:from typing import Iterable
+8:from typing import Iterator
+9:from typing import List
+10:from typing import Mapping
+11:from typing import MutableMapping
+12:from typing import NamedTuple
+13:from typing import Optional
+14:from typing import overload
+15:from typing import Sequence
+16:from typing import Set
+17:from typing import Tuple
+18:from typing import Type
+19:from typing import TYPE_CHECKING
+20:from typing import TypeVar
+21:from typing import Union
+23:import attr
+[0m
+[93m[1m! [0mpermission requested: external_directory (/tmp/*); auto-rejecting
+[0m✗ [0mcd /tmp && mkdir -p repro && cd repro && cat > test_r.py <<'EOF'
+import pytest
+class Base: pass
+@pytest.mark.foo
+class Foo(Base): pass
+@pytest.mark.bar
+class Bar(Base): pass
+class TestDings(Foo, Bar):
+    def test_dings(self): pass
+EOF
+python -m pytest -q test_r.py --collect-only -m "" 2>&1 | tail -3; python -c "
+import _pytest,sys
+" ; cd /testbed && python -c "
+import sys; sys.path.insert(0,'/tmp/repro')
+import test_r
+from _pytest.mark.structures import get_unpacked_marks
+print([m.name for m in get_unpacked_marks(test_r.TestDings)])"
+cd /testbed && python -m pytest -q testing/test_mark.py testing/test_mark_expression.py testing/python/ -p no:cacheprovider 2>&1 | tail -5 failed
+[91m[1mError: [0mThe user rejected permission to use this specific tool call.

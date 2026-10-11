@@ -1,0 +1,56 @@
+diff --git a/pylint/pyreverse/inspector.py b/pylint/pyreverse/inspector.py
+index 8fa12202..73b8cce7 100644
+--- a/pylint/pyreverse/inspector.py
++++ b/pylint/pyreverse/inspector.py
+@@ -60,6 +60,40 @@ def interfaces(node, herited=True, handler_func=_iface_hdlr):
+         raise astroid.exceptions.InferenceError()
+ 
+ 
++def get_assigned_annotation_types(node):
++    """return the types given by PEP 484 annotations for an attribute assignment
++
++    Only handles the case ``self.attr = arg`` where ``arg`` is a parameter of
++    the enclosing function annotated with a type. Returns an empty list when
++    no usable annotation is found, so callers can fall back to inference.
++    """
++    value = getattr(node.parent, "value", None)
++    if not isinstance(value, astroid.Name):
++        return []
++    try:
++        _, defining = value.lookup(value.name)
++    except astroid.AstroidError:
++        return []
++    if not defining:
++        return []
++    arguments = defining[0].parent
++    if not isinstance(arguments, astroid.Arguments):
++        return []
++    if not isinstance(arguments.parent, astroid.FunctionDef):
++        return []
++    names = [arg.name for arg in arguments.args or []]
++    if value.name not in names:
++        return []
++    idx = names.index(value.name)
++    annotations = arguments.annotations or []
++    if idx >= len(annotations) or annotations[idx] is None:
++        return []
++    try:
++        return list(annotations[idx].infer())
++    except astroid.InferenceError:
++        return []
++
++
+ class IdGeneratorMixIn:
+     """Mixin adding the ability to generate integer uid."""
+ 
+@@ -230,7 +264,9 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+         handle instance_attrs_type
+         """
+         try:
+-            values = set(node.infer())
++            values = set(get_assigned_annotation_types(node))
++            if not values:
++                values = set(node.infer())
+             current = set(parent.instance_attrs_type[node.attrname])
+             parent.instance_attrs_type[node.attrname] = list(current | values)
+         except astroid.InferenceError:

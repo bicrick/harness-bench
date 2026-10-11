@@ -1,0 +1,97 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..c80cadfcf 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -651,6 +651,23 @@ class Documenter:
+             return False, [(m.name, m.value) for m in members.values()
+                            if m.directly_defined]
+ 
++    def is_attr_doc_defined(self, cls: Any, name: str) -> bool:
++        """Check the attribute documentation (cf. self.attr1) is defined in the class."""
++        try:
++            module = safe_getattr(cls, '__module__')
++            qualname = safe_getattr(cls, '__qualname__')
++            analyzer = ModuleAnalyzer.for_module(module)
++            return (qualname, name) in analyzer.find_attr_docs()
++        except (AttributeError, PycodeError):
++            return False
++
++    def is_inherited_attr_doc(self, name: str) -> bool:
++        """Check the attribute documentation is defined in the class or its base classes."""
++        if inspect.isclass(self.object):
++            return any(self.is_attr_doc_defined(cls, name) for cls in self.object.__mro__)
++        else:
++            return False
++
+     def filter_members(self, members: ObjectMembers, want_all: bool
+                        ) -> List[Tuple[str, Any, bool]]:
+         """Filter the given member list.
+@@ -676,6 +693,9 @@ class Documenter:
+                         return False
+                     elif name in self.get_attr(cls, '__annotations__', {}):
+                         return False
++                    elif self.is_attr_doc_defined(cls, name):
++                        # instance attribute documented in the class (cf. self.attr1)
++                        return False
+ 
+             return False
+ 
+@@ -769,6 +789,10 @@ class Documenter:
+             else:
+                 if self.options.members is ALL and is_filtered_inherited_member(membername):
+                     keep = False
++                elif self.is_inherited_attr_doc(membername):
++                    # documented attribute inherited from a base class (cf. attr = 1)
++                    keep = True
++                    isattr = True
+                 else:
+                     # ignore undocumented members if :undoc-members: is not given
+                     keep = has_doc or self.options.undoc_members
+@@ -2219,10 +2243,10 @@ class UninitializedInstanceAttributeMixin(DataDocumenterMixinBase):
+                 super().should_suppress_value_header())
+ 
+     def get_doc(self, encoding: str = None, ignore: int = None) -> List[List[str]]:
+-        if self.object is UNINITIALIZED_ATTR:
+-            comment = self.get_attribute_comment(self.parent)
+-            if comment:
+-                return [comment]
++        # the attribute comment may be defined in a base class (inherited attribute)
++        comment = self.get_attribute_comment(self.parent)
++        if comment:
++            return [comment]
+ 
+         return super().get_doc(encoding, ignore)  # type: ignore
+ 
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index d6e73d36a..411659fcb 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -14,6 +14,7 @@ import warnings
+ from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
+ 
+ from sphinx.deprecation import RemovedInSphinx40Warning, deprecated_alias
++from sphinx.errors import PycodeError
+ from sphinx.pycode import ModuleAnalyzer
+ from sphinx.util import logging
+ from sphinx.util.inspect import (getannotations, getmro, getslots, isclass, isenumclass,
+@@ -307,6 +308,20 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable,
+         except AttributeError:
+             pass
+ 
++    # append instance attributes (cf. self.attr1) defined in the class and its bases
++    for cls in getmro(subject):
++        try:
++            module = safe_getattr(cls, '__module__')
++            qualname = safe_getattr(cls, '__qualname__')
++
++            analyzer_of_cls = ModuleAnalyzer.for_module(module)
++            for (ns, name), docstring in analyzer_of_cls.find_attr_docs().items():
++                if ns == qualname and name not in members:
++                    members[name] = ClassAttribute(cls, name, INSTANCEATTR,
++                                                   '\n'.join(docstring))
++        except (AttributeError, PycodeError):
++            pass
++
+     if analyzer:
+         # append instance attributes (cf. self.attr1) if analyzer knows
+         namespace = '.'.join(objpath)

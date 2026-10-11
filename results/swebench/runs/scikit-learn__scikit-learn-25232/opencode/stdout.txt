@@ -1,0 +1,17 @@
+The key problem: `IterativeImputer` drops features whose initial statistic is NaN. With `fill_value=np.nan` and `"constant"`, every statistic would be NaN, so all features would be dropped. For `"constant"`, `SimpleImputer` already keeps every feature, so I'll make `IterativeImputer` do the same.
+The existing impute tests pass. I'll check the new parameter with the experimental import enabled.
+The error comes from my toy data: column 0 is entirely missing. With `"constant"`, that column was already kept before my change (the fill value is never NaN), so this is pre-existing behavior and not caused by the new parameter. I'll rerun with data that has no all-missing column.
+The NaN-fill failure with the default estimator is expected, since BayesianRidge cannot accept NaN. The intended use is a tree-based estimator, so I'll check that case.
+I added a `fill_value` parameter to `IterativeImputer` in `sklearn/impute/_iterative.py`. It is passed to the internal `SimpleImputer` when `initial_strategy="constant"`, and `np.nan` is accepted.
+
+Changes:
+- New `fill_value=None` parameter, with a docstring entry and a `"no_validation"` constraint so `np.nan` is allowed. It sits next to `initial_strategy` in the signature.
+- The initial `SimpleImputer` now receives `fill_value`.
+- Feature selection after initialization: the old code dropped features whose initial statistic was NaN. With `fill_value=np.nan` every statistic is NaN, so all features would be dropped. For the `"constant"` strategy, all features are now kept, which matches what `SimpleImputer` already does.
+
+Verification:
+- `sklearn/impute` test suite: 301 passed.
+- `IterativeImputer(estimator=HistGradientBoostingRegressor(), initial_strategy="constant", fill_value=np.nan)` runs and imputes correctly.
+- The default `BayesianRidge` estimator cannot accept NaN inputs, so `fill_value=np.nan` only works with an estimator that handles missing values, such as the histogram gradient boosting models.
+
+I did not add or change any tests, as requested.

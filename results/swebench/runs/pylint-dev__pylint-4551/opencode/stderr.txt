@@ -1,0 +1,316 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && git log --oneline -1 && grep -n "annotation\|_get_type\|infer_type\|def get_\|AssignAttr\|Instance\|Const" pylint/pyreverse/inspector.py | head -80; grep -n "annotation\|def get_\|_get_type\|default" pylint/pyreverse/utils.py pylint/pyreverse/printer.py pylint/pyreverse/diagrams.py | head -40
+beb0f4d9 SWE-bench
+45:        implements = astroid.bases.Instance(node).getattr("__implements__")[0]
+315:    def get_module(self, name):
+318:    def get_children(self):
+pylint/pyreverse/utils.py:26:def get_default_options():
+pylint/pyreverse/utils.py:40:def insert_default_options():
+pylint/pyreverse/utils.py:41:    """insert default options to sys.argv"""
+pylint/pyreverse/utils.py:42:    options = get_default_options()
+pylint/pyreverse/utils.py:54:def get_visibility(name):
+pylint/pyreverse/utils.py:163:    def get_callbacks(self, node):
+pylint/pyreverse/utils.py:171:                handler, "visit_%s" % kid, getattr(handler, "visit_default", None)
+pylint/pyreverse/utils.py:174:                handler, "leave_%s" % kid, getattr(handler, "leave_default", None)
+pylint/pyreverse/diagrams.py:60:    def get_relationships(self, role):
+pylint/pyreverse/diagrams.py:70:        self.relationships.setdefault(relation_type, []).append(rel)
+pylint/pyreverse/diagrams.py:72:    def get_relationship(self, from_object, relation_type):
+pylint/pyreverse/diagrams.py:79:    def get_attrs(self, node):
+pylint/pyreverse/diagrams.py:100:    def get_methods(self, node):
+pylint/pyreverse/diagrams.py:214:    def get_module(self, name, node):
+grep: pylint/pyreverse/printer.py: No such file or directory
+[0m
+[0m$ [0mcd /testbed && sed -n 75,100p pylint/pyreverse/diagrams.py && grep -n "infer\|_add_\|def visit_assignattr\|def visit_functiondef" -A3 pylint/pyreverse/inspector.py | head -120
+if rel.from_object is from_object:
+                return rel
+        raise KeyError(relation_type)
+
+    def get_attrs(self, node):
+        """return visible attributes, possibly with class name"""
+        attrs = []
+        properties = [
+            (n, m)
+            for n, m in node.items()
+            if isinstance(m, astroid.FunctionDef) and decorated_with_property(m)
+        ]
+        for node_name, associated_nodes in (
+            list(node.instance_attrs_type.items())
+            + list(node.locals_type.items())
+            + properties
+        ):
+            if not self.show_attr(node_name):
+                continue
+            names = self.class_names(associated_nodes)
+            if names:
+                node_name = "{} : {}".format(node_name, ", ".join(names))
+            attrs.append(node_name)
+        return sorted(attrs)
+
+    def get_methods(self, node):
+52:    for iface in astroid.node_classes.unpack_infer(implements):
+53:        if iface is astroid.Uninferable:
+54-            missing = True
+55-            continue
+56-        if iface not in found and handler_func(iface):
+--
+175:    def visit_functiondef(self, node):
+176-        """visit an astroid.Function node
+177-
+178-        * set the locals_type mapping
+--
+221:            values = set(node.infer())
+222-            frame.locals_type[node.name] = list(set(current) | values)
+223-        except astroid.InferenceError:
+224-            pass
+--
+233:            values = set(node.infer())
+234-            current = set(parent.instance_attrs_type[node.attrname])
+235-            parent.instance_attrs_type[node.attrname] = list(current | values)
+236-        except astroid.InferenceError:
+[0m
+[0m$ [0mcd /testbed && sed -n 175,240p pylint/pyreverse/inspector.py && grep -n "def class_names" -A20 pylint/pyreverse/diagrams.py
+def visit_functiondef(self, node):
+        """visit an astroid.Function node
+
+        * set the locals_type mapping
+        * optionally tag the node with a unique id
+        """
+        if hasattr(node, "locals_type"):
+            return
+        node.locals_type = collections.defaultdict(list)
+        if self.tag:
+            node.uid = self.generate_id()
+
+    link_project = visit_project
+    link_module = visit_module
+    link_class = visit_classdef
+    link_function = visit_functiondef
+
+    def visit_assignname(self, node):
+        """visit an astroid.AssignName node
+
+        handle locals_type
+        """
+        # avoid double parsing done by different Linkers.visit
+        # running over the same project:
+        if hasattr(node, "_handled"):
+            return
+        node._handled = True
+        if node.name in node.frame():
+            frame = node.frame()
+        else:
+            # the name has been defined as 'global' in the frame and belongs
+            # there.
+            frame = node.root()
+        try:
+            if not hasattr(frame, "locals_type"):
+                # If the frame doesn't have a locals_type yet,
+                # it means it wasn't yet visited. Visit it now
+                # to add what's missing from it.
+                if isinstance(frame, astroid.ClassDef):
+                    self.visit_classdef(frame)
+                elif isinstance(frame, astroid.FunctionDef):
+                    self.visit_functiondef(frame)
+                else:
+                    self.visit_module(frame)
+
+            current = frame.locals_type[node.name]
+            values = set(node.infer())
+            frame.locals_type[node.name] = list(set(current) | values)
+        except astroid.InferenceError:
+            pass
+
+    @staticmethod
+    def handle_assignattr_type(node, parent):
+        """handle an astroid.assignattr node
+
+        handle instance_attrs_type
+        """
+        try:
+            values = set(node.infer())
+            current = set(parent.instance_attrs_type[node.attrname])
+            parent.instance_attrs_type[node.attrname] = list(current | values)
+        except astroid.InferenceError:
+            pass
+
+    def visit_import(self, node):
+        """visit an astroid.Import node
+118:    def class_names(self, nodes):
+119-        """return class names if needed in diagram"""
+120-        names = []
+121-        for node in nodes:
+122-            if isinstance(node, astroid.Instance):
+123-                node = node._proxied
+124-            if (
+125-                isinstance(node, astroid.ClassDef)
+126-                and hasattr(node, "name")
+127-                and not self.has_node(node)
+128-            ):
+129-                if node.name not in names:
+130-                    node_name = node.name
+131-                    names.append(node_name)
+132-        return names
+133-
+134-    def nodes(self):
+135-        """return the list of underlying nodes"""
+136-        return self._nodes.keys()
+137-
+138-    def has_node(self, node):
+[0m
+[0m$ [0mcd /testbed && python -c "import astroid,sys;print(astroid.__version__, sys.version)"; grep -n "handle_assignattr_type\|def visit_assignattr" -B3 -A8 pylint/pyreverse/inspector.py | sed -n 1,60p
+2.6.5 3.9.20 (main, Oct  3 2024, 07:27:41) 
+[GCC 11.2.0]
+165-        for assignattrs in node.instance_attrs.values():
+166-            for assignattr in assignattrs:
+167-                if not isinstance(assignattr, astroid.Unknown):
+168:                    self.handle_assignattr_type(assignattr, node)
+169-        # resolve implemented interface
+170-        try:
+171-            node.implements = list(interfaces(node, self.inherited_interfaces))
+172-        except astroid.InferenceError:
+173-            node.implements = ()
+174-
+175-    def visit_functiondef(self, node):
+176-        """visit an astroid.Function node
+--
+224-            pass
+225-
+226-    @staticmethod
+227:    def handle_assignattr_type(node, parent):
+228-        """handle an astroid.assignattr node
+229-
+230-        handle instance_attrs_type
+231-        """
+232-        try:
+233-            values = set(node.infer())
+234-            current = set(parent.instance_attrs_type[node.attrname])
+235-            parent.instance_attrs_type[node.attrname] = list(current | values)
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+import re
+p='pylint/pyreverse/inspector.py'
+s=open(p).read()
+old='''        try:
+            values = set(node.infer())
+            current = set(parent.instance_attrs_type[node.attrname])
+            parent.instance_attrs_type[node.attrname] = list(current | values)
+        except astroid.InferenceError:
+            pass
+'''
+new='''        try:
+            values = set(Linker._annotation_types(node) or node.infer())
+            current = set(parent.instance_attrs_type[node.attrname])
+            parent.instance_attrs_type[node.attrname] = list(current | values)
+        except astroid.InferenceError:
+            pass
+
+    @staticmethod
+    def _annotation_types(node):
+        """return the inferred types of the annotation of the argument
+        assigned to an attribute, if any (PEP 484)
+
+        e.g. ``def __init__(self, a: str = None): self.a = a``
+        gives the type ``str`` for ``self.a``.
+        Return None if no annotation can be used.
+        """
+        assign = node.parent
+        value = getattr(assign, "value", None)
+        if not isinstance(value, astroid.Name) or assign.value is not value:
+            return None
+        try:
+            _, assignments = value.lookup(value.name)
+        except astroid.AstroidError:
+            return None
+        for assignment in assignments:
+            if not isinstance(assignment, astroid.AssignName):
+                continue
+            arguments = assignment.parent
+            if not isinstance(arguments, astroid.Arguments):
+                continue
+            annotation = None
+            names = [a.name for a in arguments.args or []]
+            if assignment.name in names:
+                index = names.index(assignment.name)
+                annotations = arguments.annotations or []
+                if index < len(annotations):
+                    annotation = annotations[index]
+            if annotation is None:
+                continue
+            try:
+                inferred = set(annotation.infer())
+            except astroid.InferenceError:
+                return None
+            # annotations evaluate to classes; instances are expected
+            # by the diagram code
+            values = set()
+            for inf in inferred:
+                if isinstance(inf, astroid.ClassDef):
+                    values.add(astroid.bases.Instance(inf))
+                elif inf is not astroid.Uninferable:
+                    values.add(inf)
+            return values or None
+        return None
+'''
+assert s.count(old)==1
+s=s.replace(old,new)
+open(p,'w').write(s)
+EOF
+grep -n "^class \|^import\|^from" pylint/pyreverse/inspector.py
+17:import collections
+18:import os
+19:import traceback
+21:import astroid
+23:from pylint.pyreverse import utils
+63:class IdGeneratorMixIn:
+79:class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+344:class Project:
+[0m
+[0m$ [0mcd /tmp/opencode && mkdir -p t && cat > t/mod.py <<'EOF'
+class C(object):
+    def __init__(self, a: str = None, b: int = 1, c=None):
+        self.a = a
+        self.b = b
+        self.c = c
+EOF
+cd t && python -m pylint.pyreverse.main -o dot mod.py >/dev/null 2>&1; python -c "
+import astroid
+from pylint.pyreverse import inspector, diagrams
+from pylint.pyreverse.diagrams import ClassDiagram
+p=inspector.project_from_files(['mod.py'])
+for m in p.get_children():
+    l=inspector.Linker(p); l.visit(m)
+    for c in m.nodes_of_class(astroid.ClassDef):
+        print(c.name, dict(c.instance_attrs_type))
+        print(diagrams.ClassDiagram(c.name,[c]).get_attrs.__name__)
+        print(diagrams.DefaultDiagram if False else '')
+" ; cd /testbed && python -m pytest -q pylint/test/test_pyreverse* 2>&1 | tail -3; cd /tmp/opencode/t && python -m pylint.pyreverse.main -o dot -p x mod.py 2>&1 | tail -2; cat classes_x.dot 2>/dev/null | head -20
+Traceback (most recent call last):
+  File "<string>", line 10, in <module>
+  File "/testbed/pylint/pyreverse/diagrams.py", line 52, in __init__
+    FilterMixIn.__init__(self, mode)
+  File "/testbed/pylint/pyreverse/utils.py", line 122, in __init__
+    for nummod in mode.split("+"):
+AttributeError: 'list' object has no attribute 'split'
+parsing mod.py...
+C {'a': [<Instance of builtins.str at 0x139732832456656>], 'b': [<Instance of builtins.int at 0x139732802087136>], 'c': [Uninferable, <Const.NoneType l.2 at 0x7f1613e05550>]}
+
+-- Docs: https://docs.pytest.org/en/stable/warnings.html
+1 warning in 0.00s
+parsing mod.py...
+digraph "classes_x" {
+charset="utf-8"
+rankdir=BT
+"0" [label="{C|a : str\lb : int\lc : NoneType\l|}", shape="record"];
+}
+[0m
+[0m$ [0mcd /testbed && python -m pytest -q tests/test_pyreverse* pylint/test/ -k pyreverse 2>&1 | tail -3; git status --short
+-- Docs: https://docs.pytest.org/en/stable/warnings.html
+1 warning in 0.00s
+ M pylint/pyreverse/inspector.py
+[0m
+[0m$ [0mcd /testbed && python -m pytest -q $(git ls-files | grep -i "pyreverse.*test\|test.*pyreverse" | grep "\.py$") 2>&1 | tail -3
+-- Docs: https://docs.pytest.org/en/stable/warnings.html
+23 passed, 1 warning in 0.11s
+[0m
