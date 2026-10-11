@@ -13,6 +13,7 @@ Limits, so every harness gets the same budget:
 import fcntl, json, threading, time, http.server, socketserver
 import httpx
 from .config import MODEL, OUT, HARD_CAP_USD
+CALL_DEADLINE_S = 300
 
 UPSTREAM = "https://api.anthropic.com"
 LEDGER = OUT / "ledger.json"
@@ -102,6 +103,11 @@ def _handler(rec):
             t0 = time.time()
             with httpx.Client(timeout=httpx.Timeout(600, connect=15, read=120)) as c:
                 with c.stream(method, UPSTREAM + self.path, headers=hdrs, content=body) as r:
+                    # Hard per-call deadline: an upstream stream that stays open (pings / trickle) never trips the
+                    # 120 s read timeout and hung SWE-agent 10+ min twice (django-10554). Longest healthy call seen
+                    # is ~64 s, so closing at CALL_DEADLINE_S only ever drops a stuck call; the client sees a broken
+                    # connection and retries. Nothing is recorded for the dropped call (usage never arrived).
+                    wd = threading.Timer(CALL_DEADLINE_S, r.close); wd.daemon = True; wd.start()
                     self.send_response(r.status_code)
                     for k, v in r.headers.items():
                         if k.lower() not in ("content-length", "transfer-encoding", "connection", "content-encoding"):
@@ -111,6 +117,9 @@ def _handler(rec):
                     for chunk in r.iter_bytes():
                         buf.append(chunk)
                         self.wfile.write(f"{len(chunk):X}\r\n".encode() + chunk + b"\r\n"); self.wfile.flush()
+                    wd.cancel()
+                    if time.time() - t0 > CALL_DEADLINE_S:
+                        raise TimeoutError(f"proxy: upstream call exceeded {CALL_DEADLINE_S}s deadline")
                     status = r.status_code
             # Record the call BEFORE sending the final chunk. The client returns as soon as it sees the
             # terminator, so recording after it races: a caller reading rec.calls right away (preflight, or
