@@ -17,6 +17,9 @@ from .config import MODEL, TOOLS, MAX_TURNS, WALL_S, DATASET, image_for
 
 DOCKER = shlex.split(os.environ.get("SBR_DOCKER", "docker"))
 CURSOR_MODEL = os.environ.get("SBR_CURSOR_MODEL", MODEL)
+# Same fixed resources for every task container (agent and grading), so wall time is comparable across harnesses.
+CPUS = os.environ.get("SBR_CPUS", "2"); MEM = os.environ.get("SBR_MEM", "4g")
+LIMITS = [f"--cpus={CPUS}", f"--memory={MEM}", f"--memory-swap={MEM}"]
 TESTBED_PATH = "/opt/miniconda3/envs/testbed/bin:/opt/miniconda3/bin"
 JUNK = [".aider*", ".claude", ".opencode", ".cursor", "*.orig", "*.rej"]
 
@@ -55,7 +58,7 @@ def _ca_mounts():
 
 def _container(inst, name):
     cname = f"sbr-{name}-{uuid.uuid4().hex[:8]}"
-    r = _sh(DOCKER + ["run", "-d", "--name", cname, "--network", "host", *_ca_mounts(),
+    r = _sh(DOCKER + ["run", "-d", "--name", cname, "--network", "host", *LIMITS, *_ca_mounts(),
                       "-v", f"{TOOLS}:{TOOLS}:ro", image_for(inst["instance_id"]), "sleep", "infinity"])
     if r.returncode:
         raise RuntimeError(f"docker run failed: {r.stderr.strip()[-400:]}")
