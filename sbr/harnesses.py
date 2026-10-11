@@ -239,6 +239,13 @@ HARNESSES = {
     "opencode_auto": lambda inst, url, logdir: opencode(inst, url, logdir, auto=True),
     "cursor_nothink": lambda inst, url, logdir: cursor(inst, url, logdir, model=CURSOR_NOTHINK_MODEL),
 }
+# Same-settings set (2026-10-11): Haiku 5.5 thinks adaptively by default, so every proxied harness had thinking on.
+# These rerun each proxied harness unchanged except that its proxy forces thinking off (proxy.normalize), matching
+# cursor_nothink. OpenCode uses the auto-approve config. run.py turns normalization on for any *_nothink name.
+for _h in ("mini_swe_agent", "swe_agent", "aider", "claude_code"):
+    HARNESSES[f"{_h}_nothink"] = HARNESSES[_h]
+HARNESSES["opencode_nothink"] = HARNESSES["opencode_auto"]
 CURSOR_NOTHINK_MODEL = os.environ.get("SBR_CURSOR_NOTHINK_MODEL", "claude-haiku-5-5-high")  # "Haiku 5.5 High No Thinking"
 PROXIED = set(HARNESSES) - {"cursor", "cursor_nothink", "gold"}
-CHECKS = {"gold", "opencode_auto", "cursor_nothink"}  # not run unless asked for by name
+CHECKS = {"gold", "opencode_auto", "cursor_nothink", "mini_swe_agent_nothink", "swe_agent_nothink", "aider_nothink",
+          "claude_code_nothink", "opencode_nothink"}  # not run unless asked for by name

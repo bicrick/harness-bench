@@ -177,7 +177,7 @@ def run_one(inst, harness):
                concurrency_regime=REGIME, slot_wait_s=round(waited, 1))
     srv = rec = None
     try:
-        srv, rec, url = proxy.start(TASK_BUDGET_USD, logdir / "calls.jsonl")
+        srv, rec, url = proxy.start(TASK_BUDGET_USD, logdir / "calls.jsonl", thinking="disabled" if harness.endswith("_nothink") else None)
         patch, notes = HARNESSES[harness](inst, url, logdir)
         (logdir / "patch.diff").write_text(patch)
         row.update(notes=notes, patch_lines=patch.count("\n"),

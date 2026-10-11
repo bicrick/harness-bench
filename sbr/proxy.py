@@ -13,7 +13,39 @@ Limits, so every harness gets the same budget:
 import fcntl, json, threading, time, http.server, socketserver
 import httpx
 from .config import MODEL, OUT, HARD_CAP_USD
+import os
 CALL_DEADLINE_S = 300
+# Parity normalization (2026-10-11): claude-haiku-5-5 thinks adaptively unless a request says otherwise, and the
+# harnesses differ (Claude Code/OpenCode ask for adaptive thinking + an effort level, Aider/mini/SWE-agent send
+# nothing and get the model default). With SBR_THINKING=disabled every forwarded Messages call gets
+# thinking={"type":"disabled"} and no output_config.effort, so all proxied harnesses run at the same level: none.
+# Cursor's equivalent is its "No Thinking" model id. Everything else in the request is forwarded unchanged.
+THINKING = os.environ.get("SBR_THINKING", "")
+
+def normalize(req, thinking=None):
+    """Returns the request to forward (or None to forward the original bytes unchanged)."""
+    if (thinking or THINKING) != "disabled":
+        return None
+    out = dict(req)
+    out["thinking"] = {"type": "disabled"}
+    oc = dict(out.get("output_config") or {})
+    oc.pop("effort", None)
+    if oc: out["output_config"] = oc
+    else: out.pop("output_config", None)
+    cm = out.get("context_management")
+    if isinstance(cm, dict) and cm.get("edits"):  # thinking-clearing edits are invalid once thinking is off
+        edits = [e for e in cm["edits"] if "thinking" not in str(e.get("type", ""))]
+        if edits: out["context_management"] = {**cm, "edits": edits}
+        else: out.pop("context_management", None)
+    msgs = []
+    for m in out.get("messages") or []:  # drop any thinking blocks already in history
+        c = m.get("content")
+        if isinstance(c, list):
+            c = [b for b in c if not (isinstance(b, dict) and b.get("type") in ("thinking", "redacted_thinking"))]
+            m = {**m, "content": c}
+        msgs.append(m)
+    if "messages" in out: out["messages"] = msgs
+    return out
 
 UPSTREAM = "https://api.anthropic.com"
 LEDGER = OUT / "ledger.json"
@@ -42,8 +74,8 @@ def _charge(usd):
 
 class Recorder:
     """Per-task call log. `budget` is this task's dollar cap."""
-    def __init__(self, budget, log_path):
-        self.budget = budget; self.log_path = log_path
+    def __init__(self, budget, log_path, thinking=None):
+        self.budget = budget; self.log_path = log_path; self.thinking = thinking
         self.lock = threading.Lock(); self.calls = []; self.status = {}; self.refused = 0
 
     @property
@@ -66,6 +98,20 @@ def _usage(obj, u):
     if sr:
         u["stop_reason"] = sr
     return u
+
+REQ_KEYS = ("model", "max_tokens", "temperature", "top_p", "top_k", "thinking", "output_config", "reasoning_effort", "stream")
+
+def _req_params(req):
+    """The sampling/reasoning settings a harness actually sent (no message content, no headers/keys)."""
+    out = {k: req[k] for k in REQ_KEYS if k in req}
+    if req.get("__normalized"):
+        out["normalized"] = "thinking=disabled, effort dropped"
+    if req.get("__beta"):
+        out["anthropic_beta"] = req["__beta"]
+    extra = sorted(k for k in req if k not in REQ_KEYS + ("messages", "tools", "system", "metadata", "tool_choice", "__beta", "__normalized"))
+    if extra:
+        out["other_keys"] = extra
+    return out
 
 def _handler(rec):
     class H(http.server.BaseHTTPRequestHandler):
@@ -90,6 +136,8 @@ def _handler(rec):
             except ValueError:
                 req = {}
             is_msg = self.path.split("?")[0].endswith("/v1/messages")
+            if is_msg and self.headers.get("anthropic-beta"):  # logged only; the forwarded body is the raw bytes
+                req["__beta"] = self.headers.get("anthropic-beta")
             if is_msg:
                 if req.get("model") and not str(req["model"]).startswith(MODEL):
                     return self._err(400, f"proxy: only {MODEL} is allowed, got {req.get('model')}")
@@ -98,6 +146,12 @@ def _handler(rec):
                 if rec.usd >= rec.budget:
                     rec.refused += 1
                     return self._err(429, f"proxy: task budget ${rec.budget:.2f} spent")
+            if is_msg and req:
+                fwd = normalize(req, rec.thinking)
+                if fwd is not None:
+                    fwd.pop("__beta", None)
+                    body = json.dumps(fwd).encode()
+                    req["__normalized"] = True
             hdrs = {k: v for k, v in self.headers.items()
                     if k.lower() not in ("host", "content-length", "accept-encoding", "connection")}
             t0 = time.time()
@@ -145,11 +199,14 @@ def _handler(rec):
                     if line.startswith("data:"):
                         try: _usage(json.loads(line[5:]), u)
                         except ValueError: pass
+            n_think = text.count('"type":"thinking"') + text.count('"type": "thinking"') \
+                + text.count('"type":"redacted_thinking"') + text.count('"type": "redacted_thinking"')
             usd = cost(u)
             _charge(usd)
             rec.add(dict(t=round(t0, 3), s=round(time.time() - t0, 2), usd=round(usd, 6),
                          prompt=u["input"] + u["cache_read"] + u["cache_write"], **u,
-                         n_messages=len(req.get("messages") or []), n_tools=len(req.get("tools") or [])))
+                         n_messages=len(req.get("messages") or []), n_tools=len(req.get("tools") or []),
+                         req=_req_params(req), think_blocks=n_think))
 
         def do_POST(self): self._fwd("POST")
         def do_GET(self): self._fwd("GET")
@@ -159,9 +216,9 @@ class _Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-def start(budget, log_path, host="127.0.0.1"):
-    """Start a proxy for one task. Returns (server, recorder, base_url)."""
-    rec = Recorder(budget, log_path)
+def start(budget, log_path, host="127.0.0.1", thinking=None):
+    """Start a proxy for one task. Returns (server, recorder, base_url). thinking="disabled" normalizes (see normalize)."""
+    rec = Recorder(budget, log_path, thinking)
     srv = _Server((host, 0), _handler(rec))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv, rec, f"http://{host}:{srv.server_address[1]}"

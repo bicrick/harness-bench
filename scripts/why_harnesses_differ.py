@@ -10,6 +10,12 @@ import csv, glob, json, os, re, statistics as st, collections
 R = 'results/swebench'
 HS = ['cursor', 'swe_agent', 'claude_code', 'mini_swe_agent', 'opencode', 'aider']
 VARIANTS = ['opencode_auto', 'cursor_nothink']
+# Same settings (2026-10-11): every harness on claude-haiku-5-5 with thinking off. Cursor uses its "No Thinking"
+# model id, the proxied five ran with the proxy forcing thinking={"type":"disabled"}; OpenCode with auto-approve.
+SAME = {'cursor': 'cursor_nothink', 'swe_agent': 'swe_agent_nothink', 'claude_code': 'claude_code_nothink',
+        'mini_swe_agent': 'mini_swe_agent_nothink', 'opencode': 'opencode_nothink', 'aider': 'aider_nothink'}
+VARIANTS += [v for v in SAME.values() if v not in VARIANTS]
+base = lambda h: h.replace('_nothink', '').replace('_auto', '')
 SUBSET = {i['instance_id'] for i in json.load(open(f'{R}/subset.json'))['instances']}
 TEST = re.compile(r'pytest|runtests\.py|\btox\b|-m unittest|manage\.py test|bin/test|unittest')
 REPRO = re.compile(r'(^|[;&|\s])python3?\s+(-c|-\s|/tmp/|\S*repro|\S*test_\S*\.py|<<|-\s*<<)|python3? - <<|python3? -c')
@@ -61,14 +67,14 @@ def actions(iid, h):
                 else:
                     out.append(('search', k))
         return out, think
-    if h == 'swe_agent':
+    if base(h) == 'swe_agent':
         f = glob.glob(f'{base}/out/*/*.traj')
         if not f:
             return None, 0
         for s in json.load(open(f[0]))['trajectory']:
             out.append(('shell', s.get('action') or ''))
         return out, 0
-    if h == 'mini_swe_agent':
+    if base(h) == 'mini_swe_agent':
         f = glob.glob(f'{base}/out/*/*.traj.json')
         if not f:
             return None, 0
@@ -110,7 +116,8 @@ for iid in TASKS:
         rec = dict(iid=iid, solved=r['resolved'] == 'True', calls=len(cs) or int(float(r['calls'] or 0)),
                    patch=rr.get('patch_lines') or 0, files=rr.get('files_changed') or 0,
                    first_prompt=cs[0]['prompt'] if cs else None, max_prompt=max((c['prompt'] for c in cs), default=None),
-                   out_tok=sum(c['output'] for c in cs), wall=float(r['wall_s'] or 0), think=think)
+                   out_tok=sum(c['output'] for c in cs), wall=float(r['wall_s'] or 0), think=think,
+                   think_blocks=sum(c.get('think_blocks') or 0 for c in cs) if cs and 'think_blocks' in cs[0] else None)
         if acts is not None:
             kinds = [classify(k, t) for k, t in acts]
             rec['n_actions'] = len(kinds)
@@ -120,14 +127,14 @@ for iid in TASKS:
             rec['tested_after_edit'] = 'test' in after
             rec['checked_after_edit'] = ('test' in after) or ('run' in after)
             rec['repro_before_edit'] = ('run' in kinds[:fe]) if fe is not None else False
-        if h == 'claude_code':
+        if base(h) == 'claude_code':
             try:
                 d = json.loads(open(f'{R}/runs/{iid}/{h}/stdout.txt').read().splitlines()[0])
                 rec['n_actions'] = d.get('num_turns')
                 rec['think_tok'] = d['usage'].get('output_tokens_details', {}).get('thinking_tokens', 0)
             except Exception:
                 pass
-        if h == 'aider':
+        if base(h) == 'aider':
             s = open(f'{R}/runs/{iid}/{h}/stdout.txt', errors='ignore').read()
             rec['edit_fail'] = bool(re.search(r'SearchReplaceNoExactMatch|failed to match|did not match|Only \d+ reflections', s))
         if h.startswith('opencode'):
@@ -160,10 +167,13 @@ for h, rs in per.items():
     if h.startswith('cursor'):
         s['think_chars_med'] = med([r['think'] for r in rs])
         s['think_runs'] = sum(r['think'] > 0 for r in rs)
-    if h == 'claude_code':
+    tb = [r['think_blocks'] for r in rs if r.get('think_blocks') is not None]
+    if tb:
+        s['think_block_runs'] = sum(x > 0 for x in tb); s['think_logged_runs'] = len(tb)
+    if base(h) == 'claude_code':
         s['turns_med'] = med([r['n_actions'] for r in rs if r.get('n_actions')])
         s['think_tok_med'] = med([r.get('think_tok', 0) for r in rs])
-    if h == 'aider':
+    if base(h) == 'aider':
         s['edit_fail_runs'] = sum(r.get('edit_fail', False) for r in rs)
         s['edit_fail_solved'] = sum(r.get('edit_fail', False) and r['solved'] for r in rs)
     summ[h] = s
@@ -171,10 +181,16 @@ for h, rs in per.items():
 solved = {h: {r['iid'] for r in rs if r['solved']} for h, rs in per.items() if h in HS}  # overlap among the original six
 only = {h: sorted(solved[h] - set().union(*[solved[o] for o in solved if o != h])) for h in solved}
 missed_by_one = {h: sorted(set.intersection(*[solved[o] for o in solved if o != h]) - solved[h]) for h in solved}
+sv = {b: {r['iid'] for r in per[v] if r['solved']} for b, v in SAME.items() if v in per}
+only_same = {h: sorted(sv[h] - set().union(*[sv[o] for o in sv if o != h])) for h in sv} if len(sv) > 1 else {}
+all_same = sorted(set.intersection(*sv.values())) if sv else []
+none_same = sorted(set(TASKS) - set().union(*sv.values())) if sv else []
 out = dict(summary=summ, only_solved_by=only, missed_only_by=missed_by_one,
+           same_settings=dict(map=SAME, only_solved_by=only_same, solved_by_all=len(all_same), solved_by_none=len(none_same)),
            runs={h: rs for h, rs in per.items()})
 json.dump(out, open(f'{R}/why_harnesses.json', 'w'), indent=1)
 for h, s in summ.items():
     print(h, s)
 print('only', only)
 print('missed_only_by', missed_by_one)
+print('same_settings', out['same_settings'])
