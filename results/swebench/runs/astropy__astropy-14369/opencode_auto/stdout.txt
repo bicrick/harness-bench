@@ -1,0 +1,19 @@
+The bug is in the grammar. `unit_expression DIVISION combined_units` computes `p[1] / p[3]`, and since `combined_units` can itself be a division, `a/b/c` parses as `a/(b/c)`. I'll make everything after a `/` a denominator product, so `a/b/c` becomes `a/(b*c)`.
+The unit string is still wrong (`J s / (kpc2 m)`), and my last sanity check was itself mis-specified (Python's `m/s/kpc2` is left-associative, so it isn't the CDS meaning). Let me check whether the parser tables are stale and inspect the parse directly.
+The parse is still wrong, so the cached generated parser table is a likely suspect. The module header says these `_parsetab`/`_lextab` files are generated, so I'll check whether they're stale.
+The generated `cds_parsetab.py` is tracked in git and was not regenerated after the grammar change. Per the file header, I'll delete it and let it be rebuilt from the updated grammar.
+The parses are now correct. The test run shows 17 failures, so I need to check whether they predate my change.
+The 17 failures are identical before and after my change (unrelated numpy/quantity issues). Final check of the diff:
+The CDS parser now reads composite units correctly. In your MRT example, `10+3J/m/s/kpc2` comes out as `1000 J / (kpc2 m s)` and `10-7J/s/kpc2` as `1e-07 J / (kpc2 s)`.
+
+**Cause:** The grammar rule `unit_expression DIVISION combined_units` was right-associative, so `a/b/c` was parsed as `a/(b/c)`. Everything after a `/` should go into the denominator.
+
+**Fix** (`astropy/units/format/cds.py`):
+- The right-hand side of a division is now a new `denominator` nonterminal. It multiplies every unit that follows the `/`, so `a/b/c` becomes `a/(b·c)`.
+- I deleted the stale generated `cds_parsetab.py` so it regenerates from the new grammar. The old table was still being used after the grammar change, which is why the first attempt still gave the wrong result.
+
+**Verification:**
+- The issue's MRT file now produces the correct units for both columns.
+- `astropy/units` has 17 failing tests both before and after the change. They're unrelated numpy/quantity issues, and the failing set is identical.
+
+I didn't add or change any tests.

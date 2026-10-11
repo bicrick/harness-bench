@@ -1,0 +1,739 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcat /testbed/sympy/physics/quantum/tensorproduct.py | head -400 | tail -250
+return TensorProduct(*[Dagger(i) for i in self.args])
+
+    def _eval_rewrite(self, pattern, rule, **hints):
+        sargs = self.args
+        terms = [t._eval_rewrite(pattern, rule, **hints) for t in sargs]
+        return TensorProduct(*terms).expand(tensorproduct=True)
+
+    def _sympystr(self, printer, *args):
+        from sympy.printing.str import sstr
+        length = len(self.args)
+        s = ''
+        for i in range(length):
+            if isinstance(self.args[i], (Add, Pow, Mul)):
+                s = s + '('
+            s = s + sstr(self.args[i])
+            if isinstance(self.args[i], (Add, Pow, Mul)):
+                s = s + ')'
+            if i != length - 1:
+                s = s + 'x'
+        return s
+
+    def _pretty(self, printer, *args):
+
+        if (_combined_printing and
+                (all([isinstance(arg, Ket) for arg in self.args]) or
+                 all([isinstance(arg, Bra) for arg in self.args]))):
+
+            length = len(self.args)
+            pform = printer._print('', *args)
+            for i in range(length):
+                next_pform = printer._print('', *args)
+                length_i = len(self.args[i].args)
+                for j in range(length_i):
+                    part_pform = printer._print(self.args[i].args[j], *args)
+                    next_pform = prettyForm(*next_pform.right(part_pform))
+                    if j != length_i - 1:
+                        next_pform = prettyForm(*next_pform.right(', '))
+
+                if len(self.args[i].args) > 1:
+                    next_pform = prettyForm(
+                        *next_pform.parens(left='{', right='}'))
+                pform = prettyForm(*pform.right(next_pform))
+                if i != length - 1:
+                    pform = prettyForm(*pform.right(',' + ' '))
+
+            pform = prettyForm(*pform.left(self.args[0].lbracket))
+            pform = prettyForm(*pform.right(self.args[0].rbracket))
+            return pform
+
+        length = len(self.args)
+        pform = printer._print('', *args)
+        for i in range(length):
+            next_pform = printer._print(self.args[i], *args)
+            if isinstance(self.args[i], (Add, Mul)):
+                next_pform = prettyForm(
+                    *next_pform.parens(left='(', right=')')
+                )
+            pform = prettyForm(*pform.right(next_pform))
+            if i != length - 1:
+                if printer._use_unicode:
+                    pform = prettyForm(*pform.right(u'\N{N-ARY CIRCLED TIMES OPERATOR}' + u' '))
+                else:
+                    pform = prettyForm(*pform.right('x' + ' '))
+        return pform
+
+    def _latex(self, printer, *args):
+
+        if (_combined_printing and
+                (all([isinstance(arg, Ket) for arg in self.args]) or
+                 all([isinstance(arg, Bra) for arg in self.args]))):
+
+            def _label_wrap(label, nlabels):
+                return label if nlabels == 1 else r"\left\{%s\right\}" % label
+
+            s = r", ".join([_label_wrap(arg._print_label_latex(printer, *args),
+                                        len(arg.args)) for arg in self.args])
+
+            return r"{%s%s%s}" % (self.args[0].lbracket_latex, s,
+                                  self.args[0].rbracket_latex)
+
+        length = len(self.args)
+        s = ''
+        for i in range(length):
+            if isinstance(self.args[i], (Add, Mul)):
+                s = s + '\\left('
+            # The extra {} brackets are needed to get matplotlib's latex
+            # rendered to render this properly.
+            s = s + '{' + printer._print(self.args[i], *args) + '}'
+            if isinstance(self.args[i], (Add, Mul)):
+                s = s + '\\right)'
+            if i != length - 1:
+                s = s + '\\otimes '
+        return s
+
+    def doit(self, **hints):
+        return TensorProduct(*[item.doit(**hints) for item in self.args])
+
+    def _eval_expand_tensorproduct(self, **hints):
+        """Distribute TensorProducts across addition."""
+        args = self.args
+        add_args = []
+        stop = False
+        for i in range(len(args)):
+            if isinstance(args[i], Add):
+                for aa in args[i].args:
+                    tp = TensorProduct(*args[:i] + (aa,) + args[i + 1:])
+                    if isinstance(tp, TensorProduct):
+                        tp = tp._eval_expand_tensorproduct()
+                    add_args.append(tp)
+                break
+
+        if add_args:
+            return Add(*add_args)
+        else:
+            return self
+
+    def _eval_trace(self, **kwargs):
+        indices = kwargs.get('indices', None)
+        exp = tensor_product_simp(self)
+
+        if indices is None or len(indices) == 0:
+            return Mul(*[Tr(arg).doit() for arg in exp.args])
+        else:
+            return Mul(*[Tr(value).doit() if idx in indices else value
+                         for idx, value in enumerate(exp.args)])
+
+
+def tensor_product_simp_Mul(e):
+    """Simplify a Mul with TensorProducts.
+
+    Current the main use of this is to simplify a ``Mul`` of ``TensorProduct``s
+    to a ``TensorProduct`` of ``Muls``. It currently only works for relatively
+    simple cases where the initial ``Mul`` only has scalars and raw
+    ``TensorProduct``s, not ``Add``, ``Pow``, ``Commutator``s of
+    ``TensorProduct``s.
+
+    Parameters
+    ==========
+
+    e : Expr
+        A ``Mul`` of ``TensorProduct``s to be simplified.
+
+    Returns
+    =======
+
+    e : Expr
+        A ``TensorProduct`` of ``Mul``s.
+
+    Examples
+    ========
+
+    This is an example of the type of simplification that this function
+    performs::
+
+        >>> from sympy.physics.quantum.tensorproduct import \
+                    tensor_product_simp_Mul, TensorProduct
+        >>> from sympy import Symbol
+        >>> A = Symbol('A',commutative=False)
+        >>> B = Symbol('B',commutative=False)
+        >>> C = Symbol('C',commutative=False)
+        >>> D = Symbol('D',commutative=False)
+        >>> e = TensorProduct(A,B)*TensorProduct(C,D)
+        >>> e
+        AxB*CxD
+        >>> tensor_product_simp_Mul(e)
+        (A*C)x(B*D)
+
+    """
+    # TODO: This won't work with Muls that have other composites of
+    # TensorProducts, like an Add, Pow, Commutator, etc.
+    # TODO: This only works for the equivalent of single Qbit gates.
+    if not isinstance(e, Mul):
+        return e
+    c_part, nc_part = e.args_cnc()
+    n_nc = len(nc_part)
+    if n_nc == 0 or n_nc == 1:
+        return e
+    elif e.has(TensorProduct):
+        current = nc_part[0]
+        if not isinstance(current, TensorProduct):
+            raise TypeError('TensorProduct expected, got: %r' % current)
+        n_terms = len(current.args)
+        new_args = list(current.args)
+        for next in nc_part[1:]:
+            # TODO: check the hilbert spaces of next and current here.
+            if isinstance(next, TensorProduct):
+                if n_terms != len(next.args):
+                    raise QuantumError(
+                        'TensorProducts of different lengths: %r and %r' %
+                        (current, next)
+                    )
+                for i in range(len(new_args)):
+                    new_args[i] = new_args[i] * next.args[i]
+            else:
+                # this won't quite work as we don't want next in the
+                # TensorProduct
+                for i in range(len(new_args)):
+                    new_args[i] = new_args[i] * next
+            current = next
+        return Mul(*c_part) * TensorProduct(*new_args)
+    else:
+        return e
+
+
+def tensor_product_simp(e, **hints):
+    """Try to simplify and combine TensorProducts.
+
+    In general this will try to pull expressions inside of ``TensorProducts``.
+    It currently only works for relatively simple cases where the products have
+    only scalars, raw ``TensorProducts``, not ``Add``, ``Pow``, ``Commutators``
+    of ``TensorProducts``. It is best to see what it does by showing examples.
+
+    Examples
+    ========
+
+    >>> from sympy.physics.quantum import tensor_product_simp
+    >>> from sympy.physics.quantum import TensorProduct
+    >>> from sympy import Symbol
+    >>> A = Symbol('A',commutative=False)
+    >>> B = Symbol('B',commutative=False)
+    >>> C = Symbol('C',commutative=False)
+    >>> D = Symbol('D',commutative=False)
+
+    First see what happens to products of tensor products:
+
+    >>> e = TensorProduct(A,B)*TensorProduct(C,D)
+    >>> e
+    AxB*CxD
+    >>> tensor_product_simp(e)
+    (A*C)x(B*D)
+
+    This is the core logic of this function, and it works inside, powers, sums,
+    commutators and anticommutators as well:
+
+    >>> tensor_product_simp(e**2)
+    (A*C)x(B*D)**2
+
+    """
+    if isinstance(e, Add):
+        return Add(*[tensor_product_simp(arg) for arg in e.args])
+    elif isinstance(e, Pow):
+        return tensor_product_simp(e.base) ** e.exp
+    elif isinstance(e, Mul):
+        return tensor_product_simp_Mul(e)
+    elif isinstance(e, Commutator):
+        return Commutator(*[tensor_product_simp(arg) for arg in e.args])
+    elif isinstance(e, AntiCommutator):
+        return AntiCommutator(*[tensor_product_simp(arg) for arg in e.args])
+    else:
+        return e
+[0m
+[0m$ [0mcd /testbed && grep -n "def tensor_product_simp" -A60 sympy/physics/quantum/tensorproduct.py
+271:def tensor_product_simp_Mul(e):
+272-    """Simplify a Mul with TensorProducts.
+273-
+274-    Current the main use of this is to simplify a ``Mul`` of ``TensorProduct``s
+275-    to a ``TensorProduct`` of ``Muls``. It currently only works for relatively
+276-    simple cases where the initial ``Mul`` only has scalars and raw
+277-    ``TensorProduct``s, not ``Add``, ``Pow``, ``Commutator``s of
+278-    ``TensorProduct``s.
+279-
+280-    Parameters
+281-    ==========
+282-
+283-    e : Expr
+284-        A ``Mul`` of ``TensorProduct``s to be simplified.
+285-
+286-    Returns
+287-    =======
+288-
+289-    e : Expr
+290-        A ``TensorProduct`` of ``Mul``s.
+291-
+292-    Examples
+293-    ========
+294-
+295-    This is an example of the type of simplification that this function
+296-    performs::
+297-
+298-        >>> from sympy.physics.quantum.tensorproduct import \
+299-                    tensor_product_simp_Mul, TensorProduct
+300-        >>> from sympy import Symbol
+301-        >>> A = Symbol('A',commutative=False)
+302-        >>> B = Symbol('B',commutative=False)
+303-        >>> C = Symbol('C',commutative=False)
+304-        >>> D = Symbol('D',commutative=False)
+305-        >>> e = TensorProduct(A,B)*TensorProduct(C,D)
+306-        >>> e
+307-        AxB*CxD
+308-        >>> tensor_product_simp_Mul(e)
+309-        (A*C)x(B*D)
+310-
+311-    """
+312-    # TODO: This won't work with Muls that have other composites of
+313-    # TensorProducts, like an Add, Pow, Commutator, etc.
+314-    # TODO: This only works for the equivalent of single Qbit gates.
+315-    if not isinstance(e, Mul):
+316-        return e
+317-    c_part, nc_part = e.args_cnc()
+318-    n_nc = len(nc_part)
+319-    if n_nc == 0 or n_nc == 1:
+320-        return e
+321-    elif e.has(TensorProduct):
+322-        current = nc_part[0]
+323-        if not isinstance(current, TensorProduct):
+324-            raise TypeError('TensorProduct expected, got: %r' % current)
+325-        n_terms = len(current.args)
+326-        new_args = list(current.args)
+327-        for next in nc_part[1:]:
+328-            # TODO: check the hilbert spaces of next and current here.
+329-            if isinstance(next, TensorProduct):
+330-                if n_terms != len(next.args):
+331-                    raise QuantumError(
+--
+348:def tensor_product_simp(e, **hints):
+349-    """Try to simplify and combine TensorProducts.
+350-
+351-    In general this will try to pull expressions inside of ``TensorProducts``.
+352-    It currently only works for relatively simple cases where the products have
+353-    only scalars, raw ``TensorProducts``, not ``Add``, ``Pow``, ``Commutators``
+354-    of ``TensorProducts``. It is best to see what it does by showing examples.
+355-
+356-    Examples
+357-    ========
+358-
+359-    >>> from sympy.physics.quantum import tensor_product_simp
+360-    >>> from sympy.physics.quantum import TensorProduct
+361-    >>> from sympy import Symbol
+362-    >>> A = Symbol('A',commutative=False)
+363-    >>> B = Symbol('B',commutative=False)
+364-    >>> C = Symbol('C',commutative=False)
+365-    >>> D = Symbol('D',commutative=False)
+366-
+367-    First see what happens to products of tensor products:
+368-
+369-    >>> e = TensorProduct(A,B)*TensorProduct(C,D)
+370-    >>> e
+371-    AxB*CxD
+372-    >>> tensor_product_simp(e)
+373-    (A*C)x(B*D)
+374-
+375-    This is the core logic of this function, and it works inside, powers, sums,
+376-    commutators and anticommutators as well:
+377-
+378-    >>> tensor_product_simp(e**2)
+379-    (A*C)x(B*D)**2
+380-
+381-    """
+382-    if isinstance(e, Add):
+383-        return Add(*[tensor_product_simp(arg) for arg in e.args])
+384-    elif isinstance(e, Pow):
+385-        return tensor_product_simp(e.base) ** e.exp
+386-    elif isinstance(e, Mul):
+387-        return tensor_product_simp_Mul(e)
+388-    elif isinstance(e, Commutator):
+389-        return Commutator(*[tensor_product_simp(arg) for arg in e.args])
+390-    elif isinstance(e, AntiCommutator):
+391-        return AntiCommutator(*[tensor_product_simp(arg) for arg in e.args])
+392-    else:
+393-        return e
+[0m
+[0m$ [0mcd /testbed && sed -n 1,120p sympy/physics/quantum/tensorproduct.py; grep -n "_eval_power\|def __pow__" -A12 sympy/physics/paulialgebra.py sympy/physics/quantum/*.py | head -80
+"""Abstract tensor product."""
+
+from __future__ import print_function, division
+
+from sympy import Expr, Add, Mul, Matrix, Pow, sympify
+from sympy.core.compatibility import range
+from sympy.core.trace import Tr
+from sympy.printing.pretty.stringpict import prettyForm
+
+from sympy.physics.quantum.qexpr import QuantumError
+from sympy.physics.quantum.dagger import Dagger
+from sympy.physics.quantum.commutator import Commutator
+from sympy.physics.quantum.anticommutator import AntiCommutator
+from sympy.physics.quantum.state import Ket, Bra
+from sympy.physics.quantum.matrixutils import (
+    numpy_ndarray,
+    scipy_sparse_matrix,
+    matrix_tensor_product
+)
+
+__all__ = [
+    'TensorProduct',
+    'tensor_product_simp'
+]
+
+#-----------------------------------------------------------------------------
+# Tensor product
+#-----------------------------------------------------------------------------
+
+_combined_printing = False
+
+
+def combined_tensor_printing(combined):
+    """Set flag controlling whether tensor products of states should be
+    printed as a combined bra/ket or as an explicit tensor product of different
+    bra/kets. This is a global setting for all TensorProduct class instances.
+
+    Parameters
+    ----------
+    combine : bool
+        When true, tensor product states are combined into one ket/bra, and
+        when false explicit tensor product notation is used between each
+        ket/bra.
+    """
+    global _combined_printing
+    _combined_printing = combined
+
+
+class TensorProduct(Expr):
+    """The tensor product of two or more arguments.
+
+    For matrices, this uses ``matrix_tensor_product`` to compute the Kronecker
+    or tensor product matrix. For other objects a symbolic ``TensorProduct``
+    instance is returned. The tensor product is a non-commutative
+    multiplication that is used primarily with operators and states in quantum
+    mechanics.
+
+    Currently, the tensor product distinguishes between commutative and non-
+    commutative arguments.  Commutative arguments are assumed to be scalars and
+    are pulled out in front of the ``TensorProduct``. Non-commutative arguments
+    remain in the resulting ``TensorProduct``.
+
+    Parameters
+    ==========
+
+    args : tuple
+        A sequence of the objects to take the tensor product of.
+
+    Examples
+    ========
+
+    Start with a simple tensor product of sympy matrices::
+
+        >>> from sympy import I, Matrix, symbols
+        >>> from sympy.physics.quantum import TensorProduct
+
+        >>> m1 = Matrix([[1,2],[3,4]])
+        >>> m2 = Matrix([[1,0],[0,1]])
+        >>> TensorProduct(m1, m2)
+        Matrix([
+        [1, 0, 2, 0],
+        [0, 1, 0, 2],
+        [3, 0, 4, 0],
+        [0, 3, 0, 4]])
+        >>> TensorProduct(m2, m1)
+        Matrix([
+        [1, 2, 0, 0],
+        [3, 4, 0, 0],
+        [0, 0, 1, 2],
+        [0, 0, 3, 4]])
+
+    We can also construct tensor products of non-commutative symbols:
+
+        >>> from sympy import Symbol
+        >>> A = Symbol('A',commutative=False)
+        >>> B = Symbol('B',commutative=False)
+        >>> tp = TensorProduct(A, B)
+        >>> tp
+        AxB
+
+    We can take the dagger of a tensor product (note the order does NOT reverse
+    like the dagger of a normal product):
+
+        >>> from sympy.physics.quantum import Dagger
+        >>> Dagger(tp)
+        Dagger(A)xDagger(B)
+
+    Expand can be used to distribute a tensor product across addition:
+
+        >>> C = Symbol('C',commutative=False)
+        >>> tp = TensorProduct(A+B,C)
+        >>> tp
+        (A + B)xC
+        >>> tp.expand(tensorproduct=True)
+        AxC + BxC
+    """
+    is_commutative = False
+
+    def __new__(cls, *args):
+        if isinstance(args[0], (Matrix, numpy_ndarray, scipy_sparse_matrix)):
+sympy/physics/paulialgebra.py:132:    def _eval_power(b, e):
+sympy/physics/paulialgebra.py-133-        if e.is_Integer and e.is_positive:
+sympy/physics/paulialgebra.py-134-            return super(Pauli, b).__pow__(int(e) % 2)
+sympy/physics/paulialgebra.py-135-
+sympy/physics/paulialgebra.py-136-
+sympy/physics/paulialgebra.py-137-def evaluate_pauli_product(arg):
+sympy/physics/paulialgebra.py-138-    '''Help function to evaluate Pauli matrices product
+sympy/physics/paulialgebra.py-139-    with symbolic objects
+sympy/physics/paulialgebra.py-140-
+sympy/physics/paulialgebra.py-141-    Parameters
+sympy/physics/paulialgebra.py-142-    ==========
+sympy/physics/paulialgebra.py-143-
+sympy/physics/paulialgebra.py-144-    arg: symbolic expression that contains Paulimatrices
+--
+sympy/physics/quantum/gate.py:474:    def _eval_power(self, exp):
+sympy/physics/quantum/gate.py-475-        if isinstance(self.gate, HermitianOperator):
+sympy/physics/quantum/gate.py-476-            if exp == -1:
+sympy/physics/quantum/gate.py:477:                return Gate._eval_power(self, exp)
+sympy/physics/quantum/gate.py-478-            elif abs(exp) % 2 == 0:
+sympy/physics/quantum/gate.py-479-                return self*(Gate._eval_inverse(self))
+sympy/physics/quantum/gate.py-480-            else:
+sympy/physics/quantum/gate.py-481-                return self
+sympy/physics/quantum/gate.py-482-        else:
+sympy/physics/quantum/gate.py:483:            return Gate._eval_power(self, exp)
+sympy/physics/quantum/gate.py-484-
+sympy/physics/quantum/gate.py-485-class CGateS(CGate):
+sympy/physics/quantum/gate.py-486-    """Version of CGate that allows gate simplifications.
+sympy/physics/quantum/gate.py-487-    I.e. cnot looks like an oplus, cphase has dots, etc.
+sympy/physics/quantum/gate.py-488-    """
+sympy/physics/quantum/gate.py-489-    simplify_cgate=True
+sympy/physics/quantum/gate.py-490-
+sympy/physics/quantum/gate.py-491-
+sympy/physics/quantum/gate.py-492-class UGate(Gate):
+sympy/physics/quantum/gate.py-493-    """General gate specified by a set of targets and a target matrix.
+sympy/physics/quantum/gate.py-494-
+sympy/physics/quantum/gate.py-495-    Parameters
+--
+sympy/physics/quantum/hilbert.py:80:    def __pow__(self, other, mod=None):
+sympy/physics/quantum/hilbert.py-81-        if mod is not None:
+sympy/physics/quantum/hilbert.py-82-            raise ValueError('The third argument to __pow__ is not supported \
+sympy/physics/quantum/hilbert.py-83-            for Hilbert spaces.')
+sympy/physics/quantum/hilbert.py-84-        return TensorPowerHilbertSpace(self, other)
+sympy/physics/quantum/hilbert.py-85-
+sympy/physics/quantum/hilbert.py-86-    def __contains__(self, other):
+sympy/physics/quantum/hilbert.py-87-        """Is the operator or state in this Hilbert space.
+sympy/physics/quantum/hilbert.py-88-
+sympy/physics/quantum/hilbert.py-89-        This is checked by comparing the classes of the Hilbert spaces, not
+sympy/physics/quantum/hilbert.py-90-        the instances. This is to allow Hilbert Spaces with symbolic
+sympy/physics/quantum/hilbert.py-91-        dimensions.
+sympy/physics/quantum/hilbert.py-92-        """
+--
+sympy/physics/quantum/operator.py:214:    def _eval_power(self, exp):
+sympy/physics/quantum/operator.py-215-        if isinstance(self, UnitaryOperator):
+sympy/physics/quantum/operator.py-216-            if exp == -1:
+sympy/physics/quantum/operator.py:217:                return Operator._eval_power(self, exp)
+sympy/physics/quantum/operator.py-218-            elif abs(exp) % 2 == 0:
+sympy/physics/quantum/operator.py-219-                return self*(Operator._eval_inverse(self))
+sympy/physics/quantum/operator.py-220-            else:
+sympy/physics/quantum/operator.py-221-                return self
+sympy/physics/quantum/operator.py-222-        else:
+sympy/physics/quantum/operator.py:223:            return Operator._eval_power(self, exp)
+sympy/physics/quantum/operator.py-224-
+sympy/physics/quantum/operator.py-225-
+sympy/physics/quantum/operator.py-226-class UnitaryOperator(Operator):
+sympy/physics/quantum/operator.py-227-    """A unitary operator that satisfies U*Dagger(U) == 1.
+sympy/physics/quantum/operator.py-228-
+sympy/physics/quantum/operator.py-229-    Parameters
+sympy/physics/quantum/operator.py-230-    ==========
+sympy/physics/quantum/operator.py-231-
+sympy/physics/quantum/operator.py-232-    args : tuple
+sympy/physics/quantum/operator.py-233-        The list of numbers or parameters that uniquely specify the
+sympy/physics/quantum/operator.py-234-        operator. For time-dependent operators, this will include the time.
+sympy/physics/quantum/operator.py-235-
+--
+sympy/physics/quantum/operator.py:296:    def _eval_power(self, exp):
+sympy/physics/quantum/operator.py-297-        return self
+sympy/physics/quantum/operator.py-298-
+sympy/physics/quantum/operator.py-299-    def _print_contents(self, printer, *args):
+sympy/physics/quantum/operator.py-300-        return 'I'
+sympy/physics/quantum/operator.py-301-
+[0m
+[0m← [0mEdit sympy/physics/quantum/tensorproduct.py
+Index: /testbed/sympy/physics/quantum/tensorproduct.py
+===================================================================
+--- /testbed/sympy/physics/quantum/tensorproduct.py
++++ /testbed/sympy/physics/quantum/tensorproduct.py
+@@ -381,8 +381,12 @@
+ """
+ if isinstance(e, Add):
+     return Add(*[tensor_product_simp(arg) for arg in e.args])
+ elif isinstance(e, Pow):
++    if isinstance(e.base, TensorProduct):
++        # (A x B)**n == (A**n) x (B**n)
++        return TensorProduct(*[tensor_product_simp(arg ** e.exp)
++                               for arg in e.base.args])
+     return tensor_product_simp(e.base) ** e.exp
+ elif isinstance(e, Mul):
+     return tensor_product_simp_Mul(e)
+ elif isinstance(e, Commutator):
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy import *
+from sympy.physics.quantum import TensorProduct as tp
+from sympy.physics.quantum import tensor_product_simp as tps
+from sympy.physics.paulialgebra import Pauli
+a = Symbol('a', commutative=False)
+t1 = tp(1,1)*tp(1,1)
+print(repr(tps(t1)), t1.expand(tensorproduct=True))
+print(tps(tp(1,1)*tp(1,a)).subs(a, 1))
+t2 = tp(1,Pauli(3))*tp(1,Pauli(3))
+print(tps(t2), t2.expand(tensorproduct=True))
+print(tps(tp(1,Pauli(3))*tp(1,a)).subs(a, Pauli(3)))
+print(tps(tp(Symbol('x',commutative=False),a)**2))
+"
+/testbed/sympy/core/basic.py:3: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
+  from collections import Mapping, defaultdict
+/testbed/sympy/core/containers.py:271: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
+  class OrderedSet(collections.MutableSet):
+/testbed/sympy/solvers/diophantine.py:3188: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if feasible is 1:  # it's prime and k == 2
+/testbed/sympy/plotting/plot.py:28: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
+  from collections import Callable
+1x1 1x1**2
+1x1
+1x1 1xsigma3**2
+1x1
+(x**2)x(a**2)
+[0m
+[0m$ [0mcd /testbed && grep -n "def _expand_hint" -A30 sympy/core/expr.py
+3023:    def _expand_hint(expr, hint, deep=True, **hints):
+3024-        """
+3025-        Helper for ``expand()``.  Recursively calls ``expr._eval_expand_hint()``.
+3026-
+3027-        Returns ``(expr, hit)``, where expr is the (possibly) expanded
+3028-        ``expr`` and ``hit`` is ``True`` if ``expr`` was truly expanded and
+3029-        ``False`` otherwise.
+3030-        """
+3031-        hit = False
+3032-        # XXX: Hack to support non-Basic args
+3033-        #              |
+3034-        #              V
+3035-        if deep and getattr(expr, 'args', ()) and not expr.is_Atom:
+3036-            sargs = []
+3037-            for arg in expr.args:
+3038-                arg, arghit = Expr._expand_hint(arg, hint, **hints)
+3039-                hit |= arghit
+3040-                sargs.append(arg)
+3041-
+3042-            if hit:
+3043-                expr = expr.func(*sargs)
+3044-
+3045-        if hasattr(expr, hint):
+3046-            newexpr = getattr(expr, hint)(**hints)
+3047-            if newexpr != expr:
+3048-                return (newexpr, True)
+3049-
+3050-        return (expr, hit)
+3051-
+3052-    @cacheit
+3053-    def expand(self, deep=True, modulus=None, power_base=True, power_exp=True,
+--
+3095:        def _expand_hint_key(hint):
+3096-            """Make multinomial come before mul"""
+3097-            if hint == 'mul':
+3098-                return 'mulz'
+3099-            return hint
+3100-
+3101-        for hint in sorted(hints.keys(), key=_expand_hint_key):
+3102-            use_hint = hints[hint]
+3103-            if use_hint:
+3104-                hint = '_eval_expand_' + hint
+3105-                expr, hit = Expr._expand_hint(expr, hint, deep=deep, **hints)
+3106-
+3107-        while True:
+3108-            was = expr
+3109-            if hints.get('multinomial', False):
+3110-                expr, _ = Expr._expand_hint(
+3111-                    expr, '_eval_expand_multinomial', deep=deep, **hints)
+3112-            if hints.get('mul', False):
+3113-                expr, _ = Expr._expand_hint(
+3114-                    expr, '_eval_expand_mul', deep=deep, **hints)
+3115-            if hints.get('log', False):
+3116-                expr, _ = Expr._expand_hint(
+3117-                    expr, '_eval_expand_log', deep=deep, **hints)
+3118-            if expr == was:
+3119-                break
+3120-
+3121-        if modulus is not None:
+3122-            modulus = sympify(modulus)
+3123-
+3124-            if not modulus.is_Integer or modulus <= 0:
+3125-                raise ValueError(
+[0m
+[0m← [0mEdit sympy/physics/quantum/tensorproduct.py
+Index: /testbed/sympy/physics/quantum/tensorproduct.py
+===================================================================
+--- /testbed/sympy/physics/quantum/tensorproduct.py
++++ /testbed/sympy/physics/quantum/tensorproduct.py
+@@ -237,8 +237,14 @@
+ 
+ def doit(self, **hints):
+     return TensorProduct(*[item.doit(**hints) for item in self.args])
+ 
++def _eval_power(self, e):
++    # (A x B)**n == (A**n) x (B**n)
++    if e.is_Integer and e.is_positive:
++        return TensorProduct(*[arg ** e for arg in self.args])
++    return None
++
+ def _eval_expand_tensorproduct(self, **hints):
+     """Distribute TensorProducts across addition."""
+     args = self.args
+     add_args = []
+
+[0m
+[0m$ [0mcd /testbed && python -W ignore -c "
+from sympy import *
+from sympy.physics.quantum import TensorProduct as tp
+from sympy.physics.quantum import tensor_product_simp as tps
+from sympy.physics.paulialgebra import Pauli
+a = Symbol('a', commutative=False)
+t1 = tp(1,1)*tp(1,1)
+print(tps(t1), t1.expand(tensorproduct=True))
+print(tps(tp(1,1)*tp(1,a)).subs(a, 1))
+t2 = tp(1,Pauli(3))*tp(1,Pauli(3))
+print(tps(t2), t2.expand(tensorproduct=True))
+print(tps(tp(1,Pauli(3))*tp(1,a)).subs(a, Pauli(3)))
+" 2>&1 | grep -v Warn; python -m pytest -q sympy/physics/quantum sympy/physics/paulialgebra.py 2>&1 | tail -5
+from collections import Mapping, defaultdict
+  class OrderedSet(collections.MutableSet):
+  from collections import Callable
+1x1 1x1
+1x1
+1x1 1x1
+1x1
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed && python -W ignore bin/test sympy/physics/quantum sympy/physics/paulialgebra.py 2>&1 | tail -8
+if not isinstance(other, collections.Iterable):
+  File "/opt/miniconda3/envs/testbed/lib/python3.9/collections/__init__.py", line 62, in __getattr__
+    warnings.warn("Using or importing the ABCs from 'collections' instead "
+DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
+
+ tests finished: 100 passed, 10 skipped, 1 expected to fail, 36 exceptions, 
+in 8.62 seconds 
+DO *NOT* COMMIT!
+[0m
+[0m$ [0mcd /testbed && python -W ignore bin/test sympy/physics/quantum sympy/physics/paulialgebra.py 2>&1 | grep -E "tests finished"; git stash -q && python -W ignore bin/test sympy/physics/quantum sympy/physics/paulialgebra.py 2>&1 | grep -E "tests finished"; git stash pop -q && git status --short
+tests finished: 100 passed, 10 skipped, 1 expected to fail, 36 exceptions, 
+ tests finished: 100 passed, 10 skipped, 1 expected to fail, 36 exceptions, 
+ M sympy/physics/quantum/tensorproduct.py
+[0m

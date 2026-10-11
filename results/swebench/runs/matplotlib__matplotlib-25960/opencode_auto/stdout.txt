@@ -1,0 +1,18 @@
+The subfigure placement in `SubFigure._redo_transform_rel_fig` ignores the gridspec's spacing entirely: it only uses the width/height ratios. I'll make it account for `wspace`/`hspace` using the same spacing math as `GridSpec.get_grid_positions`, while keeping the subfigure grid spanning the full figure.
+Spacing now takes effect. Let me check which 4 tests fail and whether they also fail without my change.
+The 4 failures are only in tests that were passing before. Let me check what `test_subfigure_spanning` asserts, to confirm they encode the old zero-gap layout.
+The fix is in place, but it changes default subfigure layout, so 4 existing tests now fail.
+
+**Root cause:** `SubFigure._redo_transform_rel_fig` in `lib/matplotlib/figure.py` computed each subfigure's position only from the width and height ratios. It never used the gridspec's `wspace`/`hspace`, so the gaps were dropped.
+
+**Fix:** The method now computes the gap between cells the same way `GridSpec.get_grid_positions` does. It resolves `wspace`/`hspace` through `gs.get_subplot_params(parent)`, so explicit values and the rcParams/figure defaults both apply. Subfigures that span multiple rows or columns still get the correct extent.
+
+I checked the issue's reproduction: `subfigures(2, 2, wspace=0, hspace=0)` now gives abutting cells, and `wspace=0.5, hspace=0.5` gives visible gaps. Width and height ratios still work.
+
+**Test results:** Running `test_figure.py`, `test_subplots.py`, and `test_gridspec.py` with `-k "subfig or gridspec or subplot"` gives 97 passed and 4 failed. Before the change all 101 passed. The failures are:
+- `test_subfigure[png]` (image mismatch)
+- `test_subfigure_double[png]` (image mismatch)
+- `test_subfigure_scatter_size[png]` (image mismatch)
+- `test_subfigure_spanning` (bbox assertions)
+
+These tests encode the old zero-gap layout. Subfigures now get the default `figure.subplot.wspace`/`hspace` (0.2) gaps, consistent with how axes are laid out. I did not modify the tests, as you asked. If you want the old default, the tests would need regenerated baselines and updated bbox values, or the defaults for subfigures would need to stay at zero.

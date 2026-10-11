@@ -1,0 +1,779 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && git log --oneline -1 && cat pylint/pyreverse/inspector.py | head -250 && grep -n "annotation\|_get_attrs\|infer" pylint/pyreverse/*.py | head -50
+beb0f4d9 SWE-bench
+# Copyright (c) 2015-2020 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2017 Łukasz Rogalski <rogalski.91@gmail.com>
+# Copyright (c) 2018 ssolanki <sushobhitsolanki@gmail.com>
+# Copyright (c) 2018 Ville Skyttä <ville.skytta@iki.fi>
+# Copyright (c) 2019-2021 Pierre Sassoulas <pierre.sassoulas@gmail.com>
+# Copyright (c) 2019 Hugo van Kemenade <hugovk@users.noreply.github.com>
+# Copyright (c) 2020 hippo91 <guillaume.peillex@gmail.com>
+# Copyright (c) 2020 Anthony Sottile <asottile@umich.edu>
+
+# Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+# For details: https://github.com/PyCQA/pylint/blob/master/LICENSE
+
+"""
+Visitor doing some postprocessing on the astroid tree.
+Try to resolve definitions (namespace) dictionary, relationship...
+"""
+import collections
+import os
+import traceback
+
+import astroid
+
+from pylint.pyreverse import utils
+
+
+def _iface_hdlr(_):
+    """Handler used by interfaces to handle suspicious interface nodes."""
+    return True
+
+
+def _astroid_wrapper(func, modname):
+    print("parsing %s..." % modname)
+    try:
+        return func(modname)
+    except astroid.exceptions.AstroidBuildingException as exc:
+        print(exc)
+    except Exception:  # pylint: disable=broad-except
+        traceback.print_exc()
+    return None
+
+
+def interfaces(node, herited=True, handler_func=_iface_hdlr):
+    """Return an iterator on interfaces implemented by the given class node."""
+    try:
+        implements = astroid.bases.Instance(node).getattr("__implements__")[0]
+    except astroid.exceptions.NotFoundError:
+        return
+    if not herited and implements.frame() is not node:
+        return
+    found = set()
+    missing = False
+    for iface in astroid.node_classes.unpack_infer(implements):
+        if iface is astroid.Uninferable:
+            missing = True
+            continue
+        if iface not in found and handler_func(iface):
+            found.add(iface)
+            yield iface
+    if missing:
+        raise astroid.exceptions.InferenceError()
+
+
+class IdGeneratorMixIn:
+    """Mixin adding the ability to generate integer uid."""
+
+    def __init__(self, start_value=0):
+        self.id_count = start_value
+
+    def init_counter(self, start_value=0):
+        """init the id counter"""
+        self.id_count = start_value
+
+    def generate_id(self):
+        """generate a new identifier"""
+        self.id_count += 1
+        return self.id_count
+
+
+class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+    """Walk on the project tree and resolve relationships.
+
+    According to options the following attributes may be
+    added to visited nodes:
+
+    * uid,
+      a unique identifier for the node (on astroid.Project, astroid.Module,
+      astroid.Class and astroid.locals_type). Only if the linker
+      has been instantiated with tag=True parameter (False by default).
+
+    * Function
+      a mapping from locals names to their bounded value, which may be a
+      constant like a string or an integer, or an astroid node
+      (on astroid.Module, astroid.Class and astroid.Function).
+
+    * instance_attrs_type
+      as locals_type but for klass member attributes (only on astroid.Class)
+
+    * implements,
+      list of implemented interface _objects_ (only on astroid.Class nodes)
+    """
+
+    def __init__(self, project, inherited_interfaces=0, tag=False):
+        IdGeneratorMixIn.__init__(self)
+        utils.LocalsVisitor.__init__(self)
+        # take inherited interface in consideration or not
+        self.inherited_interfaces = inherited_interfaces
+        # tag nodes or not
+        self.tag = tag
+        # visited project
+        self.project = project
+
+    def visit_project(self, node):
+        """visit a pyreverse.utils.Project node
+
+        * optionally tag the node with a unique id
+        """
+        if self.tag:
+            node.uid = self.generate_id()
+        for module in node.modules:
+            self.visit(module)
+
+    def visit_package(self, node):
+        """visit an astroid.Package node
+
+        * optionally tag the node with a unique id
+        """
+        if self.tag:
+            node.uid = self.generate_id()
+        for subelmt in node.values():
+            self.visit(subelmt)
+
+    def visit_module(self, node):
+        """visit an astroid.Module node
+
+        * set the locals_type mapping
+        * set the depends mapping
+        * optionally tag the node with a unique id
+        """
+        if hasattr(node, "locals_type"):
+            return
+        node.locals_type = collections.defaultdict(list)
+        node.depends = []
+        if self.tag:
+            node.uid = self.generate_id()
+
+    def visit_classdef(self, node):
+        """visit an astroid.Class node
+
+        * set the locals_type and instance_attrs_type mappings
+        * set the implements list and build it
+        * optionally tag the node with a unique id
+        """
+        if hasattr(node, "locals_type"):
+            return
+        node.locals_type = collections.defaultdict(list)
+        if self.tag:
+            node.uid = self.generate_id()
+        # resolve ancestors
+        for baseobj in node.ancestors(recurs=False):
+            specializations = getattr(baseobj, "specializations", [])
+            specializations.append(node)
+            baseobj.specializations = specializations
+        # resolve instance attributes
+        node.instance_attrs_type = collections.defaultdict(list)
+        for assignattrs in node.instance_attrs.values():
+            for assignattr in assignattrs:
+                if not isinstance(assignattr, astroid.Unknown):
+                    self.handle_assignattr_type(assignattr, node)
+        # resolve implemented interface
+        try:
+            node.implements = list(interfaces(node, self.inherited_interfaces))
+        except astroid.InferenceError:
+            node.implements = ()
+
+    def visit_functiondef(self, node):
+        """visit an astroid.Function node
+
+        * set the locals_type mapping
+        * optionally tag the node with a unique id
+        """
+        if hasattr(node, "locals_type"):
+            return
+        node.locals_type = collections.defaultdict(list)
+        if self.tag:
+            node.uid = self.generate_id()
+
+    link_project = visit_project
+    link_module = visit_module
+    link_class = visit_classdef
+    link_function = visit_functiondef
+
+    def visit_assignname(self, node):
+        """visit an astroid.AssignName node
+
+        handle locals_type
+        """
+        # avoid double parsing done by different Linkers.visit
+        # running over the same project:
+        if hasattr(node, "_handled"):
+            return
+        node._handled = True
+        if node.name in node.frame():
+            frame = node.frame()
+        else:
+            # the name has been defined as 'global' in the frame and belongs
+            # there.
+            frame = node.root()
+        try:
+            if not hasattr(frame, "locals_type"):
+                # If the frame doesn't have a locals_type yet,
+                # it means it wasn't yet visited. Visit it now
+                # to add what's missing from it.
+                if isinstance(frame, astroid.ClassDef):
+                    self.visit_classdef(frame)
+                elif isinstance(frame, astroid.FunctionDef):
+                    self.visit_functiondef(frame)
+                else:
+                    self.visit_module(frame)
+
+            current = frame.locals_type[node.name]
+            values = set(node.infer())
+            frame.locals_type[node.name] = list(set(current) | values)
+        except astroid.InferenceError:
+            pass
+
+    @staticmethod
+    def handle_assignattr_type(node, parent):
+        """handle an astroid.assignattr node
+
+        handle instance_attrs_type
+        """
+        try:
+            values = set(node.infer())
+            current = set(parent.instance_attrs_type[node.attrname])
+            parent.instance_attrs_type[node.attrname] = list(current | values)
+        except astroid.InferenceError:
+            pass
+
+    def visit_import(self, node):
+        """visit an astroid.Import node
+
+        resolve module dependencies
+        """
+        context_file = node.root().file
+        for name in node.names:
+            relative = astroid.modutils.is_relative(name[0], context_file)
+            self._imported_module(node, name[0], relative)
+
+    def visit_importfrom(self, node):
+        """visit an astroid.ImportFrom node
+pylint/pyreverse/diagrams.py:187:                    if value is astroid.Uninferable:
+pylint/pyreverse/inspector.py:52:    for iface in astroid.node_classes.unpack_infer(implements):
+pylint/pyreverse/inspector.py:53:        if iface is astroid.Uninferable:
+pylint/pyreverse/inspector.py:221:            values = set(node.infer())
+pylint/pyreverse/inspector.py:233:            values = set(node.infer())
+[0m
+[0m$ [0mcd /testbed && sed -n 250,400p pylint/pyreverse/inspector.py && cat pylint/pyreverse/diagrams.py | sed -n 150,230p && grep -n "instance_attrs\|locals_type\|_get_attrs\|def " pylint/pyreverse/diagrams.py pylint/pyreverse/utils.py | head -80
+"""visit an astroid.ImportFrom node
+
+        resolve module dependencies
+        """
+        basename = node.modname
+        context_file = node.root().file
+        if context_file is not None:
+            relative = astroid.modutils.is_relative(basename, context_file)
+        else:
+            relative = False
+        for name in node.names:
+            if name[0] == "*":
+                continue
+            # analyze dependencies
+            fullname = f"{basename}.{name[0]}"
+            if fullname.find(".") > -1:
+                try:
+                    fullname = astroid.modutils.get_module_part(fullname, context_file)
+                except ImportError:
+                    continue
+            if fullname != basename:
+                self._imported_module(node, fullname, relative)
+
+    def compute_module(self, context_name, mod_path):
+        """return true if the module should be added to dependencies"""
+        package_dir = os.path.dirname(self.project.path)
+        if context_name == mod_path:
+            return 0
+        if astroid.modutils.is_standard_module(mod_path, (package_dir,)):
+            return 1
+        return 0
+
+    def _imported_module(self, node, mod_path, relative):
+        """Notify an imported module, used to analyze dependencies"""
+        module = node.root()
+        context_name = module.name
+        if relative:
+            mod_path = "{}.{}".format(".".join(context_name.split(".")[:-1]), mod_path)
+        if self.compute_module(context_name, mod_path):
+            # handle dependencies
+            if not hasattr(module, "depends"):
+                module.depends = []
+            mod_paths = module.depends
+            if mod_path not in mod_paths:
+                mod_paths.append(mod_path)
+
+
+class Project:
+    """a project handle a set of modules / packages"""
+
+    def __init__(self, name=""):
+        self.name = name
+        self.path = None
+        self.modules = []
+        self.locals = {}
+        self.__getitem__ = self.locals.__getitem__
+        self.__iter__ = self.locals.__iter__
+        self.values = self.locals.values
+        self.keys = self.locals.keys
+        self.items = self.locals.items
+
+    def add_module(self, node):
+        self.locals[node.name] = node
+        self.modules.append(node)
+
+    def get_module(self, name):
+        return self.locals[name]
+
+    def get_children(self):
+        return self.modules
+
+    def __repr__(self):
+        return f"<Project {self.name!r} at {id(self)} ({len(self.modules)} modules)>"
+
+
+def project_from_files(
+    files, func_wrapper=_astroid_wrapper, project_name="no name", black_list=("CVS",)
+):
+    """return a Project from a list of files or modules"""
+    # build the project representation
+    astroid_manager = astroid.manager.AstroidManager()
+    project = Project(project_name)
+    for something in files:
+        if not os.path.exists(something):
+            fpath = astroid.modutils.file_from_modpath(something.split("."))
+        elif os.path.isdir(something):
+            fpath = os.path.join(something, "__init__.py")
+        else:
+            fpath = something
+        ast = func_wrapper(astroid_manager.ast_from_file, fpath)
+        if ast is None:
+            continue
+        project.path = project.path or ast.file
+        project.add_module(ast)
+        base_name = ast.name
+        # recurse in package except if __init__ was explicitly given
+        if ast.package and something.find("__init__") == -1:
+            # recurse on others packages / modules if this is a package
+            for fpath in astroid.modutils.get_module_files(
+                os.path.dirname(ast.file), black_list
+            ):
+                ast = func_wrapper(astroid_manager.ast_from_file, fpath)
+                if ast is None or ast.name == base_name:
+                    continue
+                project.add_module(ast)
+    return project
+    def classe(self, name):
+        """return a class by its name, raise KeyError if not found"""
+        for klass in self.classes():
+            if klass.node.name == name:
+                return klass
+        raise KeyError(name)
+
+    def extract_relationships(self):
+        """extract relation ships between nodes in the diagram"""
+        for obj in self.classes():
+            node = obj.node
+            obj.attrs = self.get_attrs(node)
+            obj.methods = self.get_methods(node)
+            # shape
+            if is_interface(node):
+                obj.shape = "interface"
+            else:
+                obj.shape = "class"
+            # inheritance link
+            for par_node in node.ancestors(recurs=False):
+                try:
+                    par_obj = self.object_from_node(par_node)
+                    self.add_relationship(obj, par_obj, "specialization")
+                except KeyError:
+                    continue
+            # implements link
+            for impl_node in node.implements:
+                try:
+                    impl_obj = self.object_from_node(impl_node)
+                    self.add_relationship(obj, impl_obj, "implements")
+                except KeyError:
+                    continue
+            # associations link
+            for name, values in list(node.instance_attrs_type.items()) + list(
+                node.locals_type.items()
+            ):
+                for value in values:
+                    if value is astroid.Uninferable:
+                        continue
+                    if isinstance(value, astroid.Instance):
+                        value = value._proxied
+                    try:
+                        associated_obj = self.object_from_node(value)
+                        self.add_relationship(associated_obj, obj, "association", name)
+                    except KeyError:
+                        continue
+
+
+class PackageDiagram(ClassDiagram):
+    """package diagram handling"""
+
+    TYPE = "package"
+
+    def modules(self):
+        """return all module nodes in the diagram"""
+        return [o for o in self.objects if isinstance(o.node, astroid.Module)]
+
+    def module(self, name):
+        """return a module by its name, raise KeyError if not found"""
+        for mod in self.modules():
+            if mod.node.name == name:
+                return mod
+        raise KeyError(name)
+
+    def get_module(self, name, node):
+        """return a module by its name, looking also for relative imports;
+        raise KeyError if not found
+        """
+        for mod in self.modules():
+            mod_name = mod.node.name
+            if mod_name == name:
+                return mod
+            # search for fullname of relative import modules
+            package = node.root().name
+            if mod_name == f"{package}.{name}":
+                return mod
+            if mod_name == "{}.{}".format(package.rsplit(".", 1)[0], name):
+                return mod
+        raise KeyError(name)
+
+    def add_from_depend(self, node, from_module):
+pylint/pyreverse/diagrams.py:29:    def __init__(self, from_object, to_object, relation_type, name=None):
+pylint/pyreverse/diagrams.py:40:    def __init__(self, title="No name", node=None):
+pylint/pyreverse/diagrams.py:51:    def __init__(self, title, mode):
+pylint/pyreverse/diagrams.py:60:    def get_relationships(self, role):
+pylint/pyreverse/diagrams.py:67:    def add_relationship(self, from_object, to_object, relation_type, name=None):
+pylint/pyreverse/diagrams.py:72:    def get_relationship(self, from_object, relation_type):
+pylint/pyreverse/diagrams.py:79:    def get_attrs(self, node):
+pylint/pyreverse/diagrams.py:88:            list(node.instance_attrs_type.items())
+pylint/pyreverse/diagrams.py:89:            + list(node.locals_type.items())
+pylint/pyreverse/diagrams.py:100:    def get_methods(self, node):
+pylint/pyreverse/diagrams.py:111:    def add_object(self, title, node):
+pylint/pyreverse/diagrams.py:118:    def class_names(self, nodes):
+pylint/pyreverse/diagrams.py:134:    def nodes(self):
+pylint/pyreverse/diagrams.py:138:    def has_node(self, node):
+pylint/pyreverse/diagrams.py:142:    def object_from_node(self, node):
+pylint/pyreverse/diagrams.py:146:    def classes(self):
+pylint/pyreverse/diagrams.py:150:    def classe(self, name):
+pylint/pyreverse/diagrams.py:157:    def extract_relationships(self):
+pylint/pyreverse/diagrams.py:183:            for name, values in list(node.instance_attrs_type.items()) + list(
+pylint/pyreverse/diagrams.py:184:                node.locals_type.items()
+pylint/pyreverse/diagrams.py:203:    def modules(self):
+pylint/pyreverse/diagrams.py:207:    def module(self, name):
+pylint/pyreverse/diagrams.py:214:    def get_module(self, name, node):
+pylint/pyreverse/diagrams.py:230:    def add_from_depend(self, node, from_module):
+pylint/pyreverse/diagrams.py:237:    def extract_relationships(self):
+pylint/pyreverse/utils.py:26:def get_default_options():
+pylint/pyreverse/utils.py:40:def insert_default_options():
+pylint/pyreverse/utils.py:54:def get_visibility(name):
+pylint/pyreverse/utils.py:72:def is_abstract(node):
+pylint/pyreverse/utils.py:79:def is_final(node):
+pylint/pyreverse/utils.py:86:def is_interface(node):
+pylint/pyreverse/utils.py:91:def is_exception(node):
+pylint/pyreverse/utils.py:119:    def __init__(self, mode):
+pylint/pyreverse/utils.py:129:    def show_attr(self, node):
+pylint/pyreverse/utils.py:145:    def __init__(self, handler):
+pylint/pyreverse/utils.py:149:    def walk(self, node, _done=None):
+pylint/pyreverse/utils.py:163:    def get_callbacks(self, node):
+pylint/pyreverse/utils.py:181:    def visit(self, node):
+pylint/pyreverse/utils.py:187:    def leave(self, node):
+pylint/pyreverse/utils.py:197:    def __init__(self):
+pylint/pyreverse/utils.py:201:    def visit(self, node):
+[0m
+[0m$ [0mcd /testbed && sed -n 75,110p pylint/pyreverse/diagrams.py && grep -n "attr" pylint/pyreverse/printer.py pylint/pyreverse/writer.py | head -30
+if rel.from_object is from_object:
+                return rel
+        raise KeyError(relation_type)
+
+    def get_attrs(self, node):
+        """return visible attributes, possibly with class name"""
+        attrs = []
+        properties = [
+            (n, m)
+            for n, m in node.items()
+            if isinstance(m, astroid.FunctionDef) and decorated_with_property(m)
+        ]
+        for node_name, associated_nodes in (
+            list(node.instance_attrs_type.items())
+            + list(node.locals_type.items())
+            + properties
+        ):
+            if not self.show_attr(node_name):
+                continue
+            names = self.class_names(associated_nodes)
+            if names:
+                node_name = "{} : {}".format(node_name, ", ".join(names))
+            attrs.append(node_name)
+        return sorted(attrs)
+
+    def get_methods(self, node):
+        """return visible methods"""
+        methods = [
+            m
+            for m in node.values()
+            if isinstance(m, astroid.FunctionDef)
+            and not decorated_with_property(m)
+            and self.show_attr(m.name)
+        ]
+        return sorted(methods, key=lambda n: n.name)
+
+grep: pylint/pyreverse/printer.py: No such file or directory
+pylint/pyreverse/writer.py:129:        The label contains all attributes and methods
+pylint/pyreverse/writer.py:135:            label = r"{}|{}\l|".format(label, r"\l".join(obj.attrs))
+pylint/pyreverse/writer.py:190:        The label contains all attributes and methods
+pylint/pyreverse/writer.py:201:            attrs = obj.attrs
+pylint/pyreverse/writer.py:204:            maxlen = max(len(name) for name in [obj.title] + methods + attrs)
+pylint/pyreverse/writer.py:207:            for attr in attrs:
+pylint/pyreverse/writer.py:208:                label = fr"{label}\n\f08{attr}"
+pylint/pyreverse/writer.py:209:            if attrs:
+[0m
+[0m$ [0mmkdir -p /tmp/t && cd /tmp/t && cat > mod.py <<'EOF'
+class D:
+    pass
+
+class C(object):
+    def __init__(self, a: str = None, d: D = None, e: D = D()):
+        self.a = a
+        self.d = d
+        self.e = e
+        self.f: D = None
+EOF
+cd /tmp/t && python -c "
+import astroid
+m=astroid.parse(open('mod.py').read())
+c=m['C']
+for n in c.instance_attrs.items(): print(n, [list(x.infer()) for x in n[1]])
+print(c.instance_attrs)
+for a in c.instance_attrs['a']: print(a.infer)
+"; python -m pylint.pyreverse.main -h >/dev/null 2>&1; cd /tmp/t && python -m pylint.pyreverse -o dot -p mod mod.py 2>&1 | tail -3; cat classes_mod.dot 2>/dev/null | head -30; ls
+('a', [<AssignAttr.a l.6 at 0x7f3d93fb4130>]) [[<Const.NoneType l.5 at 0x7f3d93fb43a0>, Uninferable]]
+('d', [<AssignAttr.d l.7 at 0x7f3d9400e460>]) [[<Const.NoneType l.5 at 0x7f3d93fb4370>, Uninferable]]
+('e', [<AssignAttr.e l.8 at 0x7f3d9400e4f0>]) [[<Instance of .D at 0x139902452453136>, Uninferable]]
+('f', [<AssignAttr.f l.9 at 0x7f3d93fb45e0>]) [[<Const.NoneType l.9 at 0x7f3d9400eac0>]]
+{'a': [<AssignAttr.a l.6 at 0x7f3d93fb4130>], 'd': [<AssignAttr.d l.7 at 0x7f3d9400e460>], 'e': [<AssignAttr.e l.8 at 0x7f3d9400e4f0>], 'f': [<AssignAttr.f l.9 at 0x7f3d93fb45e0>]}
+<bound method NodeNG.infer of <AssignAttr.a l.6 at 0x7f3d93fb4130>>
+/opt/miniconda3/envs/testbed/bin/python: No module named pylint.pyreverse.__main__; 'pylint.pyreverse' is a package and cannot be directly executed
+mod.py
+[0m
+[0m$ [0mcd /testbed && python -c "import astroid;print(astroid.__version__); print(astroid.Arguments.__init__.__code__.co_varnames[:20])"; python -c "
+import astroid
+m=astroid.parse('''
+from typing import Optional
+class D: pass
+def f(a: D, *, b: Optional[D]=None): pass
+''')
+f=m['f']; print(f.args.annotations, f.args.kwonlyargs_annotations, f.args.posonlyargs)
+print(list(m['f'].args.annotations[0].infer()))
+print(list(f.args.kwonlyargs_annotations[0].infer()))
+"
+2.6.5
+('self', 'vararg', 'kwarg', 'parent')
+[<Name.D l.4 at 0x7fe27f258d60>] [<Subscript l.4 at 0x7fe27f258e80>] []
+[<ClassDef.D l.3 at 0x7fe27f26eaf0>]
+[<ClassDef.Optional l.10 at 0x7fe27ed5f6a0>]
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+p='pylint/pyreverse/inspector.py'
+s=open(p).read()
+old='''    @staticmethod
+    def handle_assignattr_type(node, parent):
+        """handle an astroid.assignattr node
+
+        handle instance_attrs_type
+        """
+        try:
+            values = set(node.infer())
+'''
+new='''    @staticmethod
+    def handle_assignattr_type(node, parent):
+        """handle an astroid.assignattr node
+
+        handle instance_attrs_type
+        """
+        try:
+            values = set(get_annotated_types(node) or node.infer())
+'''
+assert old in s
+s=s.replace(old,new)
+old2='''            current = frame.locals_type[node.name]
+            values = set(node.infer())
+'''
+new2='''            current = frame.locals_type[node.name]
+            values = set(get_annotated_types(node) or node.infer())
+'''
+assert old2 in s
+s=s.replace(old2,new2)
+helper='''def _infer_annotation(annotation):
+    """return the set of values inferred from a type annotation node"""
+    try:
+        return set(annotation.infer())
+    except astroid.exceptions.InferenceError:
+        return set()
+
+
+def _get_argument_annotation(func, name):
+    """return the annotation node of the argument `name` of `func`, or None"""
+    args = func.args
+    groups = (
+        (getattr(args, "posonlyargs", []), getattr(args, "posonlyargs_annotations", [])),
+        (args.args, args.annotations),
+        (args.kwonlyargs, args.kwonlyargs_annotations),
+    )
+    for arg_nodes, annotations in groups:
+        for arg_node, annotation in zip(arg_nodes or [], annotations or []):
+            if arg_node.name == name:
+                return annotation
+    return None
+
+
+def get_annotated_types(node):
+    """return the values given by PEP 484 type hints for an AssignAttr or
+    AssignName node, or an empty set if no usable annotation is found
+
+    Handles the following cases:
+    * `self.attr: Type = value` and `name: Type = value`
+    * `self.attr = arg` where `arg` is an annotated argument of the method
+    """
+    parent = node.parent
+    if isinstance(parent, astroid.AnnAssign) and parent.target is node:
+        return _infer_annotation(parent.annotation)
+    if isinstance(parent, astroid.Assign) and isinstance(parent.value, astroid.Name):
+        func = node.frame()
+        if isinstance(func, astroid.FunctionDef):
+            annotation = _get_argument_annotation(func, parent.value.name)
+            if annotation is not None:
+                return _infer_annotation(annotation)
+    return set()
+
+
+class IdGeneratorMixIn:'''
+s=s.replace('class IdGeneratorMixIn:',helper,1)
+open(p,'w').write(s)
+EOF
+cd /tmp/t && python -c "
+import astroid
+from pylint.pyreverse import inspector
+m=astroid.parse(open('mod.py').read())
+c=m['C']
+for k,v in c.instance_attrs.items(): print(k, inspector.get_annotated_types(v[0]))
+"
+a {<ClassDef.str l.0 at 0x7fc0c83603a0>}
+d {<ClassDef.D l.1 at 0x7fc0c80fd850>}
+e {<ClassDef.D l.1 at 0x7fc0c80fd850>}
+f {<ClassDef.D l.1 at 0x7fc0c80fd850>}
+[0m
+[0m$ [0mcd /tmp/t && python -c "
+from pylint.pyreverse.main import Run
+Run(['-o','dot','-p','t','mod.py'])" 2>&1 | tail -3; cat classes_t.dot | grep -i "label" ; cd /testbed && python -m pytest -q tests/test_pyreverse_diadefs.py tests/test_pyreverse_writer.py tests/test_pyreverse_inspector.py 2>&1 | tail -3
+-d <output_directory>, --output-directory=<output_directory>
+                        set the output directory path. [current: none]
+
+cat: classes_t.dot: No such file or directory
+
+-- Docs: https://docs.pytest.org/en/stable/warnings.html
+1 warning in 0.00s
+[0m
+[0m$ [0mcd /tmp/t && python -c "
+from pylint.pyreverse.main import Run
+Run(['-o','dot','-p','t','mod.py'])" 2>&1 | tail -3; ls; cat classes_t.dot 2>/dev/null; cd /testbed && ls tests | grep -i reverse; python -m pytest -q tests/pyreverse 2>&1 | tail -3
+-d <output_directory>, --output-directory=<output_directory>
+                        set the output directory path. [current: none]
+
+mod.py
+unittest_pyreverse_diadefs.py
+unittest_pyreverse_inspector.py
+unittest_pyreverse_writer.py
+
+-- Docs: https://docs.pytest.org/en/stable/warnings.html
+1 warning in 0.00s
+[0m
+[0m$ [0mcd /tmp/t && python -c "
+from pylint.pyreverse.main import Run
+Run(['-o','dot','-p','t','mod.py'])" 2>&1 | head -5; cd /testbed && python -m pytest -q tests/unittest_pyreverse_*.py 2>&1 | tail -3
+Usage: 
+  -c [options] <packages>
+
+  create UML diagrams for classes and modules in <packages>
+
+
+-- Docs: https://docs.pytest.org/en/stable/warnings.html
+23 passed, 1 warning in 0.12s
+[0m
+[0m$ [0mcd /tmp/t && python -c "
+from pylint.pyreverse.main import Run
+Run(['-c','C','-o','dot','-p','t','mod.py'])" 2>&1 | tail -3; cat classes_t.dot 2>/dev/null | grep -i label; cd /testbed && git status --short
+-d <output_directory>, --output-directory=<output_directory>
+                        set the output directory path. [current: none]
+
+ M pylint/pyreverse/inspector.py
+[0m
+[0m$ [0mcd /tmp/t && python -m pylint.pyreverse.main -o dot mod.py 2>&1 | tail -2; ls; grep -i label classes_*.dot 2>/dev/null | head; cd /testbed && git diff --stat
+parsing mod.py...
+classes.dot
+mod.py
+ pylint/pyreverse/inspector.py | 47 +++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 45 insertions(+), 2 deletions(-)
+[0m
+[0m$ [0mcd /tmp/t && cat classes.dot; cd /testbed && git stash -q && cd /tmp/t && python -m pylint.pyreverse.main -o dot -p old mod.py >/dev/null 2>&1; cat classes_old.dot 2>/dev/null | head -20; cd /testbed && git stash pop -q && git status --short
+digraph "classes" {
+charset="utf-8"
+rankdir=BT
+"0" [label="{C|a : str\ld\le\lf\l|}", shape="record"];
+"1" [label="{D|\l|}", shape="record"];
+"1" -> "0" [arrowhead="diamond", arrowtail="none", fontcolor="green", label="d", style="solid"];
+"1" -> "0" [arrowhead="diamond", arrowtail="none", fontcolor="green", label="e", style="solid"];
+"1" -> "0" [arrowhead="diamond", arrowtail="none", fontcolor="green", label="f", style="solid"];
+}
+digraph "classes_old" {
+charset="utf-8"
+rankdir=BT
+"0" [label="{C|a : NoneType\ld : NoneType\le\lf : NoneType\l|}", shape="record"];
+"1" [label="{D|\l|}", shape="record"];
+"1" -> "0" [arrowhead="diamond", arrowtail="none", fontcolor="green", label="e", style="solid"];
+}
+ M pylint/pyreverse/inspector.py
+[0m
+[0m$ [0mcd /testbed && (black --check pylint/pyreverse/inspector.py 2>&1; black -q pylint/pyreverse/inspector.py; git diff --stat; python -m pytest -q tests/unittest_pyreverse_*.py 2>&1 | tail -1)
+Traceback (most recent call last):
+  File "/opt/miniconda3/envs/testbed/bin/black", line 8, in <module>
+    sys.exit(patched_main())
+  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/black/__init__.py", line 1129, in patched_main
+    patch_click()
+  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/black/__init__.py", line 1115, in patch_click
+    from click import _unicodefun  # type: ignore
+ImportError: cannot import name '_unicodefun' from 'click' (/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/click/__init__.py)
+Traceback (most recent call last):
+  File "/opt/miniconda3/envs/testbed/bin/black", line 8, in <module>
+    sys.exit(patched_main())
+  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/black/__init__.py", line 1129, in patched_main
+    patch_click()
+  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/black/__init__.py", line 1115, in patch_click
+    from click import _unicodefun  # type: ignore
+ImportError: cannot import name '_unicodefun' from 'click' (/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/click/__init__.py)
+ pylint/pyreverse/inspector.py | 47 +++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 45 insertions(+), 2 deletions(-)
+23 passed, 1 warning in 0.12s
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+p='pylint/pyreverse/inspector.py'
+s=open(p).read()
+s=s.replace('''        (getattr(args, "posonlyargs", []), getattr(args, "posonlyargs_annotations", [])),
+''','''        (
+            getattr(args, "posonlyargs", []),
+            getattr(args, "posonlyargs_annotations", []),
+        ),
+''')
+open(p,'w').write(s)
+EOF
+awk 'length > 88' pylint/pyreverse/inspector.py; python -m pytest -q tests/unittest_pyreverse_*.py 2>&1 | tail -1
+23 passed, 1 warning in 0.11s
+[0m

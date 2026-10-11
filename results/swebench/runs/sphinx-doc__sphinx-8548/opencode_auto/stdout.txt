@@ -1,0 +1,32 @@
+Now the document-lookup side, where the cached docstring is searched by key.
+Two places need to change: `get_class_members` must list inherited attributes that have a `#:` doc comment in a base class's module, and `Documenter.add_content` must look up the docstring under the base class's namespace. I'll start with the member listing.
+Next, the docstring lookup in `Documenter.add_content`: when the attribute isn't documented under the child's namespace, fall back to the base classes in the MRO.
+Now I'll add the helper method on `Documenter`, just before `add_content`.
+Checking that `isclass`, `getmro` and `safe_getattr` are imported in `autodoc/__init__.py`.
+Now I'll reproduce the issue with a small module and run the existing autodoc tests.
+The one failure is a `node class 'meta' is already registered` warning, which looks environmental. I'll confirm it happens without my changes too, and run the rest of the suite.
+That failure also happens on the untouched code, so it predates this change. Now an end-to-end check of the issue scenario through a real Sphinx build.
+`battr` now appears with its base-class docstring. The instance attribute `iattr` from the base `__init__` is still missing, so I'll check how `attr_docs` gets populated.
+`attr_docs` is populated by `analyze()`, so the gap is elsewhere. I'll inspect what `get_class_members` returns for `Child`.
+`iattr` is in the member list, so the drop happens later, in documenting it. I'll check whether `Base` itself documents `iattr` as expected.
+`Base` renders `iattr` correctly, so the failure is specific to the inherited path. I'll trace what the attribute documenter does for `Child.iattr`.
+`iattr` never gets a documenter, so `document_members` must be dropping it. I'll look at the code between the keep decision and the documenter creation.
+The sort and generate paths look fine, so I'll check `can_document_member` for the attribute documenter.
+I'll instrument the member pipeline directly to see at which stage `iattr` is lost.
+Nothing from my monkeypatch printed, so I'll put a temporary debug print directly in the filter loop.
+No `DBG` lines at all, not even for `battr`, which suggests the build is reusing cached output. I'll re-run with a fresh environment (`-E`) and without `-q`.
+The member is found with `has_doc=True`, but `keep` ends up False. I'll check the filter branches that can drop it.
+The first debug hook didn't match, so I'll read the filter branches directly.
+The culprit is `is_filtered_inherited_member`. With `:inherited-members:` the option resolves to `'object'`, and the loop returns True when it reaches `object` for any name not in a class's `__dict__`. Documented instance attributes (`self.x` set in `__init__`) never appear in `__dict__`, so they get filtered as "inherited from object". I'll make that check also accept names with a `#:` doc comment in that class.
+Now I'll add the `_has_attr_doc` helper next to `get_inherited_attr_doc`.
+Both inherited attributes now render with their base-class docstrings. I'll run the related suites and review the final diff.
+Five failures in the wider run. I need to confirm they predate my change.
+Inherited attributes with `#:` doc comments now get their docstrings under `:inherited-members:`. Checked with a real Sphinx build: a base-class class attribute and a base-class `self.x` instance attribute both render with their docs.
+
+The cause was twice over:
+
+- **Docstring lookup** (`sphinx/ext/autodoc/__init__.py`, `Documenter.add_content`): the lookup only tried `(child_namespace, attrname)`. I added a fallback that walks the MRO and checks each base class's analyzer for `(base_qualname, attrname)`.
+- **Member listing** (`sphinx/ext/autodoc/importer.py`, `get_class_members`): base-class attribute docs were never added to the member list, so inherited attributes were dropped unless they were in `dir()` output. I now add them, tagged with the base class so the inherited-members filter treats them correctly.
+- **Filter bug** (`is_filtered_inherited_member` in `sphinx/ext/autodoc/__init__.py`): with `:inherited-members:` the option resolves to `'object'`, and the check returned True for any name not in a class `__dict__`. Documented instance attributes (`self.x` set in `__init__`) were therefore filtered out as "inherited from object". I added a check that treats names with a `#:` doc in that class as not filtered.
+
+Test results: the autodoc and pycode suites pass except `test_autodoc`, which fails with a `node class 'meta' is already registered` warning. The autosummary, napoleon and Python-domain suites show 5 failures. I confirmed both sets fail identically on the untouched code, so they are environmental and unrelated. I did not add or change any tests.

@@ -1,0 +1,120 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m✱ [0mGrep "def get_backend"[90m in lib/matplotlib · 1 match[0m
+[0m✱ [0mGrep "_auto_backend_sentinel|def switch_backend"[90m in lib/matplotlib · 16 matches[0m
+[0m→ [0mRead lib/matplotlib/__init__.py[90m [offset=1168, limit=20][0m
+[0m→ [0mRead lib/matplotlib/pyplot.py[90m [offset=205, limit=90][0m
+[0m→ [0mRead lib/matplotlib/pyplot.py[90m [offset=295, limit=40][0m
+[0m
+[0m← [0mEdit lib/matplotlib/pyplot.py
+Index: /testbed/lib/matplotlib/pyplot.py
+===================================================================
+--- /testbed/lib/matplotlib/pyplot.py
++++ /testbed/lib/matplotlib/pyplot.py
+@@ -218,13 +218,20 @@
+     ----------
+     newbackend : str
+         The name of the backend to use.
+     """
+-    global _backend_mod
+     # make sure the init is pulled up so we can assign to it later
+     import matplotlib.backends
+-    close("all")
++    if newbackend is not rcsetup._auto_backend_sentinel:
++        # Resolving the automatic backend (which may be triggered lazily, e.g.
++        # by get_backend()) must not close existing figures.
++        close("all")
++    _switch_backend(newbackend)
+ 
++
++def _switch_backend(newbackend):
++    global _backend_mod
++
+     if newbackend is rcsetup._auto_backend_sentinel:
+         current_framework = cbook._get_running_interactive_framework()
+         mapping = {'qt': 'qtagg',
+                    'gtk3': 'gtk3agg',
+
+[0m
+[0m← [0mEdit lib/matplotlib/pyplot.py
+Index: /testbed/lib/matplotlib/pyplot.py
+===================================================================
+--- /testbed/lib/matplotlib/pyplot.py
++++ /testbed/lib/matplotlib/pyplot.py
+@@ -253,9 +253,9 @@
+ # an additional dependency (pycairo) over the agg-based backend, and
+ # are of worse quality.
+ for candidate in candidates:
+     try:
+-        switch_backend(candidate)
++        _switch_backend(candidate)
+     except ImportError:
+         continue
+     else:
+         rcParamsOrig['backend'] = candidate
+
+[0m
+[0m← [0mEdit lib/matplotlib/pyplot.py
+Index: /testbed/lib/matplotlib/pyplot.py
+===================================================================
+--- /testbed/lib/matplotlib/pyplot.py
++++ /testbed/lib/matplotlib/pyplot.py
+@@ -262,9 +262,9 @@
+             return
+     else:
+         # Switching to Agg should always succeed; if it doesn't, let the
+         # exception propagate out.
+-        switch_backend("agg")
++        _switch_backend("agg")
+         rcParamsOrig["backend"] = "agg"
+         return
+ 
+ backend_mod = importlib.import_module(
+
+[0m
+[0m$ [0mcd /testbed && cat > /tmp/repro.py <<'EOF'
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+from matplotlib import get_backend, rc_context
+with rc_context():
+    fig2 = plt.figure()
+before = f'{id(plt._pylab_helpers.Gcf)} {plt._pylab_helpers.Gcf.figs!r}'
+get_backend()
+after = f'{id(plt._pylab_helpers.Gcf)} {plt._pylab_helpers.Gcf.figs!r}'
+assert before == after, '\n' + before + '\n' + after
+print("OK")
+EOF
+python /tmp/repro.py
+python -c "
+import matplotlib.pyplot as plt
+from matplotlib import get_backend, rc_context
+with rc_context():
+    fig2 = plt.figure()
+print(len(plt._pylab_helpers.Gcf.figs)); get_backend(); print(len(plt._pylab_helpers.Gcf.figs), get_backend())
+"
+python -m pytest -q lib/matplotlib/tests/test_pyplot.py lib/matplotlib/tests/test_backend_bases.py lib/matplotlib/tests/test_rcparams.py 2>&1 | tail -5
+OK
+1
+1 agg
+E   AttributeError: module 'matplotlib.testing' has no attribute 'compare'
+=========================== short test summary info ============================
+ERROR lib/matplotlib/tests/test_backend_bases.py - AttributeError: module 'matplotlib.testing' has no attribute 'compare'
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.70s
+[0m
+[0m$ [0mcd /testbed && python -m pytest -q lib/matplotlib/tests/test_pyplot.py lib/matplotlib/tests/test_rcparams.py 2>&1 | tail -5
+FAILED lib/matplotlib/tests/test_rcparams.py::test_rcparams_update - Failed: DID NOT WARN. No warnings of type (<class 'UserWarning'>,) were emitted.
+ Emitted warnings: [].
+FAILED lib/matplotlib/tests/test_rcparams.py::test_rcparams_init - Failed: DID NOT WARN. No warnings of type (<class 'UserWarning'>,) were emitted.
+ Emitted warnings: [].
+3 failed, 226 passed, 1 skipped in 8.31s
+[0m
+[0m$ [0mcd /testbed && git stash -q && python -m pytest -q lib/matplotlib/tests/test_pyplot.py lib/matplotlib/tests/test_rcparams.py 2>&1 | tail -4; git stash pop -q && git status --short
+Emitted warnings: [].
+FAILED lib/matplotlib/tests/test_rcparams.py::test_rcparams_init - Failed: DID NOT WARN. No warnings of type (<class 'UserWarning'>,) were emitted.
+ Emitted warnings: [].
+3 failed, 226 passed, 1 skipped in 7.01s
+ M lib/matplotlib/pyplot.py
+[0m

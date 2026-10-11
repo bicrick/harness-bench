@@ -1,0 +1,851 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m✱ [0mGrep "attr_docs|find_attr_doc|def get_doc|analyzer"[90m in sphinx/ext/autodoc.py · 84 matches[0m
+[0m→ [0mRead sphinx/ext/autodoc/importer.py[90m [offset=250, limit=90][0m
+[0m→ [0mRead sphinx/ext/autodoc/__init__.py[90m [offset=1585, limit=60][0m
+[0m→ [0mRead sphinx/ext/autodoc/__init__.py[90m [offset=2150, limit=40][0m
+[0m→ [0mRead sphinx/ext/autodoc/__init__.py[90m [offset=590, limit=25][0m
+[0m→ [0mRead sphinx/ext/autodoc/__init__.py[90m [offset=2221, limit=30][0m
+[0m→ [0mRead sphinx/ext/autodoc/__init__.py[90m [offset=680, limit=90][0m
+[0m→ [0mRead sphinx/ext/autodoc/importer.py[90m [offset=1, limit=30][0m
+[0m→ [0mRead sphinx/ext/autodoc/__init__.py[90m [offset=769, limit=15][0m
+[0m
+[0m← [0mEdit sphinx/ext/autodoc/importer.py
+Index: /testbed/sphinx/ext/autodoc/importer.py
+===================================================================
+--- /testbed/sphinx/ext/autodoc/importer.py
++++ /testbed/sphinx/ext/autodoc/importer.py
+@@ -314,8 +314,30 @@
+             if namespace == ns and name not in members:
+                 members[name] = ClassAttribute(subject, name, INSTANCEATTR,
+                                                '\n'.join(docstring))
+ 
++    # attribute docstrings defined in base classes (cf. inherited attributes)
++    for cls in getmro(subject)[1:]:
++        try:
++            qualname = safe_getattr(cls, '__qualname__')
++            modname = safe_getattr(cls, '__module__')
++            base_analyzer = ModuleAnalyzer.for_module(modname)
++            base_analyzer.analyze()
++            attr_docs = base_analyzer.attr_docs
++        except (AttributeError, PycodeError, ImportError):
++            continue
++
++        for (ns, name), docstring in attr_docs.items():
++            if ns != qualname:
++                continue
++            if name not in members:
++                members[name] = ClassAttribute(cls, name, INSTANCEATTR,
++                                               '\n'.join(docstring))
++            elif members[name].class_ is None:
++                # inherited attribute found by dir(); attach its docstring
++                members[name] = ClassAttribute(cls, name, members[name].value,
++                                               '\n'.join(docstring))
++
+     return members
+ 
+ 
+ from sphinx.ext.autodoc.mock import (MockFinder, MockLoader, _MockModule, _MockObject,  # NOQA
+
+[0m
+[0m✱ [0mGrep "import.*PycodeError|class PycodeError"[90m in sphinx · 6 matches[0m
+[0m
+[0m← [0mEdit sphinx/ext/autodoc/importer.py
+Index: /testbed/sphinx/ext/autodoc/importer.py
+===================================================================
+--- /testbed/sphinx/ext/autodoc/importer.py
++++ /testbed/sphinx/ext/autodoc/importer.py
+@@ -13,9 +13,9 @@
+ import warnings
+ from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
+ 
+ from sphinx.deprecation import RemovedInSphinx40Warning, deprecated_alias
+-from sphinx.pycode import ModuleAnalyzer
++from sphinx.pycode import ModuleAnalyzer, PycodeError
+ from sphinx.util import logging
+ from sphinx.util.inspect import (getannotations, getmro, getslots, isclass, isenumclass,
+                                  safe_getattr)
+ 
+
+[0m
+[0m← [0mEdit sphinx/ext/autodoc/__init__.py
+Index: /testbed/sphinx/ext/autodoc/__init__.py
+===================================================================
+--- /testbed/sphinx/ext/autodoc/__init__.py
++++ /testbed/sphinx/ext/autodoc/__init__.py
+@@ -605,9 +605,18 @@
+             docstrings = [list(attr_docs[key])]
+ 
+             for i, line in enumerate(self.process_doc(docstrings)):
+                 self.add_line(line, sourcename, i)
++        else:
++            # the attribute may be inherited from a base class
++            inherited = self.get_inherited_attr_doc()
++            if inherited is not None:
++                no_docstring = True
++                docstrings = [list(inherited)]
+ 
++                for i, line in enumerate(self.process_doc(docstrings)):
++                    self.add_line(line, sourcename, i)
++
+ # add content from docstrings
+ if not no_docstring:
+     docstrings = self.get_doc()
+     if not docstrings:
+
+[0m
+[0m✱ [0mGrep "    def add_content\(self, more_content"[90m in sphinx/ext/autodoc/__init__.py · 5 matches[0m
+[0m→ [0mRead sphinx/ext/autodoc/__init__.py[90m [offset=576, limit=12][0m
+[0m
+[0m← [0mEdit sphinx/ext/autodoc/__init__.py
+Index: /testbed/sphinx/ext/autodoc/__init__.py
+===================================================================
+--- /testbed/sphinx/ext/autodoc/__init__.py
++++ /testbed/sphinx/ext/autodoc/__init__.py
+@@ -583,8 +583,28 @@
+         return '%s:docstring of %s' % (self.analyzer.srcname, fullname)
+     else:
+         return 'docstring of %s' % fullname
+ 
++def get_inherited_attr_doc(self) -> Optional[List[str]]:
++    """Find the attribute docstring of the target in base classes, if any."""
++    if not self.objpath or self.parent is None or not isclass(self.parent):
++        return None
++
++    attrname = self.objpath[-1]
++    for cls in getmro(self.parent)[1:]:
++        try:
++            qualname = safe_getattr(cls, '__qualname__')
++            modname = safe_getattr(cls, '__module__')
++            analyzer = ModuleAnalyzer.for_module(modname)
++            attr_docs = analyzer.find_attr_docs()
++        except (AttributeError, PycodeError, ImportError):
++            continue
++
++        if (qualname, attrname) in attr_docs:
++            return list(attr_docs[(qualname, attrname)])
++
++    return None
++
+ def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                 ) -> None:
+     """Add content from docstrings, attribute documentation and user."""
+     if no_docstring:
+
+[0m
+[0m✱ [0mGrep "^from sphinx.util.inspect import|^    (isclass|getmro|safe_getattr)|^from sphinx.util.inspect"[90m in sphinx/ext/autodoc/__init__.py · 2 matches[0m
+[0m→ [0mRead sphinx/ext/autodoc/__init__.py[90m [offset=36, limit=3][0m
+[0m
+[0m← [0mEdit sphinx/ext/autodoc/__init__.py
+Index: /testbed/sphinx/ext/autodoc/__init__.py
+===================================================================
+--- /testbed/sphinx/ext/autodoc/__init__.py
++++ /testbed/sphinx/ext/autodoc/__init__.py
+@@ -32,10 +32,10 @@
+ from sphinx.locale import _, __
+ from sphinx.pycode import ModuleAnalyzer, PycodeError
+ from sphinx.util import inspect, logging
+ from sphinx.util.docstrings import extract_metadata, prepare_docstring
+-from sphinx.util.inspect import (evaluate_signature, getdoc, object_description, safe_getattr,
+-                                 stringify_signature)
++from sphinx.util.inspect import (evaluate_signature, getdoc, getmro, isclass,
++                                 object_description, safe_getattr, stringify_signature)
+ from sphinx.util.typing import get_type_hints, restify
+ from sphinx.util.typing import stringify as stringify_typehint
+ 
+ if False:
+
+[0m
+[0m$ [0mmkdir -p /tmp/opencode/repro && cd /tmp/opencode/repro && cat > inh_mod.py <<'EOF'
+class Base:
+    #: base attr doc
+    battr = 1
+    def __init__(self):
+        self.iattr = 2  #: instance attr doc
+
+class Child(Base):
+    """child"""
+EOF
+cat > run.py <<'EOF'
+import sys
+sys.path.insert(0, '/tmp/opencode/repro')
+from sphinx.ext.autodoc.directive import DocumenterBridge
+from sphinx.util.docutils import LoggingReporter
+from docutils.statemachine import StringList
+from docutils import frontend, utils
+from sphinx.ext.autodoc import Options
+from sphinx.testing.util import SphinxTestApp
+EOF
+cd /testbed && python -m pytest tests/test_ext_autodoc*.py -q -x 2>&1 | tail -15
+tests/test_ext_autodoc.py::test_autodoc
+  /testbed/sphinx/transforms/post_transforms/code.py:99: PendingDeprecationWarning: nodes.Node.traverse() is obsoleted by Node.findall().
+    for dbnode in self.document.traverse(nodes.doctest_block):  # type: nodes.doctest_block
+
+tests/test_ext_autodoc.py::test_autodoc
+  /testbed/sphinx/environment/__init__.py:540: PendingDeprecationWarning: nodes.Node.traverse() is obsoleted by Node.findall().
+    for toctreenode in doctree.traverse(addnodes.toctree):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_ext_autodoc.py::test_autodoc - AssertionError: assert '\x1b[91mWARN...b[39;49;00m\n' == ''
+  
+  + [91mWARNING: while setting up extension sphinx.addnodes: node class 'meta' is already registered, its visitors will be overridden[39;49;00m
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed, 64 passed, 42 warnings in 3.87s
+[0m
+[0m$ [0mcd /testbed && python -m pytest tests/test_ext_autodoc*.py tests/test_pycode*.py -q 2>&1 | tail -4; git stash -q && python -m pytest tests/test_ext_autodoc.py::test_autodoc -q 2>&1 | tail -1; git stash pop -q && git status --short
+FAILED tests/test_ext_autodoc.py::test_autodoc - AssertionError: assert '\x1b[91mWARN...b[39;49;00m\n' == ''
+  
+  + [91mWARNING: while setting up extension sphinx.addnodes: node class 'meta' is already registered, its visitors will be overridden[39;49;00m
+1 failed, 209 passed, 169 warnings in 4.71s
+1 failed, 42 warnings in 0.33s
+ M sphinx/ext/autodoc/__init__.py
+ M sphinx/ext/autodoc/importer.py
+[0m
+[0m$ [0mcd /tmp/opencode/repro && rm -rf _build && cat > conf.py <<'EOF'
+import sys, os
+sys.path.insert(0, os.path.abspath('.'))
+extensions = ['sphinx.ext.autodoc']
+EOF
+cat > index.rst <<'EOF'
+Test
+====
+
+.. autoclass:: inh_mod.Child
+   :members:
+   :inherited-members:
+EOF
+python -m sphinx -q -b text . _build 2>&1 | tail -5; cat _build/index.txt
+WARNING: while setting up extension sphinx.addnodes: node class 'meta' is already registered, its visitors will be overridden
+Test
+****
+
+class inh_mod.Child
+
+   child
+
+   battr = 1
+
+      base attr doc
+[0m
+[0m$ [0mcd /testbed && grep -n "def analyze\|def find_attr_docs\|self.attr_docs\|def find_tags" -A3 sphinx/pycode/__init__.py | head -60
+148:        self.attr_docs = None    # type: Dict[Tuple[str, str], List[str]]
+149-        self.finals = None       # type: List[str]
+150-        self.overloads = None    # type: Dict[str, List[Signature]]
+151-        self.tagorder = None     # type: Dict[str, int]
+--
+161:    def analyze(self) -> None:
+162-        """Analyze the source code."""
+163-        if self._analyzed:
+164-            return None
+--
+170:            self.attr_docs = OrderedDict()
+171-            for (scope, comment) in parser.comments.items():
+172-                if comment:
+173:                    self.attr_docs[scope] = comment.splitlines() + ['']
+174-                else:
+175:                    self.attr_docs[scope] = ['']
+176-
+177-            self.annotations = parser.annotations
+178-            self.finals = parser.finals
+--
+186:    def find_attr_docs(self) -> Dict[Tuple[str, str], List[str]]:
+187-        """Find class and module-level attributes and their documentation."""
+188-        self.analyze()
+189:        return self.attr_docs
+190-
+191:    def find_tags(self) -> Dict[str, Tuple[str, int, int]]:
+192-        """Find class, function and method definitions and their location."""
+193-        self.analyze()
+194-        return self.tags
+[0m
+[0m$ [0mcd /tmp/opencode/repro && python -c "
+import sys; sys.path.insert(0,'.')
+from sphinx.ext.autodoc.importer import get_class_members
+from sphinx.pycode import ModuleAnalyzer
+import inh_mod
+a = ModuleAnalyzer.for_module('inh_mod'); a.analyze()
+print(a.attr_docs)
+for k,v in get_class_members(inh_mod.Child, ['Child'], getattr, a).items(): print(k, v)
+"
+OrderedDict([(('Base', 'battr'), ['base attr doc', '']), (('Base', 'iattr'), ['instance attr doc', ''])])
+__class__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f1373e8dfa0>
+__delattr__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f137226dcd0>
+__dict__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f137226df70>
+__dir__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f137226df10>
+__doc__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f137226dca0>
+__eq__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f1373e0aa00>
+__format__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f1373e0a820>
+__ge__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f1373e0a0a0>
+__getattribute__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f1373e0adf0>
+__gt__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f1373e0a8b0>
+__hash__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f1373fa9ee0>
+__init__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f1373fa9fa0>
+__init_subclass__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f1373fa9eb0>
+__le__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f13721fd760>
+__lt__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f13721fdd90>
+__module__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f13721fd790>
+__ne__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f13721fdca0>
+__new__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f13721fdc10>
+__reduce__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f13721fdd00>
+__reduce_ex__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f13721fdbe0>
+__repr__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f13721fdb80>
+__setattr__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f13721fdb20>
+__sizeof__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f13721fdac0>
+__str__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f13721fda60>
+__subclasshook__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f13721fda00>
+__weakref__ <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f13721fd9a0>
+battr <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f13721fd8e0>
+iattr <sphinx.ext.autodoc.importer.ClassAttribute object at 0x7f13721fd940>
+[0m
+[0m$ [0mcd /tmp/opencode/repro && sed -i 's/inh_mod.Child/inh_mod.Base/; /inherited-members/d' index.rst && python -m sphinx -q -b text . _build 2>/dev/null; cat _build/index.txt
+Test
+****
+
+class inh_mod.Base
+
+   battr = 1
+
+      base attr doc
+
+   iattr
+
+      instance attr doc
+[0m
+[0m$ [0mcd /tmp/opencode/repro && sed -i 's/inh_mod.Base/inh_mod.Child/; s/   :members:/   :members:\n   :inherited-members:/' index.rst && cat index.rst && python -c "
+import sys; sys.path.insert(0,'.')
+from sphinx.ext.autodoc import AttributeDocumenter
+orig = AttributeDocumenter.add_directive_header
+import sphinx.ext.autodoc as ad
+o = ad.Documenter.generate
+def gen(self, *a, **k):
+    print('GEN', self.name, self.objpath, self.object, getattr(self,'analyzer',None) is not None)
+    return o(self, *a, **k)
+ad.Documenter.generate = gen
+from sphinx.cmd.build import main
+main(['-q','-b','text','.','_build'])
+" 2>&1 | grep -v meta; cat _build/index.txt
+Test
+====
+
+.. autoclass:: inh_mod.Child
+   :members:
+   :inherited-members:
+GEN inh_mod.Child None None False
+GEN inh_mod::Child.battr None None False
+Test
+****
+
+class inh_mod.Child
+
+   child
+
+   battr = 1
+
+      base attr doc
+[0m
+[0m→ [0mRead sphinx/ext/autodoc/__init__.py[90m [offset=800, limit=30][0m
+[0m
+[0m$ [0mcd /tmp/opencode/repro && python -c "
+import sys; sys.path.insert(0,'.')
+import sphinx.ext.autodoc as ad
+o = ad.ClassDocumenter.document_members
+def dm(self, *a, **k):
+    members = self.get_object_members(True)[1]
+    print('MEMBERS', [(m.name, m.value, m.docstring, m.class_) for m in members if 'attr' in m.name])
+    r = o(self, *a, **k)
+    return r
+ad.ClassDocumenter.document_members = dm
+from sphinx.cmd.build import main
+main(['-q','-b','text','.','_build'])
+" 2>&1 | grep -v meta | head; grep -n "def document_members" -A12 /testbed/sphinx/ext/autodoc/__init__.py | head -30
+830:    def document_members(self, all_members: bool = False) -> None:
+831-        """Generate reST for member documentation.
+832-
+833-        If *all_members* is True, do all members, else those given by
+834-        *self.options.members*.
+835-        """
+836-        # set current namespace for finding members
+837-        self.env.temp_data['autodoc:module'] = self.modname
+838-        if self.objpath:
+839-            self.env.temp_data['autodoc:class'] = self.objpath[0]
+840-
+841-        want_all = all_members or self.options.inherited_members or \
+842-            self.options.members is ALL
+--
+1315:    def document_members(self, all_members: bool = False) -> None:
+1316-        pass
+1317-
+1318-    def add_directive_header(self, sig: str) -> None:
+1319-        sourcename = self.get_sourcename()
+1320-        super().add_directive_header(sig)
+1321-
+1322-        if inspect.iscoroutinefunction(self.object):
+1323-            self.add_line('   :async:', sourcename)
+1324-
+1325-    def format_signature(self, **kwargs: Any) -> str:
+1326-        sigs = []
+1327-        if (self.analyzer and
+--
+1696:    def document_members(self, all_members: bool = False) -> None:
+1697-        if self.doc_as_attr:
+[0m
+[0m→ [0mRead sphinx/ext/autodoc/__init__.py[90m [offset=1696, limit=12][0m
+[0m→ [0mRead sphinx/ext/autodoc/__init__.py[90m [offset=842, limit=50][0m
+[0m
+[0m$ [0mcd /testbed && grep -n "def can_document_member" -A12 sphinx/ext/autodoc/__init__.py | sed -n '/AttributeDocumenter/,$p' | head -5; awk 'NR>=2290 && NR<=2330' sphinx/ext/autodoc/__init__.py | grep -n "can_document_member" -A10
+(no output)
+[0m
+[0m$ [0mcd /testbed && grep -n "def can_document_member" sphinx/ext/autodoc/__init__.py; sed -n '2290,2330p' sphinx/ext/autodoc/__init__.py
+323:    def can_document_member(cls, member: Any, membername: str, isattr: bool, parent: Any
+1013:    def can_document_member(cls, member: Any, membername: str, isattr: bool, parent: Any
+1289:    def can_document_member(cls, member: Any, membername: str, isattr: bool, parent: Any
+1437:    def can_document_member(cls, member: Any, membername: str, isattr: bool, parent: Any
+1724:    def can_document_member(cls, member: Any, membername: str, isattr: bool, parent: Any
+1881:    def can_document_member(cls, member: Any, membername: str, isattr: bool, parent: Any
+1958:    def can_document_member(cls, member: Any, membername: str, isattr: bool, parent: Any
+1973:    def can_document_member(cls, member: Any, membername: str, isattr: bool, parent: Any
+2288:    def can_document_member(cls, member: Any, membername: str, isattr: bool, parent: Any
+2424:    def can_document_member(cls, member: Any, membername: str, isattr: bool, parent: Any
+2456:    def can_document_member(cls, member: Any, membername: str, isattr: bool, parent: Any
+        if inspect.isattributedescriptor(member):
+            return True
+        elif (not isinstance(parent, ModuleDocumenter) and
+              not inspect.isroutine(member) and
+              not isinstance(member, type)):
+            return True
+        else:
+            return False
+
+    def document_members(self, all_members: bool = False) -> None:
+        pass
+
+    def isinstanceattribute(self) -> bool:
+        """Check the subject is an instance attribute."""
+        # uninitialized instance variable (PEP-526)
+        with mock(self.config.autodoc_mock_imports):
+            try:
+                ret = import_object(self.modname, self.objpath[:-1], 'class',
+                                    attrgetter=self.get_attr,
+                                    warningiserror=self.config.autodoc_warningiserror)
+                self.parent = ret[3]
+                annotations = get_type_hints(self.parent, None,
+                                             self.config.autodoc_type_aliases)
+                if self.objpath[-1] in annotations:
+                    self.object = UNINITIALIZED_ATTR
+                    return True
+            except ImportError:
+                pass
+
+        return False
+
+    def update_annotations(self, parent: Any) -> None:
+        """Update __annotations__ to support type_comment and so on."""
+        try:
+            annotations = inspect.getannotations(parent)
+
+            for cls in inspect.getmro(parent):
+                try:
+                    module = safe_getattr(cls, '__module__')
+                    qualname = safe_getattr(cls, '__qualname__')
+[0m
+[0m$ [0mcd /testbed && cp sphinx/ext/autodoc/__init__.py /tmp/opencode/init_backup.py && python - <<'EOF'
+import re
+p='sphinx/ext/autodoc/__init__.py'
+s=open(p).read()
+s=s.replace("            if keep:\n                ret.append((membername, member, isattr))","            if 'attr' in membername: print('DBG', membername, keep, isattr, has_doc, file=__import__('sys').stderr)\n            if keep:\n                ret.append((membername, member, isattr))",1)
+open(p,'w').write(s)
+EOF
+cd /tmp/opencode/repro && python -m sphinx -q -b text . _build 2>&1 | grep DBG; cp /tmp/opencode/init_backup.py /testbed/sphinx/ext/autodoc/__init__.py
+(no output)
+[0m
+[0m✗ [0m failed
+[91m[1mError: [0mTool execution aborted
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+p='sphinx/ext/autodoc/__init__.py'
+s=open(p).read()
+s=s.replace("            if keep:\n                ret.append((membername, member, isattr))","            if 'attr' in membername: print('DBG', membername, keep, isattr, has_doc, file=__import__('sys').stderr)\n            if keep:\n                ret.append((membername, member, isattr))",1)
+open(p,'w').write(s)
+EOF
+cd /tmp/opencode/repro && rm -rf _build && python -m sphinx -E -b text . _build 2>&1 | grep -v meta; cp /tmp/opencode/init_backup.py /testbed/sphinx/ext/autodoc/__init__.py; cat _build/index.txt
+Running Sphinx v3.4.0+/88445db69
+making output directory... done
+building [mo]: targets for 0 po files that are out of date
+building [text]: targets for 1 source files that are out of date
+updating environment: [new config] 1 added, 0 changed, 0 removed
+reading sources... [100%] index
+DBG __delattr__ False False True
+DBG __getattribute__ False False True
+DBG __setattr__ False False True
+DBG battr True False True
+DBG iattr False True True
+
+looking for now-outdated files... none found
+pickling environment... done
+checking consistency... done
+preparing documents... done
+writing output... [100%] index
+
+build succeeded, 1 warning.
+
+The text files are in _build.
+Test
+****
+
+class inh_mod.Child
+
+   child
+
+   battr = 1
+
+      base attr doc
+[0m
+[0m$ [0mcd /testbed && grep -n "def is_filtered_inherited_member" -A14 sphinx/ext/autodoc/__init__.py; sed -n 660,680p sphinx/ext/autodoc/__init__.py
+698:        def is_filtered_inherited_member(name: str) -> bool:
+699-            if inspect.isclass(self.object):
+700-                for cls in self.object.__mro__:
+701-                    if cls.__name__ == self.options.inherited_members and cls != self.object:
+702-                        # given member is a member of specified *super class*
+703-                        return True
+704-                    elif name in cls.__dict__:
+705-                        return False
+706-                    elif name in self.get_attr(cls, '__annotations__', {}):
+707-                        return False
+708-
+709-            return False
+710-
+711-        ret = []
+712-
+        members given by *self.options.members* (which may also be none).
+        """
+        warnings.warn('The implementation of Documenter.get_object_members() will be '
+                      'removed from Sphinx-6.0.', RemovedInSphinx60Warning)
+        members = get_object_members(self.object, self.objpath, self.get_attr, self.analyzer)
+        if not want_all:
+            if not self.options.members:
+                return False, []  # type: ignore
+            # specific members given
+            selected = []
+            for name in self.options.members:  # type: str
+                if name in members:
+                    selected.append((name, members[name].value))
+                else:
+                    logger.warning(__('missing attribute %s in object %s') %
+                                   (name, self.fullname), type='autodoc')
+            return False, selected
+        elif self.options.inherited_members:
+            return False, [(m.name, m.value) for m in members.values()]
+        else:
+            return False, [(m.name, m.value) for m in members.values()
+[0m
+[0m$ [0mcd /testbed && sed -n 735,760p sphinx/ext/autodoc/__init__.py
+# if the member __doc__ is the same as self's __doc__, it's just
+            # inherited and therefore not the member's doc
+            cls = self.get_attr(member, '__class__', None)
+            if cls:
+                cls_doc = self.get_attr(cls, '__doc__', None)
+                if cls_doc == doc:
+                    doc = None
+
+            if isinstance(obj, ObjectMember) and obj.docstring:
+                # hack for ClassDocumenter to inject docstring via ObjectMember
+                doc = obj.docstring
+
+            has_doc = bool(doc)
+
+            metadata = extract_metadata(doc)
+            if 'private' in metadata:
+                # consider a member private if docstring has "private" metadata
+                isprivate = True
+            elif 'public' in metadata:
+                # consider a member public if docstring has "public" metadata
+                isprivate = False
+            else:
+                isprivate = membername.startswith('_')
+
+            keep = False
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+p='sphinx/ext/autodoc/__init__.py'
+s=open(p).read()
+s=s.replace("            keep = False\n\n            if safe_getattr(member, '__sphinx_mock__'","            keep = False\n            if membername == 'iattr': print('DBG0', want_all, isprivate, self.options.members, self.options.exclude_members, self.options.inherited_members, file=__import__('sys').stderr)\n\n            if safe_getattr(member, '__sphinx_mock__'",1)
+s=s.replace("            if keep:\n                ret.append((membername, member, isattr))","            if 'attr' in membername: print('DBG', membername, keep, isattr, has_doc, file=__import__('sys').stderr)\n            if keep:\n                ret.append((membername, member, isattr))",1)
+open(p,'w').write(s)
+EOF
+cd /tmp/opencode/repro && rm -rf _build && python -m sphinx -E -b text . _build 2>&1 | grep DBG; cp /tmp/opencode/init_backup.py /testbed/sphinx/ext/autodoc/__init__.py
+DBG __delattr__ False False True
+DBG __getattribute__ False False True
+DBG __setattr__ False False True
+DBG battr True False True
+DBG iattr False True True
+[0m
+[0m$ [0mcd /testbed && sed -n 760,800p sphinx/ext/autodoc/__init__.py
+keep = False
+            if safe_getattr(member, '__sphinx_mock__', None) is not None:
+                # mocked module or object
+                pass
+            elif self.options.exclude_members and membername in self.options.exclude_members:
+                # remove members given by exclude-members
+                keep = False
+            elif want_all and special_member_re.match(membername):
+                # special __methods__
+                if self.options.special_members and membername in self.options.special_members:
+                    if membername == '__doc__':
+                        keep = False
+                    elif is_filtered_inherited_member(membername):
+                        keep = False
+                    else:
+                        keep = has_doc or self.options.undoc_members
+                else:
+                    keep = False
+            elif (namespace, membername) in attr_docs:
+                if want_all and isprivate:
+                    if self.options.private_members is None:
+                        keep = False
+                    else:
+                        keep = membername in self.options.private_members
+                else:
+                    # keep documented attributes
+                    keep = True
+                isattr = True
+            elif want_all and isprivate:
+                if has_doc or self.options.undoc_members:
+                    if self.options.private_members is None:
+                        keep = False
+                    elif is_filtered_inherited_member(membername):
+                        keep = False
+                    else:
+                        keep = membername in self.options.private_members
+                else:
+                    keep = False
+            else:
+                if self.options.members is ALL and is_filtered_inherited_member(membername):
+                    keep = False
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+p='sphinx/ext/autodoc/__init__.py'
+s=open(p).read()
+s=s.replace("            keep = False\n            if safe_getattr(member, '__sphinx_mock__', None) is not None:",
+"            keep = False\n            if membername == 'iattr': print('DBG0', want_all, isprivate, self.options.members, self.options.exclude_members, self.options.inherited_members, namespace, (namespace, membername) in attr_docs, file=__import__('sys').stderr)\n            if safe_getattr(member, '__sphinx_mock__', None) is not None:",1)
+open(p,'w').write(s)
+EOF
+grep -c DBG0 sphinx/ext/autodoc/__init__.py; cd /tmp/opencode/repro && rm -rf _build && python -m sphinx -E -b text . _build 2>&1 | grep DBG; cp /tmp/opencode/init_backup.py /testbed/sphinx/ext/autodoc/__init__.py
+1
+DBG0 object False <sphinx.ext.autodoc._All object at 0x7ff0fb6e8040> None object Child False
+[0m
+[0m$ [0mcd /testbed && git diff --stat && sed -n 696,710p sphinx/ext/autodoc/__init__.py
+sphinx/ext/autodoc/__init__.py | 33 +++++++++++++++++++++++++++++++--
+ sphinx/ext/autodoc/importer.py | 24 +++++++++++++++++++++++-
+ 2 files changed, 54 insertions(+), 3 deletions(-)
+        ``autodoc-skip-member`` event.
+        """
+        def is_filtered_inherited_member(name: str) -> bool:
+            if inspect.isclass(self.object):
+                for cls in self.object.__mro__:
+                    if cls.__name__ == self.options.inherited_members and cls != self.object:
+                        # given member is a member of specified *super class*
+                        return True
+                    elif name in cls.__dict__:
+                        return False
+                    elif name in self.get_attr(cls, '__annotations__', {}):
+                        return False
+
+            return False
+[0m
+[0m← [0mEdit sphinx/ext/autodoc/__init__.py
+Index: /testbed/sphinx/ext/autodoc/__init__.py
+===================================================================
+--- /testbed/sphinx/ext/autodoc/__init__.py
++++ /testbed/sphinx/ext/autodoc/__init__.py
+@@ -704,8 +704,11 @@
+             elif name in cls.__dict__:
+                 return False
+             elif name in self.get_attr(cls, '__annotations__', {}):
+                 return False
++            elif self._has_attr_doc(cls, name):
++                # instance attribute documented in the class (cf. self.attr)
++                return False
+ 
+     return False
+ 
+ ret = []
+
+[0m
+[0m← [0mEdit sphinx/ext/autodoc/__init__.py
+Index: /testbed/sphinx/ext/autodoc/__init__.py
+===================================================================
+--- /testbed/sphinx/ext/autodoc/__init__.py
++++ /testbed/sphinx/ext/autodoc/__init__.py
+@@ -583,8 +583,18 @@
+         return '%s:docstring of %s' % (self.analyzer.srcname, fullname)
+     else:
+         return 'docstring of %s' % fullname
+ 
++def _has_attr_doc(self, cls: Any, name: str) -> bool:
++    """Check whether *name* has an attribute docstring defined in *cls*."""
++    try:
++        qualname = safe_getattr(cls, '__qualname__')
++        modname = safe_getattr(cls, '__module__')
++        analyzer = ModuleAnalyzer.for_module(modname)
++        return (qualname, name) in analyzer.find_attr_docs()
++    except (AttributeError, PycodeError, ImportError):
++        return False
++
+ def get_inherited_attr_doc(self) -> Optional[List[str]]:
+     """Find the attribute docstring of the target in base classes, if any."""
+     if not self.objpath or self.parent is None or not isclass(self.parent):
+         return None
+
+[0m
+[0m$ [0mcd /tmp/opencode/repro && rm -rf _build && python -m sphinx -E -q -b text . _build 2>&1 | grep -v meta; cat _build/index.txt; echo ----; cd /testbed && python -m pytest tests/test_ext_autodoc*.py tests/test_pycode*.py -q 2>&1 | tail -3
+Test
+****
+
+class inh_mod.Child
+
+   child
+
+   battr = 1
+
+      base attr doc
+
+   iattr
+
+      instance attr doc
+----
+  
+  + [91mWARNING: while setting up extension sphinx.addnodes: node class 'meta' is already registered, its visitors will be overridden[39;49;00m
+1 failed, 209 passed, 169 warnings in 5.22s
+[0m
+[0m$ [0mcd /testbed && python -m pytest tests/test_ext_autosummary*.py tests/test_ext_napoleon*.py tests/test_domain_py.py -q 2>&1 | tail -2; git status --short; git diff
++  where 2 = len(["\x1b[91mWARNING: while setting up extension sphinx.addnodes: node class 'meta' is already registered, its visitors will be overridden\x1b[39;49;00m", '\x1b[91mWARNING: invalid value set (missing closing brace): {1, 2\x1b[39;49;00m'])
+5 failed, 129 passed, 3246 warnings in 3.78s
+ M sphinx/ext/autodoc/__init__.py
+ M sphinx/ext/autodoc/importer.py
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..ce3cdbd95 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -33,8 +33,8 @@ from sphinx.locale import _, __
+ from sphinx.pycode import ModuleAnalyzer, PycodeError
+ from sphinx.util import inspect, logging
+ from sphinx.util.docstrings import extract_metadata, prepare_docstring
+-from sphinx.util.inspect import (evaluate_signature, getdoc, object_description, safe_getattr,
+-                                 stringify_signature)
++from sphinx.util.inspect import (evaluate_signature, getdoc, getmro, isclass,
++                                 object_description, safe_getattr, stringify_signature)
+ from sphinx.util.typing import get_type_hints, restify
+ from sphinx.util.typing import stringify as stringify_typehint
+ 
+@@ -584,6 +584,36 @@ class Documenter:
+         else:
+             return 'docstring of %s' % fullname
+ 
++    def _has_attr_doc(self, cls: Any, name: str) -> bool:
++        """Check whether *name* has an attribute docstring defined in *cls*."""
++        try:
++            qualname = safe_getattr(cls, '__qualname__')
++            modname = safe_getattr(cls, '__module__')
++            analyzer = ModuleAnalyzer.for_module(modname)
++            return (qualname, name) in analyzer.find_attr_docs()
++        except (AttributeError, PycodeError, ImportError):
++            return False
++
++    def get_inherited_attr_doc(self) -> Optional[List[str]]:
++        """Find the attribute docstring of the target in base classes, if any."""
++        if not self.objpath or self.parent is None or not isclass(self.parent):
++            return None
++
++        attrname = self.objpath[-1]
++        for cls in getmro(self.parent)[1:]:
++            try:
++                qualname = safe_getattr(cls, '__qualname__')
++                modname = safe_getattr(cls, '__module__')
++                analyzer = ModuleAnalyzer.for_module(modname)
++                attr_docs = analyzer.find_attr_docs()
++            except (AttributeError, PycodeError, ImportError):
++                continue
++
++            if (qualname, attrname) in attr_docs:
++                return list(attr_docs[(qualname, attrname)])
++
++        return None
++
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         """Add content from docstrings, attribute documentation and user."""
+@@ -606,6 +636,15 @@ class Documenter:
+ 
+                     for i, line in enumerate(self.process_doc(docstrings)):
+                         self.add_line(line, sourcename, i)
++                else:
++                    # the attribute may be inherited from a base class
++                    inherited = self.get_inherited_attr_doc()
++                    if inherited is not None:
++                        no_docstring = True
++                        docstrings = [list(inherited)]
++
++                        for i, line in enumerate(self.process_doc(docstrings)):
++                            self.add_line(line, sourcename, i)
+ 
+         # add content from docstrings
+         if not no_docstring:
+@@ -676,6 +715,9 @@ class Documenter:
+                         return False
+                     elif name in self.get_attr(cls, '__annotations__', {}):
+                         return False
++                    elif self._has_attr_doc(cls, name):
++                        # instance attribute documented in the class (cf. self.attr)
++                        return False
+ 
+             return False
+ 
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index d6e73d36a..baa2339fc 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -14,7 +14,7 @@ import warnings
+ from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
+ 
+ from sphinx.deprecation import RemovedInSphinx40Warning, deprecated_alias
+-from sphinx.pycode import ModuleAnalyzer
++from sphinx.pycode import ModuleAnalyzer, PycodeError
+ from sphinx.util import logging
+ from sphinx.util.inspect import (getannotations, getmro, getslots, isclass, isenumclass,
+                                  safe_getattr)
+@@ -315,6 +315,28 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable,
+                 members[name] = ClassAttribute(subject, name, INSTANCEATTR,
+                                                '\n'.join(docstring))
+ 
++    # attribute docstrings defined in base classes (cf. inherited attributes)
++    for cls in getmro(subject)[1:]:
++        try:
++            qualname = safe_getattr(cls, '__qualname__')
++            modname = safe_getattr(cls, '__module__')
++            base_analyzer = ModuleAnalyzer.for_module(modname)
++            base_analyzer.analyze()
++            attr_docs = base_analyzer.attr_docs
++        except (AttributeError, PycodeError, ImportError):
++            continue
++
++        for (ns, name), docstring in attr_docs.items():
++            if ns != qualname:
++                continue
++            if name not in members:
++                members[name] = ClassAttribute(cls, name, INSTANCEATTR,
++                                               '\n'.join(docstring))
++            elif members[name].class_ is None:
++                # inherited attribute found by dir(); attach its docstring
++                members[name] = ClassAttribute(cls, name, members[name].value,
++                                               '\n'.join(docstring))
++
+     return members
+[0m
+[0m$ [0mcd /testbed && python -m pytest tests/test_ext_autosummary*.py tests/test_ext_napoleon*.py tests/test_domain_py.py -q 2>&1 | grep FAILED > /tmp/opencode/after.txt; git stash -q && python -m pytest tests/test_ext_autosummary*.py tests/test_ext_napoleon*.py tests/test_domain_py.py -q 2>&1 | grep FAILED > /tmp/opencode/before.txt; git stash pop -q; diff /tmp/opencode/before.txt /tmp/opencode/after.txt && echo SAME; wc -l < /tmp/opencode/before.txt; git status --short
+SAME
+5
+ M sphinx/ext/autodoc/__init__.py
+ M sphinx/ext/autodoc/importer.py
+[0m

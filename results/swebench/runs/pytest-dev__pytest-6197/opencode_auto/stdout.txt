@@ -1,0 +1,26 @@
+The root cause is in `pytest_collect_file` in `src/_pytest/python.py`: it adds `"__init__.py"` to the `python_files` patterns, so every `__init__.py` found while recursing gets turned into a collector. I'll remove that extra pattern and check how `Package` handles its own `__init__.py`.
+`Package.collect` already yields its own `__init__.py` when it matches `python_files`, so the extra pattern is redundant and harmful. Removing it:
+Now I'll reproduce the issue and run the relevant test suites.
+Some failures remain. I'll check whether they predate my change by stashing it and rerunning.
+My change introduced 4 new failures, so the removal is not sufficient on its own. I'll look at them.
+Removing the pattern stops `__init__.py` from being collected as a Package in cases where it should be. Before picking a fix, I'll look at how `Session._collect` handles package `__init__.py` files.
+The explicit `__init__.py` collection in `_collect` (main.py:534) and the argument path (main.py:561) both depend on `pytest_collect_file` accepting `__init__.py`. Reverting my change and checking history will show what 5.2.3 changed.
+Found the regression source. Commit 9275012ef added `self._mount_obj_if_needed()` to `Package.collect()`, which eagerly imports every package's `__init__.py`. I'll try removing that eager import and check the related tests, including the `test_skipping` test added for the 5830 fix.
+The repro passes now, but `test_skip_package` (the 5830 regression test) fails. I'll look at that test to see what the package's `__init__` import must provide.
+The 5830 fix needs the package `__init__` loaded before its children run, since package-level `pytestmark` must be applied. The regression comes from loading it even when the package yields nothing. The cleaner fix is to load it lazily, only right before the first child is yielded. I'll apply that in `Package.collect`.
+The repro passes and the affected test files match the baseline. Next I'll run the full suite to check for other regressions.
+The full suite runs longer than the default timeout, so I'll rerun it with a larger timeout.
+The full run has many failures, likely from the environment rather than my change. I'll run the same suite on the original code to compare.
+The failure set is identical to the baseline, so the remaining failures are pre-existing environment issues. Final diff:
+Fixed. pytest no longer imports a package's `__init__.py` during collection when that package has no tests to collect, so the issue's `foobar/__init__.py` (`assert False`) no longer breaks the run. The issue's example now passes.
+
+**Root cause:** commit 9275012ef ("fix bug with nonskipped first test in package") added `self._mount_obj_if_needed()` to the start of `Package.collect()` in `src/_pytest/python.py`. That eagerly imports every package's `__init__.py`, even when the package contains nothing collectable.
+
+**Fix:** the import is now deferred in `Package.collect()`. It runs only right before the first child collector is yielded. Package-level `pytestmark` still applies before the package's tests run, so the 5830 fix (`test_skip_package`) keeps working.
+
+**Verification:**
+- The reproduction from the issue passes.
+- `test_collection`, `test_session`, `python/collect`, `python/fixtures`, `test_pytester`, `test_skipping` and `test_mark` have the same failures as before the change.
+- The full suite (excluding `metafunc.py` and `test_junitxml.py`, which fail to import because of missing `hypothesis` and `xmlschema`) has the same failure set as the unmodified repo: 1292 failed, 994 passed. These failures are pre-existing and environmental.
+
+I did not add or change any tests.

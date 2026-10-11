@@ -1,0 +1,125 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "__getattr__" -A40 astropy/coordinates/sky_coordinate.py | head -80
+869:    def __getattr__(self, attr):
+870-        """
+871-        Overrides getattr to return coordinates that this can be transformed
+872-        to, based on the alias attr in the primary transform graph.
+873-        """
+874-        if "_sky_coord_frame" in self.__dict__:
+875-            if self._is_name(attr):
+876-                return self  # Should this be a deepcopy of self?
+877-
+878-            # Anything in the set of all possible frame_attr_names is handled
+879-            # here. If the attr is relevant for the current frame then delegate
+880-            # to self.frame otherwise get it from self._<attr>.
+881-            if attr in frame_transform_graph.frame_attributes:
+882-                if attr in self.frame.frame_attributes:
+883-                    return getattr(self.frame, attr)
+884-                else:
+885-                    return getattr(self, "_" + attr, None)
+886-
+887-            # Some attributes might not fall in the above category but still
+888-            # are available through self._sky_coord_frame.
+889-            if not attr.startswith("_") and hasattr(self._sky_coord_frame, attr):
+890-                return getattr(self._sky_coord_frame, attr)
+891-
+892-            # Try to interpret as a new frame for transforming.
+893-            frame_cls = frame_transform_graph.lookup_name(attr)
+894-            if frame_cls is not None and self.frame.is_transformable_to(frame_cls):
+895-                return self.transform_to(attr)
+896-
+897-        # Fail
+898-        raise AttributeError(
+899-            f"'{self.__class__.__name__}' object has no attribute '{attr}'"
+900-        )
+901-
+902-    def __setattr__(self, attr, val):
+903:        # This is to make anything available through __getattr__ immutable
+904-        if "_sky_coord_frame" in self.__dict__:
+905-            if self._is_name(attr):
+906-                raise AttributeError(f"'{attr}' is immutable")
+907-
+908-            if not attr.startswith("_") and hasattr(self._sky_coord_frame, attr):
+909-                setattr(self._sky_coord_frame, attr, val)
+910-                return
+911-
+912-            frame_cls = frame_transform_graph.lookup_name(attr)
+913-            if frame_cls is not None and self.frame.is_transformable_to(frame_cls):
+914-                raise AttributeError(f"'{attr}' is immutable")
+915-
+916-        if attr in frame_transform_graph.frame_attributes:
+917-            # All possible frame attributes can be set, but only via a private
+918:            # variable.  See __getattr__ above.
+919-            super().__setattr__("_" + attr, val)
+920-            # Validate it
+921-            frame_transform_graph.frame_attributes[attr].__get__(self)
+922-            # And add to set of extra attributes
+923-            self._extra_frameattr_names |= {attr}
+924-
+925-        else:
+926-            # Otherwise, do the standard Python attribute setting
+927-            super().__setattr__(attr, val)
+928-
+929-    def __delattr__(self, attr):
+930-        # mirror __setattr__ above
+931-        if "_sky_coord_frame" in self.__dict__:
+932-            if self._is_name(attr):
+933-                raise AttributeError(f"'{attr}' is immutable")
+934-
+935-            if not attr.startswith("_") and hasattr(self._sky_coord_frame, attr):
+936-                delattr(self._sky_coord_frame, attr)
+937-                return
+938-
+939-            frame_cls = frame_transform_graph.lookup_name(attr)
+940-            if frame_cls is not None and self.frame.is_transformable_to(frame_cls):
+941-                raise AttributeError(f"'{attr}' is immutable")
+942-
+943-        if attr in frame_transform_graph.frame_attributes:
+944-            # All possible frame attributes can be deleted, but need to remove
+945:            # the corresponding private variable.  See __getattr__ above.
+946-            super().__delattr__("_" + attr)
+947-            # Also remove it from the set of extra attributes
+948-            self._extra_frameattr_names -= {attr}
+[0m
+[0m← [0mEdit astropy/coordinates/sky_coordinate.py
+Index: /testbed/astropy/coordinates/sky_coordinate.py
+===================================================================
+--- /testbed/astropy/coordinates/sky_coordinate.py
++++ /testbed/astropy/coordinates/sky_coordinate.py
+@@ -870,8 +870,15 @@
+ """
+ Overrides getattr to return coordinates that this can be transformed
+ to, based on the alias attr in the primary transform graph.
+ """
++# If ``attr`` is a property defined on the class, its getter raised an
++# AttributeError (which is why we ended up here). Re-invoke the getter
++# so the original, more informative, error is propagated instead of
++# the generic "no attribute" message.
++if isinstance(getattr(type(self), attr, None), property):
++    return object.__getattribute__(self, attr)
++
+ if "_sky_coord_frame" in self.__dict__:
+     if self._is_name(attr):
+         return self  # Should this be a deepcopy of self?
+ 
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+import astropy.coordinates as coord
+class custom_coord(coord.SkyCoord):
+    @property
+    def prop(self):
+        return self.random_attr
+c = custom_coord('00h42m30s', '+41d12m00s', frame='icrs')
+print(c.ra)
+c.prop
+" 2>&1 | tail -3; python -m pytest -q astropy/coordinates/tests/test_sky_coord.py 2>&1 | tail -3
+raise AttributeError(
+AttributeError: 'custom_coord' object has no attribute 'random_attr'
+10d37m30s
+[36m[1m=========================== short test summary info ============================[0m
+[31mFAILED[0m astropy/coordinates/tests/test_sky_coord.py::[1mtest_repr_altaz[0m - astropy.utils.exceptions.AstropyWarning: leap-second auto-update failed due to the following exception: IERSStaleWarning('leap-second file is expired.')
+[31m[31m[1m1 failed[0m, [32m426 passed[0m, [33m3 skipped[0m, [33m1 xfailed[0m[31m in 3.72s[0m[0m
+[0m

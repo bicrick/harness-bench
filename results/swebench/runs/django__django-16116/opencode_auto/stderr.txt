@@ -1,0 +1,275 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "check" django/core/management/commands/makemigrations.py | head -80
+70:            "--check",
+72:            dest="check_changes",
+113:        check_changes = options["check_changes"]
+137:        consistency_check_labels = {config.label for config in apps.get_app_configs()}
+138:        # Non-default databases are only checked if database routers used.
+139:        aliases_to_check = (
+142:        for alias in sorted(aliases_to_check):
+149:                for app_label in consistency_check_labels
+153:                    loader.check_consistent_history(connection)
+156:                        "Got an error checking a consistent migration history "
+255:            if check_changes:
+270:            # Multiple leaf nodes have already been checked earlier in command.
+[0m
+[0m$ [0mcd /testbed && sed -n 60,80p django/core/management/commands/makemigrations.py && sed -n 105,125p django/core/management/commands/makemigrations.py && sed -n 225,270p django/core/management/commands/makemigrations.py
+"--name",
+            help="Use this name for migration file(s).",
+        )
+        parser.add_argument(
+            "--no-header",
+            action="store_false",
+            dest="include_header",
+            help="Do not add header comments to new migration file(s).",
+        )
+        parser.add_argument(
+            "--check",
+            action="store_true",
+            dest="check_changes",
+            help="Exit with a non-zero status if model changes are missing migrations.",
+        )
+        parser.add_argument(
+            "--scriptable",
+            action="store_true",
+            dest="scriptable",
+            help=(
+                "Divert log output and input prompts to stderr, writing only "
+        self.interactive = options["interactive"]
+        self.dry_run = options["dry_run"]
+        self.merge = options["merge"]
+        self.empty = options["empty"]
+        self.migration_name = options["name"]
+        if self.migration_name and not self.migration_name.isidentifier():
+            raise CommandError("The migration name must be a valid Python identifier.")
+        self.include_header = options["include_header"]
+        check_changes = options["check_changes"]
+        self.scriptable = options["scriptable"]
+        self.update = options["update"]
+        # If logs and prompts are diverted to stderr, remove the ERROR style.
+        if self.scriptable:
+            self.stderr.style_func = None
+
+        # Make sure the app they asked for exists
+        app_labels = set(app_labels)
+        has_bad_labels = False
+        for app_label in app_labels:
+            try:
+                apps.get_app_config(app_label)
+            )
+            self.write_migration_files(changes)
+            return
+
+        # Detect changes
+        changes = autodetector.changes(
+            graph=loader.graph,
+            trim_to_apps=app_labels or None,
+            convert_apps=app_labels or None,
+            migration_name=self.migration_name,
+        )
+
+        if not changes:
+            # No changes? Tell them.
+            if self.verbosity >= 1:
+                if app_labels:
+                    if len(app_labels) == 1:
+                        self.log("No changes detected in app '%s'" % app_labels.pop())
+                    else:
+                        self.log(
+                            "No changes detected in apps '%s'"
+                            % ("', '".join(app_labels))
+                        )
+                else:
+                    self.log("No changes detected")
+        else:
+            if self.update:
+                self.write_to_last_migration_files(changes)
+            else:
+                self.write_migration_files(changes)
+            if check_changes:
+                sys.exit(1)
+
+    def write_to_last_migration_files(self, changes):
+        loader = MigrationLoader(connections[DEFAULT_DB_ALIAS])
+        new_changes = {}
+        update_previous_migration_paths = {}
+        for app_label, app_migrations in changes.items():
+            # Find last migration.
+            leaf_migration_nodes = loader.graph.leaf_nodes(app=app_label)
+            if len(leaf_migration_nodes) == 0:
+                raise CommandError(
+                    f"App {app_label} has no migration, cannot update last migration."
+                )
+            leaf_migration_node = leaf_migration_nodes[0]
+            # Multiple leaf nodes have already been checked earlier in command.
+[0m
+[0m$ [0mcd /testbed && sed -n 125,132p django/core/management/commands/makemigrations.py; sed -n 196,228p django/core/management/commands/makemigrations.py; grep -n "dry_run" django/core/management/commands/makemigrations.py
+apps.get_app_config(app_label)
+            except LookupError as err:
+                self.stderr.write(str(err))
+                has_bad_labels = True
+        if has_bad_labels:
+            sys.exit(2)
+
+        # Load the current graph state. Pass in None for the connection so
+                dry_run=self.dry_run,
+                prompt_output=self.log_output,
+            )
+        else:
+            questioner = NonInteractiveMigrationQuestioner(
+                specified_apps=app_labels,
+                dry_run=self.dry_run,
+                verbosity=self.verbosity,
+                log=self.log,
+            )
+        # Set up autodetector
+        autodetector = MigrationAutodetector(
+            loader.project_state(),
+            ProjectState.from_apps(apps),
+            questioner,
+        )
+
+        # If they want to make an empty migration, make one for each app
+        if self.empty:
+            if not app_labels:
+                raise CommandError(
+                    "You must supply at least one app label when using --empty."
+                )
+            # Make a fake changes() result we can pass to arrange_for_graph
+            changes = {app: [Migration("custom", app)] for app in app_labels}
+            changes = autodetector.arrange_for_graph(
+                changes=changes,
+                graph=loader.graph,
+                migration_name=self.migration_name,
+            )
+            self.write_migration_files(changes)
+            return
+
+106:        self.dry_run = options["dry_run"]
+196:                dry_run=self.dry_run,
+202:                dry_run=self.dry_run,
+350:                if not self.dry_run:
+493:                if not self.dry_run:
+[0m
+[0m← [0mEdit django/core/management/commands/makemigrations.py
+Index: /testbed/django/core/management/commands/makemigrations.py
+===================================================================
+--- /testbed/django/core/management/commands/makemigrations.py
++++ /testbed/django/core/management/commands/makemigrations.py
+@@ -247,14 +247,15 @@
+                     )
+             else:
+                 self.log("No changes detected")
+     else:
++        if check_changes:
++            # Don't write migrations, just report that changes are missing.
++            sys.exit(1)
+         if self.update:
+             self.write_to_last_migration_files(changes)
+         else:
+             self.write_migration_files(changes)
+-        if check_changes:
+-            sys.exit(1)
+ 
+ def write_to_last_migration_files(self, changes):
+     loader = MigrationLoader(connections[DEFAULT_DB_ALIAS])
+     new_changes = {}
+
+[0m
+[0m$ [0mcd /testbed && grep -rn "makemigrations.*--check\|\-\-check" docs/ref/django-admin.txt | head; grep -n -A12 "^.. django-admin:: makemigrations" docs/ref/django-admin.txt | head -5
+823:.. django-admin-option:: --check
+913:.. django-admin-option:: --check
+938:.. django-admin-option:: --check
+779:.. django-admin:: makemigrations [app_label [app_label ...]]
+780-
+781-Creates new migrations based on the changes detected to your models.
+782-Migrations, their relationship with apps and more are covered in depth in
+783-:doc:`the migrations documentation</topics/migrations>`.
+[0m
+[0m$ [0mcd /testbed && sed -n 820,835p docs/ref/django-admin.txt; grep -n "check" docs/ref/django-admin.txt | sed -n 1,3p; grep -n -B2 -A8 "django-admin-option:: --check" docs/ref/django-admin.txt | sed -n 1,12p
+Generate migration files without Django version and timestamp header.
+
+.. django-admin-option:: --check
+
+Makes ``makemigrations`` exit with a non-zero status when model changes without
+migrations are detected.
+
+.. django-admin-option:: --scriptable
+
+.. versionadded:: 4.1
+
+Diverts log output and input prompts to ``stderr``, writing only paths of
+generated migration files to ``stdout``.
+
+.. django-admin-option:: --update
+85:``check``
+88:.. django-admin:: check [app_label [app_label ...]]
+90:Uses the :doc:`system check framework </ref/checks>` to inspect the entire
+821-Generate migration files without Django version and timestamp header.
+822-
+823:.. django-admin-option:: --check
+824-
+825-Makes ``makemigrations`` exit with a non-zero status when model changes without
+826-migrations are detected.
+827-
+828-.. django-admin-option:: --scriptable
+829-
+830-.. versionadded:: 4.1
+831-
+--
+[0m
+[0m← [0mEdit docs/ref/django-admin.txt
+Index: /testbed/docs/ref/django-admin.txt
+===================================================================
+--- /testbed/docs/ref/django-admin.txt
++++ /testbed/docs/ref/django-admin.txt
+@@ -822,9 +822,9 @@
+ 
+ .. django-admin-option:: --check
+ 
+ Makes ``makemigrations`` exit with a non-zero status when model changes without
+-migrations are detected.
++migrations are detected. No migration files are written when this option is used.
+ 
+ .. django-admin-option:: --scriptable
+ 
+ .. versionadded:: 4.1
+
+[0m
+[0m$ [0mcd /testbed && python -m pytest tests/migrations/test_commands.py -q -k "check" 2>&1 | tail -15
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py migrations.test_commands 2>&1 | tail -30
+Found 140 test(s).
+Cloning test database for alias 'default'...
+Cloning test database for alias 'default'...
+Cloning test database for alias 'default'...
+Cloning test database for alias 'default'...
+Cloning test database for alias 'default'...
+Creating test database for alias 'other'...
+Cloning test database for alias 'other'...
+Cloning test database for alias 'other'...
+Cloning test database for alias 'other'...
+Cloning test database for alias 'other'...
+Cloning test database for alias 'other'...
+System check identified no issues (0 silenced).
+............................................................................................................................................
+----------------------------------------------------------------------
+Ran 140 tests in 7.213s
+
+OK
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+[0m

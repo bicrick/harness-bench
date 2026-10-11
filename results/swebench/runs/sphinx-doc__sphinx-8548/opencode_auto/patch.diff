@@ -1,0 +1,120 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..ce3cdbd95 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -33,8 +33,8 @@ from sphinx.locale import _, __
+ from sphinx.pycode import ModuleAnalyzer, PycodeError
+ from sphinx.util import inspect, logging
+ from sphinx.util.docstrings import extract_metadata, prepare_docstring
+-from sphinx.util.inspect import (evaluate_signature, getdoc, object_description, safe_getattr,
+-                                 stringify_signature)
++from sphinx.util.inspect import (evaluate_signature, getdoc, getmro, isclass,
++                                 object_description, safe_getattr, stringify_signature)
+ from sphinx.util.typing import get_type_hints, restify
+ from sphinx.util.typing import stringify as stringify_typehint
+ 
+@@ -584,6 +584,36 @@ class Documenter:
+         else:
+             return 'docstring of %s' % fullname
+ 
++    def _has_attr_doc(self, cls: Any, name: str) -> bool:
++        """Check whether *name* has an attribute docstring defined in *cls*."""
++        try:
++            qualname = safe_getattr(cls, '__qualname__')
++            modname = safe_getattr(cls, '__module__')
++            analyzer = ModuleAnalyzer.for_module(modname)
++            return (qualname, name) in analyzer.find_attr_docs()
++        except (AttributeError, PycodeError, ImportError):
++            return False
++
++    def get_inherited_attr_doc(self) -> Optional[List[str]]:
++        """Find the attribute docstring of the target in base classes, if any."""
++        if not self.objpath or self.parent is None or not isclass(self.parent):
++            return None
++
++        attrname = self.objpath[-1]
++        for cls in getmro(self.parent)[1:]:
++            try:
++                qualname = safe_getattr(cls, '__qualname__')
++                modname = safe_getattr(cls, '__module__')
++                analyzer = ModuleAnalyzer.for_module(modname)
++                attr_docs = analyzer.find_attr_docs()
++            except (AttributeError, PycodeError, ImportError):
++                continue
++
++            if (qualname, attrname) in attr_docs:
++                return list(attr_docs[(qualname, attrname)])
++
++        return None
++
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         """Add content from docstrings, attribute documentation and user."""
+@@ -606,6 +636,15 @@ class Documenter:
+ 
+                     for i, line in enumerate(self.process_doc(docstrings)):
+                         self.add_line(line, sourcename, i)
++                else:
++                    # the attribute may be inherited from a base class
++                    inherited = self.get_inherited_attr_doc()
++                    if inherited is not None:
++                        no_docstring = True
++                        docstrings = [list(inherited)]
++
++                        for i, line in enumerate(self.process_doc(docstrings)):
++                            self.add_line(line, sourcename, i)
+ 
+         # add content from docstrings
+         if not no_docstring:
+@@ -676,6 +715,9 @@ class Documenter:
+                         return False
+                     elif name in self.get_attr(cls, '__annotations__', {}):
+                         return False
++                    elif self._has_attr_doc(cls, name):
++                        # instance attribute documented in the class (cf. self.attr)
++                        return False
+ 
+             return False
+ 
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index d6e73d36a..baa2339fc 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -14,7 +14,7 @@ import warnings
+ from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
+ 
+ from sphinx.deprecation import RemovedInSphinx40Warning, deprecated_alias
+-from sphinx.pycode import ModuleAnalyzer
++from sphinx.pycode import ModuleAnalyzer, PycodeError
+ from sphinx.util import logging
+ from sphinx.util.inspect import (getannotations, getmro, getslots, isclass, isenumclass,
+                                  safe_getattr)
+@@ -315,6 +315,28 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable,
+                 members[name] = ClassAttribute(subject, name, INSTANCEATTR,
+                                                '\n'.join(docstring))
+ 
++    # attribute docstrings defined in base classes (cf. inherited attributes)
++    for cls in getmro(subject)[1:]:
++        try:
++            qualname = safe_getattr(cls, '__qualname__')
++            modname = safe_getattr(cls, '__module__')
++            base_analyzer = ModuleAnalyzer.for_module(modname)
++            base_analyzer.analyze()
++            attr_docs = base_analyzer.attr_docs
++        except (AttributeError, PycodeError, ImportError):
++            continue
++
++        for (ns, name), docstring in attr_docs.items():
++            if ns != qualname:
++                continue
++            if name not in members:
++                members[name] = ClassAttribute(cls, name, INSTANCEATTR,
++                                               '\n'.join(docstring))
++            elif members[name].class_ is None:
++                # inherited attribute found by dir(); attach its docstring
++                members[name] = ClassAttribute(cls, name, members[name].value,
++                                               '\n'.join(docstring))
++
+     return members
+ 
+ 

@@ -115,19 +115,21 @@ def claude_code(inst, url, logdir):
             f'--max-turns {MAX_TURNS} --output-format json')
     return _in_container(inst, "claude_code", argv, env, logdir)
 
-def opencode(inst, url, logdir):
+def opencode(inst, url, logdir, auto=False):
     cfg = {"$schema": "https://opencode.ai/config.json", "model": f"anthropic/{MODEL}", "small_model": f"anthropic/{MODEL}",
            "provider": {"anthropic": {"options": {"baseURL": url + "/v1"}}},
            "permission": {"edit": "allow", "bash": "allow", "webfetch": "deny"}, "autoupdate": False, "share": "disabled"}
+    if auto:  # every permission (incl. external_directory, doom_loop, webfetch) auto-approved: no unattended rejections
+        cfg["permission"] = "allow"
     env = {**_anthropic_env(url), "OPENCODE_CONFIG_CONTENT": json.dumps(cfg), "OPENCODE_DISABLE_AUTOUPDATE": "1"}
-    return _in_container(inst, "opencode", f'opencode run -m anthropic/{MODEL} "$(cat /tmp/sbr/prompt.txt)"', env, logdir)
+    return _in_container(inst, "opencode_auto" if auto else "opencode", f'opencode run -m anthropic/{MODEL} "$(cat /tmp/sbr/prompt.txt)"', env, logdir)
 
 CURSOR_CLI_CONFIG = json.dumps({"version": 1, "editor": {"vimMode": False},
                                 "permissions": {"allow": [], "deny": []}, "approvalMode": "unrestricted",
                                 "sandbox": {"mode": "disabled"}, "notifications": False, "hints": False,
                                 "attribution": {"attributeCommitsToAgent": False, "attributePRsToAgent": False}})
 
-def cursor(inst, url, logdir):
+def cursor(inst, url, logdir, model=None):
     """Cursor's agent goes to Cursor's servers, not our proxy: no per-call logs, no dollar cap.
     Its cost comes from Cursor's own usage numbers and is reported separately.
 
@@ -147,8 +149,8 @@ def cursor(inst, url, logdir):
              + "".join(f'&& git config --global --add url.file:///nonexistent/.insteadOf {shlex.quote(u)} '
                        for u in ["https://", "http://", "git@", "ssh://", "git://"]) + '&& ')
     argv = setup + (f'agent -p --force --trust --sandbox disabled --workspace /testbed '
-                    f'--model {shlex.quote(CURSOR_MODEL)} --output-format stream-json "$(cat /tmp/sbr/prompt.txt)"')
-    return _in_container(inst, "cursor", argv, env, logdir, env_file=True)
+                    f'--model {shlex.quote(model or CURSOR_MODEL)} --output-format stream-json "$(cat /tmp/sbr/prompt.txt)"')
+    return _in_container(inst, "cursor_nothink" if model else "cursor", argv, env, logdir, env_file=True)
 
 AIDER_SETTINGS = f"""- name: anthropic/{MODEL}
   edit_format: diff
@@ -232,6 +234,11 @@ HARNESSES = {
     "claude_code": claude_code,
     "cursor": cursor,
     "gold": gold,
+    # Variants that remove two confounds (2026-10-11): OpenCode's unattended permission rejections, and Cursor's
+    # default Haiku 5.5 id resolving to the thinking/High variant. Same code path otherwise.
+    "opencode_auto": lambda inst, url, logdir: opencode(inst, url, logdir, auto=True),
+    "cursor_nothink": lambda inst, url, logdir: cursor(inst, url, logdir, model=CURSOR_NOTHINK_MODEL),
 }
-PROXIED = set(HARNESSES) - {"cursor", "gold"}
-CHECKS = {"gold"}  # not run unless asked for by name
+CURSOR_NOTHINK_MODEL = os.environ.get("SBR_CURSOR_NOTHINK_MODEL", "claude-haiku-5-5-high")  # "Haiku 5.5 High No Thinking"
+PROXIED = set(HARNESSES) - {"cursor", "cursor_nothink", "gold"}
+CHECKS = {"gold", "opencode_auto", "cursor_nothink"}  # not run unless asked for by name

@@ -1,0 +1,83 @@
+diff --git a/pylint/pyreverse/inspector.py b/pylint/pyreverse/inspector.py
+index 8fa12202..1301bcd8 100644
+--- a/pylint/pyreverse/inspector.py
++++ b/pylint/pyreverse/inspector.py
+@@ -28,6 +28,69 @@ def _iface_hdlr(_):
+     return True
+ 
+ 
++def _infer_annotation(annotation):
++    """Return the inferred values of a type annotation node (PEP 484).
++
++    An empty set is returned if the annotation cannot be inferred.
++    """
++    try:
++        return {
++            inferred
++            for inferred in annotation.infer()
++            if inferred is not astroid.Uninferable
++        }
++    except astroid.InferenceError:
++        return set()
++
++
++def get_annotated_or_inferred_values(node):
++    """Return the values describing the type of an assignment target.
++
++    If the assigned value is annotated, either directly (``self.a: str = None``)
++    or through the function parameter it comes from
++    (``def __init__(self, a: str = None): self.a = a``), the annotation is used
++    instead of the inferred value, which would be ``None`` for such defaults.
++    Otherwise, the inferred values are returned.
++    """
++    parent = node.parent
++    annotation = None
++    # annotated assignment: `self.a: str = value`
++    if isinstance(parent, astroid.AnnAssign) and parent.target is node:
++        annotation = parent.annotation
++    # assignment from an annotated function parameter: `self.a = a`
++    elif isinstance(parent, astroid.Assign) and isinstance(parent.value, astroid.Name):
++        annotation = next(_annotated_arguments(parent.value), None)
++
++    if annotation is not None:
++        annotated = _infer_annotation(annotation)
++        if annotated:
++            return annotated
++    return set(node.infer())
++
++
++def _annotated_arguments(name_node):
++    """Yield the annotation of the function argument referenced by a Name node.
++
++    Nothing is yielded if the name does not refer to an annotated argument.
++    """
++    try:
++        scope, _ = name_node.lookup(name_node.name)
++    except astroid.AstroidError:
++        return
++    if not isinstance(scope, astroid.FunctionDef) or scope.args is None:
++        return
++    args = scope.args
++    pairs = [
++        (args.args or [], args.annotations or []),
++        (args.kwonlyargs or [], args.kwonlyargs_annotations or []),
++    ]
++    for arg_nodes, annotations in pairs:
++        for arg_node, annotation in zip(arg_nodes, annotations):
++            if arg_node.name == name_node.name and annotation is not None:
++                yield annotation
++                return
++
++
+ def _astroid_wrapper(func, modname):
+     print("parsing %s..." % modname)
+     try:
+@@ -230,7 +293,7 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+         handle instance_attrs_type
+         """
+         try:
+-            values = set(node.infer())
++            values = set(get_annotated_or_inferred_values(node))
+             current = set(parent.instance_attrs_type[node.attrname])
+             parent.instance_attrs_type[node.attrname] = list(current | values)
+         except astroid.InferenceError:

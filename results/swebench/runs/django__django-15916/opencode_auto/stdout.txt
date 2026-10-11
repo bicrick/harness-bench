@@ -1,0 +1,14 @@
+The root cause: the metaclass pops `formfield_callback` from the class attrs and falls back to a base's `Meta` only when the class itself doesn't define one, while `modelform_factory` always sets `formfield_callback=None` on the new class, which masks the callback stored on `Meta`. I'll read the relevant sections before changing them.
+I'll move the callback lookup into `ModelFormOptions`, which reads it from `Meta` (inherited through the normal attribute lookup), and drop the separate base-class loop and the `formfield_callback=None` override in `modelform_factory`.
+Now I'll verify the issue's scenario and run the model form test suites.
+The fix is in `django/forms/models.py`. `modelform_factory` now keeps a `formfield_callback` set in the form's `Meta`, so `FactoryForm` from the issue makes `name` and `active` required, matching `MyForm`.
+
+The cause was that `modelform_factory` always set `formfield_callback=None` on the new class, which overrode the callback stored on the base form's `Meta`. I made three changes:
+
+- **`ModelFormOptions`** now reads `formfield_callback` from `Meta`. Inherited `Meta` lookups still work, including the one `modelform_factory` creates.
+- **`ModelFormMetaclass.__new__`** takes the callback from those options. I removed the separate base-class loop and the class-attribute pop.
+- **`modelform_factory`** no longer passes `formfield_callback` as a class attribute, so the `Meta` value is not overridden.
+
+I checked the issue's example with a small script: the factory's `name` and `active` fields are required, and a factory without a callback still gives non-required fields. The `model_forms`, `model_formsets`, `model_formsets_regress`, `model_inheritance_regress`, `forms_tests` and `model_fields` test suites pass (1668 tests). I did not add or change any tests.
+
+One behaviour change to be aware of: a `formfield_callback` set as a plain class attribute on a `ModelForm` (rather than in `Meta`) is no longer picked up. Before, the metaclass popped it from the class attributes and used it, so this was a supported spelling. The issue's example sets it in both places, so it is not covered by the fix; it would need `Meta` to be honoured.

@@ -1,20 +1,23 @@
 """Behavioural comparison of the six harnesses on the SWE-bench run.
 
 Uses the final scored row per (task, harness) from results/swebench/summary_tokens.csv
-(psf__requests-2317 excluded) and the per-run artifacts in results/swebench/runs/.
+(pinned 50-task subset; psf__requests-2317 replaced by psf__requests-1142),
+plus the confound-free variants opencode_auto and cursor_nothink and the per-run artifacts in results/swebench/runs/.
 Writes results/swebench/why_harnesses.json and prints a summary.
 """
 import csv, glob, json, os, re, statistics as st, collections
 
 R = 'results/swebench'
 HS = ['cursor', 'swe_agent', 'claude_code', 'mini_swe_agent', 'opencode', 'aider']
+VARIANTS = ['opencode_auto', 'cursor_nothink']
+SUBSET = {i['instance_id'] for i in json.load(open(f'{R}/subset.json'))['instances']}
 TEST = re.compile(r'pytest|runtests\.py|\btox\b|-m unittest|manage\.py test|bin/test|unittest')
 REPRO = re.compile(r'(^|[;&|\s])python3?\s+(-c|-\s|/tmp/|\S*repro|\S*test_\S*\.py|<<|-\s*<<)|python3? - <<|python3? -c')
 EDITCMD = re.compile(r'sed -i|str_replace_editor (str_replace|create|insert)|cat >\s*/testbed|> /testbed/\S+\.py|\.write_text\(|open\([^)]*[\'"]w[\'"]|patch -p|git apply')
 
 rows = {}
 for r in csv.DictReader(open(f'{R}/summary_tokens.csv')):
-    if r['instance_id'] == 'psf__requests-2317' or r['harness'] == 'gold':
+    if r['instance_id'] not in SUBSET or r['harness'] == 'gold':
         continue
     rows[(r['instance_id'], r['harness'])] = r
 res = {}
@@ -33,7 +36,7 @@ def actions(iid, h):
     """Ordered list of (kind, text) for harnesses with transcripts."""
     out = []
     base = f'{R}/runs/{iid}/{h}'
-    if h == 'cursor':
+    if h.startswith('cursor'):
         p = f'{base}/stdout.txt'
         if not os.path.exists(p):
             return None, 0
@@ -97,7 +100,7 @@ def classify(kind, text):
 
 per = collections.defaultdict(list)
 for iid in TASKS:
-    for h in HS:
+    for h in HS + VARIANTS:
         r = rows.get((iid, h))
         if not r:
             continue
@@ -127,6 +130,9 @@ for iid in TASKS:
         if h == 'aider':
             s = open(f'{R}/runs/{iid}/{h}/stdout.txt', errors='ignore').read()
             rec['edit_fail'] = bool(re.search(r'SearchReplaceNoExactMatch|failed to match|did not match|Only \d+ reflections', s))
+        if h.startswith('opencode'):
+            e = f'{R}/runs/{iid}/{h}/stderr.txt'
+            rec['perm_reject'] = os.path.exists(e) and 'rejected permission' in open(e, errors='ignore').read()
         per[h].append(rec)
 
 summ = {}
@@ -149,7 +155,9 @@ for h, rs in per.items():
                  solve_if_checked=pct([r['solved'] for r in t if r['checked_after_edit']]),
                  solve_if_not_checked=pct([r['solved'] for r in t if not r['checked_after_edit']]),
                  n_checked=sum(r['checked_after_edit'] for r in t))
-    if h == 'cursor':
+    if h.startswith('opencode'):
+        s['perm_reject_runs'] = sum(r.get('perm_reject', False) for r in rs)
+    if h.startswith('cursor'):
         s['think_chars_med'] = med([r['think'] for r in rs])
         s['think_runs'] = sum(r['think'] > 0 for r in rs)
     if h == 'claude_code':
@@ -160,7 +168,7 @@ for h, rs in per.items():
         s['edit_fail_solved'] = sum(r.get('edit_fail', False) and r['solved'] for r in rs)
     summ[h] = s
 
-solved = {h: {r['iid'] for r in rs if r['solved']} for h, rs in per.items()}
+solved = {h: {r['iid'] for r in rs if r['solved']} for h, rs in per.items() if h in HS}  # overlap among the original six
 only = {h: sorted(solved[h] - set().union(*[solved[o] for o in solved if o != h])) for h in solved}
 missed_by_one = {h: sorted(set.intersection(*[solved[o] for o in solved if o != h]) - solved[h]) for h in solved}
 out = dict(summary=summ, only_solved_by=only, missed_only_by=missed_by_one,

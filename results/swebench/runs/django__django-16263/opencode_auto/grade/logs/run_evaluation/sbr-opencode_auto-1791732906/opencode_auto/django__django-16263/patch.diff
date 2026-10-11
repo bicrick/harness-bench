@@ -1,0 +1,110 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..44e28baacb 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -550,9 +550,105 @@ class Query(BaseExpression):
+         Perform a COUNT() query using the current filter constraints.
+         """
+         obj = self.clone()
++        obj._strip_unused_annotations_for_count()
+         obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+         return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++    def _strip_unused_annotations_for_count(self):
++        """
++        Remove annotations that cannot affect the result of a COUNT(*) query.
++
++        An annotation is needed if it is referenced by the WHERE clause or by
++        another needed annotation. Aggregate annotations are only removed when
++        doing so cannot change the number of rows counted, i.e. when there is
++        no explicit GROUP BY and no join other than the base table is needed
++        (joins could otherwise multiply rows that the GROUP BY collapses).
++        """
++        if (
++            not self.annotations
++            or isinstance(self.group_by, tuple)
++            or self.is_sliced
++            or self.distinct
++            or self.combinator
++        ):
++            return
++
++        annotations = self.annotations
++        ann_ids = {id(ann): alias for alias, ann in annotations.items()}
++
++        def referenced_aliases(expr):
++            """Yield annotation aliases directly referenced by expr."""
++            stack = [expr]
++            while stack:
++                node = stack.pop()
++                if isinstance(node, Ref):
++                    if node.refs in annotations:
++                        yield node.refs
++                if id(node) in ann_ids:
++                    yield ann_ids[id(node)]
++                    continue
++                stack.extend(node.get_source_expressions())
++
++        # Fixed point: annotations needed by the WHERE clause, then by the
++        # annotations already known to be needed.
++        needed = set()
++        pending = list(referenced_aliases(self.where))
++        while pending:
++            alias = pending.pop()
++            if alias in needed:
++                continue
++            needed.add(alias)
++            pending.extend(referenced_aliases(annotations[alias]))
++
++        kept_annotations = [annotations[alias] for alias in needed]
++        removable = [alias for alias in annotations if alias not in needed]
++        if not removable:
++            return
++        strip_aggregates = (
++            self.group_by in (None, True)
++            and not self.where.contains_aggregate
++            and not any(ann.contains_aggregate for ann in kept_annotations)
++        )
++        if strip_aggregates:
++            # Only the base table may be joined once the aggregates are gone.
++            base_alias = self.base_table
++            needed_cols = set(
++                self._gen_col_aliases([self.where, *kept_annotations])
++            )
++            strip_aggregates = needed_cols <= {base_alias}
++        removed = []
++        for alias in removable:
++            annotation = annotations[alias]
++            if not annotation.contains_aggregate or strip_aggregates:
++                removed.append(alias)
++        if not removed:
++            return
++
++        self.annotations = {
++            alias: ann for alias, ann in annotations.items() if alias not in removed
++        }
++        if self.annotation_select_mask is not None:
++            self.annotation_select_mask = {
++                alias
++                for alias in self.annotation_select_mask
++                if alias not in removed
++            }
++        self._annotation_select_cache = None
++        if self.group_by is True and not any(
++            ann.contains_aggregate for ann in self.annotations.values()
++        ):
++            self.group_by = None
++
++        # Release joins only referenced by the removed annotations.
++        required = set()
++        for alias in self._gen_col_aliases([self.where, *self.annotations.values()]):
++            while alias is not None and alias not in required:
++                required.add(alias)
++                alias = self.alias_map[alias].parent_alias
++        for alias in self.alias_map:
++            if alias not in required and self.alias_refcount.get(alias):
++                self.alias_refcount[alias] = 0
++
+     def has_filters(self):
+         return self.where
+ 

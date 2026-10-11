@@ -1,0 +1,276 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && git log --oneline -1 && cat django/views/generic/base.py | head -80 && grep -n "SimpleLazyObject\|lazy" django/views/generic/*.py django/views/decorators/*.py | head -30
+8b27eb2da1 SWE-bench
+import logging
+import warnings
+from functools import update_wrapper
+
+from django.core.exceptions import ImproperlyConfigured
+from django.http import (
+    HttpResponse, HttpResponseGone, HttpResponseNotAllowed,
+    HttpResponsePermanentRedirect, HttpResponseRedirect,
+)
+from django.template.response import TemplateResponse
+from django.urls import reverse
+from django.utils.decorators import classonlymethod
+from django.utils.deprecation import RemovedInDjango40Warning
+from django.utils.functional import SimpleLazyObject
+
+logger = logging.getLogger('django.request')
+
+
+class ContextMixin:
+    """
+    A default context mixin that passes the keyword arguments received by
+    get_context_data() as the template context.
+    """
+    extra_context = None
+
+    def get_context_data(self, **kwargs):
+        kwargs.setdefault('view', self)
+        if self.extra_context is not None:
+            kwargs.update(self.extra_context)
+        return kwargs
+
+
+class View:
+    """
+    Intentionally simple parent class for all views. Only implements
+    dispatch-by-method and simple sanity checking.
+    """
+
+    http_method_names = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace']
+
+    def __init__(self, **kwargs):
+        """
+        Constructor. Called in the URLconf; can contain helpful extra
+        keyword arguments, and other things.
+        """
+        # Go through keyword arguments, and either save their values to our
+        # instance, or raise an error.
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    @classonlymethod
+    def as_view(cls, **initkwargs):
+        """Main entry point for a request-response process."""
+        for key in initkwargs:
+            if key in cls.http_method_names:
+                raise TypeError(
+                    'The method name %s is not accepted as a keyword argument '
+                    'to %s().' % (key, cls.__name__)
+                )
+            if not hasattr(cls, key):
+                raise TypeError("%s() received an invalid keyword %r. as_view "
+                                "only accepts arguments that are already "
+                                "attributes of the class." % (cls.__name__, key))
+
+        def view(request, *args, **kwargs):
+            self = cls(**initkwargs)
+            self.setup(request, *args, **kwargs)
+            if not hasattr(self, 'request'):
+                raise AttributeError(
+                    "%s instance has no 'request' attribute. Did you override "
+                    "setup() and forget to call super()?" % cls.__name__
+                )
+            return self.dispatch(request, *args, **kwargs)
+        view.view_class = cls
+        view.view_initkwargs = initkwargs
+
+        # take name and docstring from class
+        update_wrapper(view, cls, updated=())
+
+        # and possible attributes set by decorators
+django/views/generic/base.py:14:from django.utils.functional import SimpleLazyObject
+django/views/generic/base.py:172:        @SimpleLazyObject
+django/views/generic/edit.py:53:        return str(self.success_url)  # success_url may be lazy
+[0m
+[0m$ [0mcd /testbed && sed -n 150,200p django/views/generic/base.py; git log -3 --format=%s -- django/views/generic/base.py
+raise ImproperlyConfigured(
+                "TemplateResponseMixin requires either a definition of "
+                "'template_name' or an implementation of 'get_template_names()'")
+        else:
+            return [self.template_name]
+
+
+class TemplateView(TemplateResponseMixin, ContextMixin, View):
+    """Render a template."""
+    def get(self, request, *args, **kwargs):
+        # RemovedInDjango40Warning: when the deprecation ends, replace with:
+        #   context = self.get_context_data()
+        context_kwargs = _wrap_url_kwargs_with_deprecation_warning(kwargs)
+        context = self.get_context_data(**context_kwargs)
+        return self.render_to_response(context)
+
+
+# RemovedInDjango40Warning
+def _wrap_url_kwargs_with_deprecation_warning(url_kwargs):
+    context_kwargs = {}
+    for key, value in url_kwargs.items():
+        # Bind into function closure.
+        @SimpleLazyObject
+        def access_value(key=key, value=value):
+            warnings.warn(
+                'TemplateView passing URL kwargs to the context is '
+                'deprecated. Reference %s in your template through '
+                'view.kwargs instead.' % key,
+                RemovedInDjango40Warning, stacklevel=2,
+            )
+            return value
+        context_kwargs[key] = access_value
+    return context_kwargs
+
+
+class RedirectView(View):
+    """Provide a redirect on any GET request."""
+    permanent = False
+    url = None
+    pattern_name = None
+    query_string = False
+
+    def get_redirect_url(self, *args, **kwargs):
+        """
+        Return the URL redirect to. Keyword arguments from the URL pattern
+        match generating the redirect request are provided as kwargs to this
+        method.
+        """
+        if self.url:
+            url = self.url % kwargs
+        elif self.pattern_name:
+Fixed #19878 -- Deprecated TemplateView passing URL kwargs into context.
+Removed "Don't do that" from docs and error messages.
+Refs #20456 -- Moved initialization of HEAD method based on GET to the View.setup() for generic views.
+[0m
+[0m$ [0mcd /testbed && grep -rn "URL kwargs\|kwargs to the context\|RemovedInDjango40Warning" tests/generic_views/ | head; grep -n -B3 -A25 "def test_template_params_warning\|deprecat" tests/generic_views/test_base.py | head -80
+tests/generic_views/test_base.py:10:from django.utils.deprecation import RemovedInDjango40Warning
+tests/generic_views/test_base.py:575:    @ignore_warnings(category=RemovedInDjango40Warning)
+tests/generic_views/test_base.py:583:    @ignore_warnings(category=RemovedInDjango40Warning)
+tests/generic_views/test_base.py:597:            'TemplateView passing URL kwargs to the context is deprecated. '
+tests/generic_views/test_base.py:600:        with self.assertRaisesMessage(RemovedInDjango40Warning, msg % 'foo1'):
+tests/generic_views/test_base.py:602:        with self.assertRaisesMessage(RemovedInDjango40Warning, msg % 'foo2'):
+7-)
+8-from django.test.utils import require_jinja2
+9-from django.urls import resolve
+10:from django.utils.deprecation import RemovedInDjango40Warning
+11-from django.views.generic import RedirectView, TemplateView, View
+12-
+13-from . import views
+14-
+15-
+16-class SimpleView(View):
+17-    """
+18-    A simple view with a docstring.
+19-    """
+20-    def get(self, request):
+21-        return HttpResponse('This is a simple view')
+22-
+23-
+24-class SimplePostView(SimpleView):
+25-    post = SimpleView.get
+26-
+27-
+28-class PostOnlyView(View):
+29-    def post(self, request):
+30-        return HttpResponse('This view only accepts POST')
+31-
+32-
+33-class CustomizableView(SimpleView):
+34-    parameter = {}
+35-
+--
+590-        self.assertEqual(response.context['key'], 'value')
+591-        self.assertIsInstance(response.context['view'], View)
+592-
+593:    def test_template_params_warning(self):
+594-        response = self.client.get('/template/custom/bar1/bar2/')
+595-        self.assertEqual(response.status_code, 200)
+596-        msg = (
+597:            'TemplateView passing URL kwargs to the context is deprecated. '
+598-            'Reference %s in your template through view.kwargs instead.'
+599-        )
+600-        with self.assertRaisesMessage(RemovedInDjango40Warning, msg % 'foo1'):
+601-            str(response.context['foo1'])
+602-        with self.assertRaisesMessage(RemovedInDjango40Warning, msg % 'foo2'):
+603-            str(response.context['foo2'])
+604-        self.assertEqual(response.context['key'], 'value')
+605-        self.assertIsInstance(response.context['view'], View)
+[0m
+[0m← [0mEdit django/views/generic/base.py
+Index: /testbed/django/views/generic/base.py
+===================================================================
+--- /testbed/django/views/generic/base.py
++++ /testbed/django/views/generic/base.py
+@@ -156,19 +156,27 @@
+ 
+ class TemplateView(TemplateResponseMixin, ContextMixin, View):
+     """Render a template."""
+     def get(self, request, *args, **kwargs):
+-        # RemovedInDjango40Warning: when the deprecation ends, replace with:
+-        #   context = self.get_context_data()
+-        context_kwargs = _wrap_url_kwargs_with_deprecation_warning(kwargs)
+-        context = self.get_context_data(**context_kwargs)
++        # Pass the actual URL kwargs to get_context_data() so that user code
++        # receives real values rather than lazy proxies.
++        # RemovedInDjango40Warning: when the deprecation ends, remove the
++        # wrapping of URL kwargs present in the returned context below.
++        context = self.get_context_data(**kwargs)
++        _wrap_url_kwargs_with_deprecation_warning(context, kwargs)
+         return self.render_to_response(context)
+ 
+ 
+ # RemovedInDjango40Warning
+-def _wrap_url_kwargs_with_deprecation_warning(url_kwargs):
+-    context_kwargs = {}
++def _wrap_url_kwargs_with_deprecation_warning(context, url_kwargs):
++    """
++    Replace URL kwargs that were passed unchanged into the context with lazy
++    objects that emit a deprecation warning when accessed.
++    """
+     for key, value in url_kwargs.items():
++        if key not in context or context[key] is not value:
++            continue
++
+         # Bind into function closure.
+         @SimpleLazyObject
+         def access_value(key=key, value=value):
+             warnings.warn(
+@@ -177,10 +185,10 @@
+                 'view.kwargs instead.' % key,
+                 RemovedInDjango40Warning, stacklevel=2,
+             )
+             return value
+-        context_kwargs[key] = access_value
+-    return context_kwargs
++        context[key] = access_value
++    return context
+ 
+ 
+ class RedirectView(View):
+     """Provide a redirect on any GET request."""
+
+[0m
+[0m$ [0mcd /testbed && cat > /tmp/t.py <<'EOF'
+from django.views.generic import TemplateView
+from django.test import RequestFactory
+class V(TemplateView):
+    template_name = "x.html"
+    def get_context_data(self, **kwargs):
+        print(type(kwargs["slug"]))
+        return {"slug": kwargs["slug"]}
+EOF
+python -m pytest tests/generic_views -q 2>&1 | tail -3
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py generic_views 2>&1 | tail -5
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py generic_views 2>&1 | grep -E "^(Ran|OK|FAILED|ERROR|FAIL)"
+Ran 214 tests in 3.746s
+OK
+[0m

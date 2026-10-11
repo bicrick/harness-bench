@@ -1,0 +1,26 @@
+The stacking itself is a plain reduce over `row_join`/`col_join`, so the bug is likely in those. Let me look at their implementations.
+Let me reproduce it and see which step drops columns.
+My direct reproduction gives `(0, 6)`, which is the 1.0 behavior, so the failure is not in this exact path. I'll check the git state and test the variants from the issue.
+The issue's exact inputs produce the 1.0 results here, so the bug may be in a different case. I'll brute-force small empty shapes and compare against the expected column/row sums.
+The failures are all in `MutableSparseMatrix`, mostly when a zero-size block appears in the sequence. Let me look at the sparse row/col join code.
+The root cause is the `if not self: return type(self)(other)` shortcut in sparse `row_join` and `col_join`. An empty-but-shaped matrix like 0x1 is falsy, so the shortcut returns `other` and discards `self`'s column (or row) count. The general code below already handles empty matrices correctly, so I'll remove the shortcut from both methods.
+The fix breaks one existing test. Let me look at what it expects.
+The sparse `row_join`/`col_join` override the base-class methods, so the base-class guard for empty matrices (`common.py` lines 243 and 479) never runs for sparse matrices. The old shortcut was covering for that. I'll move the same guard into the sparse overrides, replacing the shortcut.
+The sparse test passes now, but the brute-force check reports 42 failures again. Let me see which cases fail.
+I think I swapped the guards: the `if not A.cols == B.cols` check belongs to `col_join`, not `row_join`. Let me confirm which method each block is in.
+The guards ended up in the wrong methods. I'll swap them so each method has its own guard and shape check.
+All 0 bad shapes now, and the sparse test file passes. I'll confirm the full matrices test run is clean and that the issue's exact example returns `(0, 6)`.
+The run reports 13 exceptions. I need to confirm these predate my change, so I'll compare against a stashed baseline.
+The sparse matrix `hstack`/`vstack` bug is fixed in `sympy/matrices/sparse.py`. The issue's example now returns `(0, 6)`, matching sympy 1.0.
+
+**Cause:** the sparse `row_join` and `col_join` started with `if not self: return type(self)(other)`. An empty matrix like `0x1` is falsy, so the shortcut returned `other` and dropped `self`'s column count. Every empty block after the first was lost, which gave `(0, 3)` instead of `(0, 6)`.
+
+**Fix:** I removed that shortcut and added the same empty-matrix guard the base class already uses (`common.py`, referencing issue #10770) to each sparse override:
+- `row_join`: if `self.cols == 0` and the row counts differ, reshape `self` to `(other.rows, 0)` first.
+- `col_join`: if `self.rows == 0` and the column counts differ, reshape `self` to `(0, other.cols)` first.
+
+**Verification:**
+- Brute-forced `hstack`/`vstack` over `Matrix`, `SparseMatrix` and `ImmutableMatrix` for all combinations of small empty shapes. Every result now has the expected shape.
+- `sympy/matrices` test suite: 380 passed, with the same 13 exceptions as the unmodified baseline, so none are caused by this change.
+
+I did not add or change any tests.

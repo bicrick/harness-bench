@@ -1,0 +1,17 @@
+The docstring already mentions `fill_value`, but the parameter is missing from the signature. I'll check how `SimpleImputer` declares it so the two stay consistent.
+`SimpleImputer` accepts any `fill_value` (no validation). One complication: `np.nan` as `fill_value` makes every `statistics_` entry NaN, and `IterativeImputer` uses NaN statistics to detect empty features. I need to look at that logic before adding the parameter.
+Before deciding how to handle NaN statistics, I'll check how `SimpleImputer` handles empty columns with `constant` strategy today.
+`SimpleImputer` with `strategy="constant"` never drops columns, so `IterativeImputer` should treat every column as valid in that case. That matches current behavior for non-NaN fill values and avoids the NaN problem. I'll make the edits now.
+The version is 1.3.dev0, so I'll fix the `versionadded` tag and then test the change.
+The `DecisionTreeRegressor` error is expected: with `fill_value=np.nan` the initial NaNs stay in the features, so the estimator has to accept missing values. I'll verify with an estimator that handles NaN natively, then run the test suite.
+The full impute suite is slow, so I'll run the iterative imputer tests in the background and check the result.
+`IterativeImputer` now accepts a `fill_value` parameter, which is used when `initial_strategy="constant"`. `np.nan` is accepted as well. The 57 iterative-imputer tests pass.
+
+The change is in `sklearn/impute/_iterative.py`:
+
+- **New parameter:** `fill_value=None` is added to the signature, with a docstring entry and no validation (same as `SimpleImputer`). It is passed through to the initial `SimpleImputer`.
+- **NaN handling:** The code used to detect empty features from the initial imputer's statistics. With `fill_value=np.nan` every statistic is NaN, so all features would have been dropped. For the `constant` strategy, all features are now treated as valid. `SimpleImputer` never drops columns in that case, so this matches existing behavior for non-NaN fill values.
+
+Usage check: `fill_value=np.nan` with `HistGradientBoostingRegressor` runs correctly. With `DecisionTreeRegressor` it raises an error, because the estimator is trained on features that still contain NaN. That follows from the parameter, not from this fix. Tree estimators need a non-NaN fill value unless they handle missing values natively.
+
+I did not add or change any tests.

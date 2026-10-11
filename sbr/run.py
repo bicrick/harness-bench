@@ -115,7 +115,7 @@ def _done():
         if excluded and not r.get("error"):
             good.add(k); fresh.add(k); continue
         # infra failure: a proxied harness that never reached the model (upstream 5xx / CLI crash) gets one retry
-        if r["harness"] != "cursor" and not r.get("calls") and r.get("resolved") is False:
+        if not r["harness"].startswith("cursor") and not r.get("calls") and r.get("resolved") is False:
             zero[k] = zero.get(k, 0) + 1
             if zero[k] < 2:
                 good.discard(k); fresh.discard(k); continue
@@ -208,7 +208,7 @@ def run_one(inst, harness):
         row["resolved"] = False
     elif not row.get("error") and harness in PROXIED and not calls:
         row["error"] = f"no model calls reached the proxy (exit {row.get('notes', {}).get('exit_code')}); see {logdir}/stderr.txt"
-    if not row.get("error") and harness == "cursor" and row.get("notes", {}).get("exit_code") not in (0, None) and not row.get("patch_lines"):
+    if not row.get("error") and harness.startswith("cursor") and row.get("notes", {}).get("exit_code") not in (0, None) and not row.get("patch_lines"):
         row["error"] = f"cursor exited {row['notes']['exit_code']} with no patch; see {logdir}/stderr.txt"
     with open(RESULTS, "a") as f:
         f.write(json.dumps(row) + "\n")
