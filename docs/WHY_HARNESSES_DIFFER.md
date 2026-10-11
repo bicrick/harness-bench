@@ -1,7 +1,9 @@
 # Why the harnesses differ (SWE-bench, Haiku 5.5)
 
-Behavioural comparison of the six harnesses on the 49 scored SWE-bench Verified tasks
-(psf__requests-2317 excluded). Script: `scripts/why_harnesses_differ.py`, output:
+Behavioural comparison of the six harnesses on the 50-task SWE-bench Verified subset
+(psf__requests-2317 replaced by psf__requests-1142), plus two confound-free variants:
+`opencode_auto` (all permissions auto-approved) and `cursor_nothink` (Cursor's "Haiku 5.5 High
+No Thinking" model id). Script: `scripts/why_harnesses_differ.py`, output:
 `results/swebench/why_harnesses.json`. Final scored row per (task, harness) from
 `summary_tokens.csv`; per-run artifacts from `results/swebench/runs/<iid>/<harness>/`.
 
@@ -27,25 +29,27 @@ file writes; test = pytest / runtests.py / unittest; run = ad-hoc python (repro 
 
 | harness | fixed | wrong fix | no fix submitted |
 |---|---|---|---|
-| Cursor | 38 | 11 | **0** |
-| SWE-agent | 36 | 12 | 1 |
-| Claude Code | 35 | 12 | 2 |
-| mini-swe-agent | 34 | 13 | 2 |
-| OpenCode | 31 | 13 | 5 |
-| Aider | 30 | 13 | **6** |
+| Cursor | 39 | 11 | **0** |
+| SWE-agent | 37 | 12 | 1 |
+| Claude Code | 36 | 12 | 2 |
+| mini-swe-agent | 35 | 13 | 2 |
+| OpenCode | 32 | 13 | 5 |
+| Aider | 31 | 13 | **6** |
+| *OpenCode, auto-approve* | 36 | 14 | **0** |
+| *Cursor, no thinking* | 35 | 15 | 0 |
 
-Every harness submits an incorrect patch on 11-13 tasks. Most of the 8-point gap between
-Cursor and Aider is runs that end with an empty patch.
+Every harness submits an incorrect patch on 11-15 tasks. In the original run, most of the
+gap between the top and bottom was runs that end with an empty patch.
 
 Why runs ended empty:
 - **OpenCode:** 7 runs (all failed) ended on "The user rejected permission to use this
-  specific tool call": OpenCode's default permission policy asks before some commands
-  (e.g. writing repro files outside the project), and headless there is no one to say yes.
-  This is a configuration default, not the model; with a permissive config OpenCode would
-  likely score higher. We ran every harness on defaults.
-- **Aider:** median 2 model calls per task. Aider is built for a human in the loop: it
-  proposes edits and asks you to run things. In 22 of 49 runs its last message asks the
-  user to run tests or confirm an edit. Headless, nobody answers, so the run ends.
+  specific tool call": OpenCode's default policy asks before some commands, and headless
+  nobody says yes. **Confirmed by the rerun:** with every permission auto-approved,
+  permission stops drop 7 -> 0, empty patches 5 -> 0, and OpenCode goes 32 -> 36 solved
+  (+5 tasks, -1). OpenCode's original deficit was an unattended-configuration artifact.
+- **Aider:** median 2 model calls per task. Aider is built for a human in the loop; in 22
+  runs (counted on the original 49) its last message asks the user to run tests or confirm
+  an edit. Headless, nobody answers. This is how Aider behaves unattended; no rerun changes it.
 - Claude Code / mini-swe-agent: the 2 empties are long runs that never converged
   (e.g. django-10554, 25 and 44 calls).
 
@@ -55,42 +59,44 @@ Share of runs that executed code (tests or a repro script) after their first edi
 
 | harness | ran code after editing | ran the test suite after editing | wrote a repro before editing | median actions | actions before first edit |
 |---|---|---|---|---|---|
-| SWE-agent | 98% | 98% | 76% | 13 | 4 |
+| SWE-agent | 98% | 98% | 76% | 12.5 | 4 |
 | Cursor | 82% | 82% | 24% | 6 | 2 |
-| mini-swe-agent | 63% | 55% | 12% | 6 | 2 |
+| Cursor, no thinking | 80% | 68% | 12% | 5 | 2 |
+| mini-swe-agent | 64% | 56% | 12% | 6.5 | 2 |
 
-Across these three, the harness that verifies more often scores higher, but within each
-harness verified runs do *not* solve more often (Cursor 75% vs 89% unverified; SWE-agent
-73% vs 1/1), because agents test more on harder tasks. So this is a correlation across
-three harnesses, not a causal effect. Aider cannot run code in our headless setup at all
-(see Finding 1).
+Still a correlation, not a cause: within each harness, verified runs do *not* solve more
+often (Cursor 76% verified vs 89% unverified; SWE-agent 73% vs 1/1), because agents test
+more on harder tasks. Without thinking, Cursor still checks its work about as often, but
+writes fewer repro scripts up front.
 
-## Finding 3: Cursor's edge is small, and partly not the harness
+## Finding 3: Cursor's edge was mostly the thinking, not the harness
 
-Cursor solved 3 tasks no other harness solved (django-10554, django-14376, sphinx-8638)
-and missed none that all others solved.
+In the original run Cursor solved 3 tasks no other harness solved (django-10554,
+django-14376, sphinx-8638). **Without thinking it solved none of the three**, and dropped
+from 39 to 35 (78% -> 70%): -6 tasks (django-10554, django-13315, django-14376,
+django-15916, sphinx-8548, sphinx-8638), +2 (astropy-14369, matplotlib-25960). Thinking
+was confirmed absent in all 50 no-thinking logs (vs 49 of 50 originals).
 
-- **django-14376** is the clearest case. All five other harnesses wrote the same 16-line,
-  one-file fix in `mysql/base.py`. Cursor's first command grepped the whole MySQL backend
-  for the deprecated keyword, found the second use in `mysql/client.py`, fixed both
-  (39 lines, 2 files) and ran the dbshell tests. Looking one step wider won the task.
-- **sphinx-8638:** Cursor wrote a 13-line patch in 6 actions; SWE-agent, Claude Code and
-  mini wrote 35-48 line patches over 12-40 steps and failed; OpenCode and Aider stopped
-  empty (permission prompt / hand-back).
-- **django-10554:** Cursor ran for 29 min (the 19-min post-turn hang is in this window)
-  and changed 3 files; every other harness failed, 4 of 5 with no patch.
+- **django-14376** was the showcase: all five other harnesses fixed only `mysql/base.py`
+  and failed; thinking Cursor grepped the whole MySQL backend and also fixed
+  `mysql/client.py`. No-thinking Cursor wrote the same one-file fix as everyone else and
+  failed. The "looks wider before editing" behaviour came from the reasoning, not from
+  Cursor's tooling.
+- Remaining confound: Cursor still runs with its own built-in skills loaded.
 
-Confounds, stated plainly:
-- **Thinking.** Cursor's init line reports the model as "Claude Haiku 5.5 300K High", and
-  48 of 49 runs contain thinking events (median ~620 characters per run). The other
-  harnesses ran Haiku with little or no thinking (Claude Code median 804 thinking tokens,
-  others none). Some of Cursor's edge may be reasoning effort, not harness design.
-- **Built-in skills.** Cursor ran with its own built-in skills loaded (account plugins off).
-- **Small n.** With 49 tasks the 95% intervals overlap for every pair; 3 unique solves is
-  thin evidence.
+## What changed with the confounds removed
 
-## Cost (unchanged)
+On the same footing, the top five sit within 4 points: SWE-agent 74%, Claude Code 72%,
+OpenCode-auto 72%, mini-swe-agent 70%, Cursor-no-thinking 70%; Aider 62%. All 95% CIs
+overlap at n=50. What survives:
+- Unattended harnesses lose most by **ending without a fix** (Aider hand-backs; OpenCode
+  before auto-approve). Configure for headless use and that gap closes.
+- **Cost** is the robust difference (below).
+What does not survive: "Cursor wins because it looks wider" -- that was thinking.
 
-Aider's cost per fix (~8.5c vs 0.55c for OpenCode) comes from re-sending the repo map and
-whole files: 4% of its input tokens came from cache vs 90-93% for the others
-(cache_read / (input + cache_read + cache_write)).
+## Cost
+
+Aider's cost per fix (~8.3c vs 0.54c for OpenCode, 0.71c for OpenCode-auto) comes from
+re-sending the repo map and whole files: 4% of its input tokens came from cache vs 90-94%
+for the others (cache_read / (input + cache_read + cache_write)). Cursor without thinking
+is slightly cheaper per fix than with ($0.0093 vs $0.0109, estimated from its own token logs).
