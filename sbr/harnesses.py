@@ -10,6 +10,7 @@ Every harness gets the same model, the same per-task dollar cap (enforced by the
 limit where the harness has one, and the same wall clock. Settings are otherwise each harness's defaults.
 Cursor is the exception on cost: it talks to Cursor's servers, so the proxy can't see or cap it.
 """
+import tempfile
 import json, os, shlex, subprocess, uuid
 from pathlib import Path
 from .config import MODEL, TOOLS, MAX_TURNS, WALL_S, DATASET, image_for
@@ -68,7 +69,7 @@ def _patch(cname):
     r = _sh(DOCKER + ["exec", cname, "bash", "-lc", f"cd /testbed && git add -A && git diff --cached --binary HEAD -- . {excl}"])
     return r.stdout
 
-def _in_container(inst, name, argv, env, logdir):
+def _in_container(inst, name, argv, env, logdir, env_file=False):
     cname = _container(inst, name)
     base_env = {**_net_env(), "HOME": "/tmp/sbr/home", "TERM": "dumb", "NO_COLOR": "1", "CI": "1",
                 "PATH": f"{TESTBED_PATH}:{TOOLS}/node/bin:{TOOLS}/npm/bin:{TOOLS}/cursor/bin:/usr/local/bin:/usr/bin:/bin"}
@@ -76,7 +77,14 @@ def _in_container(inst, name, argv, env, logdir):
     try:
         (logdir / "prompt.txt").write_text(prompt(inst))
         _sh(DOCKER + ["cp", str(logdir / "prompt.txt"), f"{cname}:/tmp/sbr/prompt.txt"])
-        cmd = DOCKER + ["exec", "-w", "/testbed"] + _env_args({**base_env, **env}) + [cname, "bash", "-c", argv]
+        if env_file:  # keep secrets out of `ps`: docker reads them from a 0600 temp file
+            fd, envpath = tempfile.mkstemp(prefix="sbr-env-")
+            with os.fdopen(fd, "w") as f:
+                f.write("".join(f"{k}={v}\n" for k, v in {**base_env, **env}.items()))
+            env_args = ["--env-file", envpath]
+        else:
+            envpath, env_args = None, _env_args({**base_env, **env})
+        cmd = DOCKER + ["exec", "-w", "/testbed"] + env_args + [cname, "bash", "-c", argv]
         try:
             r = _sh(cmd, timeout=WALL_S)
             out, err, rc = r.stdout, r.stderr, r.returncode
@@ -84,6 +92,8 @@ def _in_container(inst, name, argv, env, logdir):
             out = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
             err, rc = "WALL CLOCK TIMEOUT", -9
             notes["timeout"] = True
+        if envpath:
+            os.unlink(envpath)
         (logdir / "stdout.txt").write_text(out[-200000:])
         (logdir / "stderr.txt").write_text(err[-50000:])
         notes["exit_code"] = rc
@@ -109,12 +119,33 @@ def opencode(inst, url, logdir):
     env = {**_anthropic_env(url), "OPENCODE_CONFIG_CONTENT": json.dumps(cfg), "OPENCODE_DISABLE_AUTOUPDATE": "1"}
     return _in_container(inst, "opencode", f'opencode run -m anthropic/{MODEL} "$(cat /tmp/sbr/prompt.txt)"', env, logdir)
 
+CURSOR_CLI_CONFIG = json.dumps({"version": 1, "editor": {"vimMode": False},
+                                "permissions": {"allow": [], "deny": []}, "approvalMode": "unrestricted",
+                                "sandbox": {"mode": "disabled"}, "notifications": False, "hints": False,
+                                "attribution": {"attributeCommitsToAgent": False, "attributePRsToAgent": False}})
+
 def cursor(inst, url, logdir):
     """Cursor's agent goes to Cursor's servers, not our proxy: no per-call logs, no dollar cap.
-    Its cost comes from Cursor's own usage numbers and is reported separately."""
-    env = {"CURSOR_API_KEY": os.environ["CURSOR_API_KEY"]}
-    argv = f'agent -p --force --model {shlex.quote(CURSOR_MODEL)} --output-format json "$(cat /tmp/sbr/prompt.txt)"'
-    return _in_container(inst, "cursor", argv, env, logdir)
+    Its cost comes from Cursor's own usage numbers and is reported separately.
+
+    Clean local headless run: a brand-new empty HOME/config dir per run (only a minimal cli-config,
+    no auth file, no plugins/marketplaces/MCP/user rules/skills), auth via CURSOR_API_KEY passed in an
+    env-file, tools run locally in the task container (no cloud agent, worker, worktree, or resume),
+    no --approve-mcps."""
+    env = {"CURSOR_API_KEY": os.environ["CURSOR_API_KEY"], "NO_OPEN_BROWSER": "1"}
+    setup = ('export HOME=$(mktemp -d /tmp/sbr/cursorhome.XXXXXX) && export CURSOR_CONFIG_DIR=$HOME/.cursor '
+             '&& export XDG_CONFIG_HOME=$HOME/.config XDG_CACHE_HOME=$HOME/.cache XDG_DATA_HOME=$HOME/.local/share '
+             f'&& mkdir -p $CURSOR_CONFIG_DIR && printf %s {shlex.quote(CURSOR_CLI_CONFIG)} > $CURSOR_CONFIG_DIR/cli-config.json '
+             # The account's installed plugins (with their MCP servers, skills, hooks) are git-cloned at startup.
+             # There is no CLI flag to skip them, so point every remote git URL at a nonexistent local path:
+             # the clones fail instantly and the CLI drops those plugins. /testbed needs no remote.
+             '&& git config --global --add safe.directory /testbed && git config --global user.email sbr@example.com '
+             '&& git config --global user.name sbr '
+             + "".join(f'&& git config --global --add url.file:///nonexistent/.insteadOf {shlex.quote(u)} '
+                       for u in ["https://", "http://", "git@", "ssh://", "git://"]) + '&& ')
+    argv = setup + (f'agent -p --force --trust --sandbox disabled --workspace /testbed '
+                    f'--model {shlex.quote(CURSOR_MODEL)} --output-format stream-json "$(cat /tmp/sbr/prompt.txt)"')
+    return _in_container(inst, "cursor", argv, env, logdir, env_file=True)
 
 AIDER_SETTINGS = f"""- name: anthropic/{MODEL}
   edit_format: diff
