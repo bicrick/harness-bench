@@ -87,12 +87,17 @@ def _done():
         return set(), set()
     rows = [json.loads(l) for l in RESULTS.read_text().splitlines() if l.strip()]
     skip = _skip_ids()
-    good, fresh = set(), set()
+    good, fresh, zero = set(), set(), {}
     for r in rows:
         k = (r["instance_id"], r["harness"])
         excluded = r.get("excluded") or r.get("notes") == EXCLUDE_NOTE or r["instance_id"] in skip
         if excluded and not r.get("error"):
             good.add(k); fresh.add(k); continue
+        # infra failure: a proxied harness that never reached the model (upstream 5xx / CLI crash) gets one retry
+        if r["harness"] != "cursor" and not r.get("calls") and r.get("resolved") is False:
+            zero[k] = zero.get(k, 0) + 1
+            if zero[k] < 2:
+                good.discard(k); fresh.discard(k); continue
         if not r.get("error") and r.get("resolved") is not None:
             good.add(k)
             if r.get("concurrency_regime", "unconstrained") != "unconstrained":
