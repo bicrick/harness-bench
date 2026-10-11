@@ -1,0 +1,429 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "combinator" django/db/models/sql/compiler.py | head -60
+345:            if self.query.combinator:
+410:    def get_combinator_sql(self, combinator, all):
+436:                if compiler.query.combinator:
+449:                if combinator == 'union' or (combinator == 'difference' and parts):
+454:        combinator_sql = self.connection.ops.set_operators[combinator]
+455:        if all and combinator == 'union':
+456:            combinator_sql += ' ALL'
+459:        result = [' {} '.format(combinator_sql).join(sql_parts)]
+479:            combinator = self.query.combinator
+481:            if combinator:
+482:                if not getattr(features, 'supports_select_{}'.format(combinator)):
+483:                    raise NotSupportedError('{} is not supported on this database backend.'.format(combinator))
+484:                result, params = self.get_combinator_sql(combinator, self.query.combinator_all)
+[0m
+[0m$ [0mcd /testbed && sed -n 330,365p django/db/models/sql/compiler.py && sed -n 405,520p django/db/models/sql/compiler.py
+field, self.query.get_meta(), default_order=asc))
+            else:
+                if col not in self.query.extra_select:
+                    order_by.append((
+                        OrderBy(RawSQL(*self.query.extra[col]), descending=descending),
+                        False))
+                else:
+                    order_by.append((
+                        OrderBy(Ref(col, RawSQL(*self.query.extra[col])), descending=descending),
+                        True))
+        result = []
+        seen = set()
+
+        for expr, is_ref in order_by:
+            resolved = expr.resolve_expression(self.query, allow_joins=True, reuse=None)
+            if self.query.combinator:
+                src = resolved.get_source_expressions()[0]
+                # Relabel order by columns to raw numbers if this is a combined
+                # query; necessary since the columns can't be referenced by the
+                # fully qualified name and the simple column names may collide.
+                for idx, (sel_expr, _, col_alias) in enumerate(self.select):
+                    if is_ref and col_alias == src.refs:
+                        src = src.source
+                    elif col_alias:
+                        continue
+                    if src == sel_expr:
+                        resolved.set_source_expressions([RawSQL('%d' % (idx + 1), ())])
+                        break
+                else:
+                    raise DatabaseError('ORDER BY term does not match any column in the result set.')
+            sql, params = self.compile(resolved)
+            # Don't add the same column twice, but the order direction is
+            # not taken into account so we strip it. When this entire method
+            # is refactored into expressions, then we can check each part as we
+            # generate it.
+            without_ordering = self.ordering_parts.search(sql).group(1)
+            sql, params = node.as_sql(self, self.connection)
+        if select_format is FORCE or (select_format and not self.query.subquery):
+            return node.output_field.select_format(self, sql, params)
+        return sql, params
+
+    def get_combinator_sql(self, combinator, all):
+        features = self.connection.features
+        compilers = [
+            query.get_compiler(self.using, self.connection)
+            for query in self.query.combined_queries if not query.is_empty()
+        ]
+        if not features.supports_slicing_ordering_in_compound:
+            for query, compiler in zip(self.query.combined_queries, compilers):
+                if query.low_mark or query.high_mark:
+                    raise DatabaseError('LIMIT/OFFSET not allowed in subqueries of compound statements.')
+                if compiler.get_order_by():
+                    raise DatabaseError('ORDER BY not allowed in subqueries of compound statements.')
+        parts = ()
+        for compiler in compilers:
+            try:
+                # If the columns list is limited, then all combined queries
+                # must have the same columns list. Set the selects defined on
+                # the query on all combined queries, if not already set.
+                if not compiler.query.values_select and self.query.values_select:
+                    compiler.query = compiler.query.clone()
+                    compiler.query.set_values((
+                        *self.query.extra_select,
+                        *self.query.values_select,
+                        *self.query.annotation_select,
+                    ))
+                part_sql, part_args = compiler.as_sql()
+                if compiler.query.combinator:
+                    # Wrap in a subquery if wrapping in parentheses isn't
+                    # supported.
+                    if not features.supports_parentheses_in_compound:
+                        part_sql = 'SELECT * FROM ({})'.format(part_sql)
+                    # Add parentheses when combining with compound query if not
+                    # already added for all compound queries.
+                    elif not features.supports_slicing_ordering_in_compound:
+                        part_sql = '({})'.format(part_sql)
+                parts += ((part_sql, part_args),)
+            except EmptyResultSet:
+                # Omit the empty queryset with UNION and with DIFFERENCE if the
+                # first queryset is nonempty.
+                if combinator == 'union' or (combinator == 'difference' and parts):
+                    continue
+                raise
+        if not parts:
+            raise EmptyResultSet
+        combinator_sql = self.connection.ops.set_operators[combinator]
+        if all and combinator == 'union':
+            combinator_sql += ' ALL'
+        braces = '({})' if features.supports_slicing_ordering_in_compound else '{}'
+        sql_parts, args_parts = zip(*((braces.format(sql), args) for sql, args in parts))
+        result = [' {} '.format(combinator_sql).join(sql_parts)]
+        params = []
+        for part in args_parts:
+            params.extend(part)
+        return result, params
+
+    def as_sql(self, with_limits=True, with_col_aliases=False):
+        """
+        Create the SQL for this query. Return the SQL string and list of
+        parameters.
+
+        If 'with_limits' is False, any limit/offset information is not included
+        in the query.
+        """
+        refcounts_before = self.query.alias_refcount.copy()
+        try:
+            extra_select, order_by, group_by = self.pre_sql_setup()
+            for_update_part = None
+            # Is a LIMIT/OFFSET clause needed?
+            with_limit_offset = with_limits and (self.query.high_mark is not None or self.query.low_mark)
+            combinator = self.query.combinator
+            features = self.connection.features
+            if combinator:
+                if not getattr(features, 'supports_select_{}'.format(combinator)):
+                    raise NotSupportedError('{} is not supported on this database backend.'.format(combinator))
+                result, params = self.get_combinator_sql(combinator, self.query.combinator_all)
+            else:
+                distinct_fields, distinct_params = self.get_distinct()
+                # This must come after 'select', 'ordering', and 'distinct'
+                # (see docstring of get_from_clause() for details).
+                from_, f_params = self.get_from_clause()
+                where, w_params = self.compile(self.where) if self.where is not None else ("", [])
+                having, h_params = self.compile(self.having) if self.having is not None else ("", [])
+                result = ['SELECT']
+                params = []
+
+                if self.query.distinct:
+                    distinct_result, distinct_params = self.connection.ops.distinct_sql(
+                        distinct_fields,
+                        distinct_params,
+                    )
+                    result += distinct_result
+                    params += distinct_params
+
+                out_cols = []
+                col_idx = 1
+                for _, (s_sql, s_params), alias in self.select + extra_select:
+                    if alias:
+                        s_sql = '%s AS %s' % (s_sql, self.connection.ops.quote_name(alias))
+                    elif with_col_aliases:
+                        s_sql = '%s AS %s' % (s_sql, 'Col%d' % col_idx)
+                        col_idx += 1
+                    params.extend(s_params)
+                    out_cols.append(s_sql)
+
+                result += [', '.join(out_cols), 'FROM', *from_]
+                params.extend(f_params)
+
+                if self.query.select_for_update and self.connection.features.has_select_for_update:
+                    if self.connection.get_autocommit():
+                        raise TransactionManagementError('select_for_update cannot be used outside of a transaction.')
+[0m
+[0m$ [0mcd /testbed && grep -n "_combinator_query" -A 12 django/db/models/query.py | head -40; grep -n "combined_queries" django/db/models/sql/query.py
+928:    def _combinator_query(self, combinator, *other_qs, all=False):
+929-        # Clone the query to inherit the select list and everything
+930-        clone = self._chain()
+931-        # Clear limits and ordering so they can be reapplied
+932-        clone.query.clear_ordering(True)
+933-        clone.query.clear_limits()
+934-        clone.query.combined_queries = (self.query,) + tuple(qs.query for qs in other_qs)
+935-        clone.query.combinator = combinator
+936-        clone.query.combinator_all = all
+937-        return clone
+938-
+939-    def union(self, *other_qs, all=False):
+940-        # If the query is an EmptyQuerySet, combine all nonempty querysets.
+--
+943:            return qs[0]._combinator_query('union', *qs[1:], all=all) if qs else self
+944:        return self._combinator_query('union', *other_qs, all=all)
+945-
+946-    def intersection(self, *other_qs):
+947-        # If any query is an EmptyQuerySet, return it.
+948-        if isinstance(self, EmptyQuerySet):
+949-            return self
+950-        for other in other_qs:
+951-            if isinstance(other, EmptyQuerySet):
+952-                return other
+953:        return self._combinator_query('intersection', *other_qs)
+954-
+955-    def difference(self, *other_qs):
+956-        # If the query is an EmptyQuerySet, return it.
+957-        if isinstance(self, EmptyQuerySet):
+958-            return self
+959:        return self._combinator_query('difference', *other_qs)
+960-
+961-    def select_for_update(self, nowait=False, skip_locked=False, of=()):
+962-        """
+963-        Return a new QuerySet instance that will select objects with a
+964-        FOR UPDATE lock.
+965-        """
+966-        if nowait and skip_locked:
+967-            raise ValueError('The nowait option cannot be used with skip_locked.')
+968-        obj = self._chain()
+215:        self.combined_queries = ()
+[0m
+[0m$ [0mcd /testbed && cat > /tmp/repro.py <<'EOF'
+import django, os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'tests.test_sqlite')
+EOF
+ls tests | head -5; sed -n 1,30p tests/test_sqlite.py 2>/dev/null; grep -rn "order_by('order')\|union(" tests/queries/test_qs_combinators.py | head -5
+README.rst
+absolute_url_overrides
+admin_autodiscover
+admin_changelist
+admin_checks
+# This is an example test settings file for use with the Django test suite.
+#
+# The 'sqlite3' backend requires only the ENGINE setting (an in-
+# memory database will be used). All other backends will require a
+# NAME and potentially authentication information. See the
+# following section in the docs for more information:
+#
+# https://docs.djangoproject.com/en/dev/internals/contributing/writing-code/unit-tests/
+#
+# The different databases that Django supports behave differently in certain
+# situations, so it is recommended to run the test suite against as many
+# database backends as possible.  You may want to create a separate settings
+# file for each of the backends you test against.
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+    },
+    'other': {
+        'ENGINE': 'django.db.backends.sqlite3',
+    }
+}
+
+SECRET_KEY = "django_tests_secret_key"
+
+# Use a fast hasher to speed up tests.
+PASSWORD_HASHERS = [
+    'django.contrib.auth.hashers.MD5PasswordHasher',
+]
+20:    def test_simple_union(self):
+24:        self.assertNumbersEqual(qs1.union(qs2, qs3), [0, 1, 5, 8, 9], ordered=False)
+52:        self.assertEqual(len(list(qs1.union(qs2, all=True))), 20)
+53:        self.assertEqual(len(list(qs1.union(qs2))), 10)
+94:        self.assertEqual(len(qs1.union(qs2)), 10)
+[0m
+[0m$ [0mcd /testbed && cat > /tmp/repro.py <<'EOF'
+import django
+from django.conf import settings
+settings.configure(INSTALLED_APPS=['django.contrib.contenttypes','django.contrib.auth'],
+    DATABASES={'default':{'ENGINE':'django.db.backends.sqlite3','NAME':':memory:'}})
+django.setup()
+from django.db import connection
+from django.db import models
+class Dimension(models.Model):
+    order = models.IntegerField()
+    class Meta:
+        app_label = 'auth'
+with connection.schema_editor() as e:
+    e.create_model(Dimension)
+for i in range(10, 19):
+    Dimension.objects.create(id=i, order=100-i)
+qs = Dimension.objects.filter(pk__in=[10, 11]).union(Dimension.objects.filter(pk__in=[16, 17]).order_by('order'))
+print(list(qs))
+print(list(qs.order_by().values_list('pk', flat=True)))
+print(list(qs))
+EOF
+python /tmp/repro.py 2>&1 | tail -5
+File "/testbed/django/db/models/sql/compiler.py", line 484, in as_sql
+    result, params = self.get_combinator_sql(combinator, self.query.combinator_all)
+  File "/testbed/django/db/models/sql/compiler.py", line 421, in get_combinator_sql
+    raise DatabaseError('ORDER BY not allowed in subqueries of compound statements.')
+django.db.utils.DatabaseError: ORDER BY not allowed in subqueries of compound statements.
+[0m
+[0m$ [0mcd /testbed && sed -n 285,330p django/db/models/sql/compiler.py; sed -n 365,385p django/db/models/sql/compiler.py
+if not isinstance(field, OrderBy):
+                    field = field.asc()
+                if not self.query.standard_ordering:
+                    field = field.copy()
+                    field.reverse_ordering()
+                order_by.append((field, False))
+                continue
+            if field == '?':  # random
+                order_by.append((OrderBy(Random()), False))
+                continue
+
+            col, order = get_order_dir(field, asc)
+            descending = order == 'DESC'
+
+            if col in self.query.annotation_select:
+                # Reference to expression in SELECT clause
+                order_by.append((
+                    OrderBy(Ref(col, self.query.annotation_select[col]), descending=descending),
+                    True))
+                continue
+            if col in self.query.annotations:
+                # References to an expression which is masked out of the SELECT
+                # clause.
+                expr = self.query.annotations[col]
+                if isinstance(expr, Value):
+                    # output_field must be resolved for constants.
+                    expr = Cast(expr, expr.output_field)
+                order_by.append((OrderBy(expr, descending=descending), False))
+                continue
+
+            if '.' in field:
+                # This came in through an extra(order_by=...) addition. Pass it
+                # on verbatim.
+                table, col = col.split('.', 1)
+                order_by.append((
+                    OrderBy(
+                        RawSQL('%s.%s' % (self.quote_name_unless_alias(table), col), []),
+                        descending=descending
+                    ), False))
+                continue
+
+            if not self.query.extra or col not in self.query.extra:
+                # 'col' is of the form 'field' or 'field1__field2' or
+                # '-field1__field2__field', etc.
+                order_by.extend(self.find_ordering_name(
+                    field, self.query.get_meta(), default_order=asc))
+            without_ordering = self.ordering_parts.search(sql).group(1)
+            params_hash = make_hashable(params)
+            if (without_ordering, params_hash) in seen:
+                continue
+            seen.add((without_ordering, params_hash))
+            result.append((resolved, (sql, params, is_ref)))
+        return result
+
+    def get_extra_select(self, order_by, select):
+        extra_select = []
+        if self.query.distinct and not self.query.distinct_fields:
+            select_sql = [t[1] for t in select]
+            for expr, (sql, params, is_ref) in order_by:
+                without_ordering = self.ordering_parts.search(sql).group(1)
+                if not is_ref and (without_ordering, params) not in select_sql:
+                    extra_select.append((expr, (without_ordering, params), None))
+        return extra_select
+
+    def quote_name_unless_alias(self, name):
+        """
+        A wrapper around connection.ops.quote_name that doesn't quote aliases
+[0m
+[0m$ [0mcd /testbed && sed -n 255,284p django/db/models/sql/compiler.py; grep -n "def get_order_by\|def pre_sql_setup\|def _setup_joins\|def get_select" django/db/models/sql/compiler.py
+"""
+        Return a list of 2-tuples of form (expr, (sql, params, is_ref)) for the
+        ORDER BY clause.
+
+        The order_by clause can alter the select clause (for example it
+        can add aliases to clauses that do not yet have one, or it can
+        add totally new select clauses).
+        """
+        if self.query.extra_order_by:
+            ordering = self.query.extra_order_by
+        elif not self.query.default_ordering:
+            ordering = self.query.order_by
+        elif self.query.order_by:
+            ordering = self.query.order_by
+        elif self.query.get_meta().ordering:
+            ordering = self.query.get_meta().ordering
+            self._meta_ordering = ordering
+        else:
+            ordering = []
+        if self.query.standard_ordering:
+            asc, desc = ORDER_DIR['ASC']
+        else:
+            asc, desc = ORDER_DIR['DESC']
+
+        order_by = []
+        for field in ordering:
+            if hasattr(field, 'resolve_expression'):
+                if isinstance(field, Value):
+                    # output_field must be resolved for constants.
+                    field = Cast(field, field.output_field)
+46:    def pre_sql_setup(self):
+184:    def get_select(self):
+236:            def get_select_from_parent(klass_info):
+254:    def get_order_by(self):
+726:    def _setup_joins(self, pieces, opts, alias):
+948:    def get_select_for_update_of_arguments(self):
+1445:    def pre_sql_setup(self):
+[0m
+[0m← [0mEdit django/db/models/sql/compiler.py
+Index: /testbed/django/db/models/sql/compiler.py
+===================================================================
+--- /testbed/django/db/models/sql/compiler.py
++++ /testbed/django/db/models/sql/compiler.py
+@@ -265,8 +265,12 @@
+ elif not self.query.default_ordering:
+     ordering = self.query.order_by
+ elif self.query.order_by:
+     ordering = self.query.order_by
++elif self.query.combinator:
++    # Model default ordering doesn't apply to compound queries; their
++    # ordering columns must be explicitly referenced in the result set.
++    ordering = []
+ elif self.query.get_meta().ordering:
+     ordering = self.query.get_meta().ordering
+     self._meta_ordering = ordering
+ else:
+
+[0m
+[0m$ [0mcd /testbed && sed -i "s/        app_label = 'auth'/        app_label = 'auth'\n        ordering = ['order']/" /tmp/repro.py && python /tmp/repro.py 2>&1 | tail -5 && python -m pytest tests/queries/test_qs_combinators.py -q 2>&1 | tail -3
+File "/testbed/django/db/models/sql/compiler.py", line 488, in as_sql
+    result, params = self.get_combinator_sql(combinator, self.query.combinator_all)
+  File "/testbed/django/db/models/sql/compiler.py", line 425, in get_combinator_sql
+    raise DatabaseError('ORDER BY not allowed in subqueries of compound statements.')
+django.db.utils.DatabaseError: ORDER BY not allowed in subqueries of compound statements.
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed && python tests/runtests.py queries.test_qs_combinators 2>&1 | tail -4
+OK (skipped=2)
+Destroying test database for alias 'default'...
+Testing against Django installed in '/testbed/django' with up to 8 processes
+System check identified no issues (1 silenced).
+[0m

@@ -1,0 +1,37 @@
+diff --git a/astropy/io/ascii/cds.py b/astropy/io/ascii/cds.py
+index 7a83fc39b..2edbf03fd 100644
+--- a/astropy/io/ascii/cds.py
++++ b/astropy/io/ascii/cds.py
+@@ -25,6 +25,23 @@ __doctest_skip__ = ["*"]
+ class CdsHeader(core.BaseHeader):
+     _subfmt = "CDS"
+ 
++    @staticmethod
++    def _parse_cds_unit(unit_str):
++        """Parse a CDS/MRT unit string, handling an optional leading ``10+n`` or
++        ``10-n`` power-of-ten scale followed by a composite unit, e.g.
++        ``10+3J/m/s/kpc2``.  The composite part is parsed as a whole so that the
++        order of division is preserved."""
++        match = re.match(r"^(10[+-]\d+)(.*)$", unit_str)
++        if match:
++            scale_str, rest = match.groups()
++            scale = 10.0 ** int(scale_str[2:]) if scale_str[2] == "+" else 10.0 ** -int(
++                scale_str[2:]
++            )
++            # ``scale_str[2:]`` includes the sign, so handle both cases uniformly.
++            scale = 10.0 ** int(scale_str[2:])
++            return scale * Unit(rest, format="cds", parse_strict="warn")
++        return Unit(unit_str, format="cds", parse_strict="warn")
++
+     col_type_map = {
+         "e": core.FloatType,
+         "f": core.FloatType,
+@@ -130,7 +147,7 @@ class CdsHeader(core.BaseHeader):
+                 if unit == "---":
+                     col.unit = None  # "---" is the marker for no unit in CDS/MRT table
+                 else:
+-                    col.unit = Unit(unit, format="cds", parse_strict="warn")
++                    col.unit = self._parse_cds_unit(unit)
+                 col.description = (match.group("descr") or "").strip()
+                 col.raw_type = match.group("format")
+                 col.type = self.get_col_type(col)

@@ -1,0 +1,78 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m✱ [0mGrep "class ThreadedWSGIServer|class LiveServerThread|_create_server|close_old_connections|connections.close_all"[90m in django/test · 17 matches[0m
+[0m→ [0mRead django/test/testcases.py[90m [offset=1470, limit=80][0m
+[0m✱ [0mGrep "ThreadedWSGIServer|^from|^import"[90m in django/test/testcases.py · 100 matches[0m
+[0m✱ [0mGrep "ThreadedWSGIServer|WSGIServer"[90m in django/test/testcases.py · 2 matches[0m
+[0m✱ [0mGrep "class ThreadedWSGIServer|daemon_threads|class WSGIServer|^from|^import"[90m in django/core/servers/basehttp.py · 14 matches[0m
+[0m→ [0mRead django/core/servers/basehttp.py[90m [offset=60, limit=30][0m
+[0m
+[0m← [0mEdit django/core/servers/basehttp.py
+Index: /testbed/django/core/servers/basehttp.py
+===================================================================
+--- /testbed/django/core/servers/basehttp.py
++++ /testbed/django/core/servers/basehttp.py
+@@ -80,9 +80,21 @@
+ class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):
+     """A threaded version of the WSGIServer"""
+     daemon_threads = True
+ 
++    def process_request_thread(self, request, client_address):
++        """
++        Close database connections opened by the request thread once the
++        request is handled, so they don't outlive the thread and block
++        database teardown (see #22414).
++        """
++        try:
++            super().process_request_thread(request, client_address)
++        finally:
++            from django.db import connections
++            connections.close_all()
+ 
++
+ class ServerHandler(simple_server.ServerHandler):
+     http_version = '1.1'
+ 
+     def __init__(self, stdin, stdout, stderr, environ, **kwargs):
+
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py servers --parallel 1 -q 2>&1 | tail -5
+[--parallel [N]] [--tag TAGS] [--exclude-tag EXCLUDE_TAGS]
+                   [--start-after START_AFTER] [--start-at START_AT] [--pdb]
+                   [-b] [--timing] [-k TEST_NAME_PATTERNS]
+                   [module [module ...]]
+runtests.py: error: unrecognized arguments: -q
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py servers liveserver_tests --parallel 1 2>&1 | tail -5
+----------------------------------------------------------------------
+Ran 26 tests in 4.417s
+
+FAILED (errors=1, skipped=1)
+Destroying test database for alias 'default'...
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py servers liveserver_tests --parallel 1 2>&1 | grep -A15 "^ERROR:"; git -C /testbed stash -q && python runtests.py servers liveserver_tests --parallel 1 2>&1 | tail -3; git -C /testbed stash pop -q
+ERROR: liveserver_tests (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: liveserver_tests
+Traceback (most recent call last):
+  File "/opt/miniconda3/envs/testbed/lib/python3.8/unittest/loader.py", line 154, in loadTestsFromName
+    module = __import__(module_name)
+ModuleNotFoundError: No module named 'liveserver_tests'
+
+
+----------------------------------------------------------------------
+Ran 26 tests in 4.420s
+
+FAILED (errors=1, skipped=1)
+Destroying test database for alias 'default'...
+
+FAILED (errors=1, skipped=1)
+Destroying test database for alias 'default'...
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py servers --parallel 1 2>&1 | tail -3; git -C /testbed diff --stat
+OK (skipped=1)
+Destroying test database for alias 'default'...
+ django/core/servers/basehttp.py | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+[0m

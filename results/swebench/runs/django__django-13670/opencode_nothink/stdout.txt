@@ -1,0 +1,14 @@
+I'll look at the dateformat implementation for the `y` format character.
+The bug is that `str(year)[2:]` drops leading zeros wrongly for years < 1000 (e.g. 123 → "3"). The fix is to zero-pad the year to 4 digits before slicing the last two.
+Let me verify the behavior against the examples in the issue.
+The check failed only because Django settings weren't configured. I'll configure them and rerun.
+The fix is in `django/utils/dateformat.py`. The `y` format now returns a zero-padded two-digit year, matching Python's `strftime("%y")` and PHP.
+
+Change in `DateFormat.y()`:
+```python
+return '%02d' % (self.data.year % 100)
+```
+
+Previously it was `str(self.data.year)[2:]`, which for year 123 produced `'3'` instead of `'23'`, and for year 9 produced `''`.
+
+Verified outputs: year 123 → `'23'`, year 9 → `'09'`, year 999 → `'99'`, 1999 → `'99'`, 2020 → `'20'`. I didn't modify any tests.

@@ -1,0 +1,443 @@
+2026-10-11 15:06:27,393 - INFO - rex-deploy - Building image docker.io/swebench/sweb.eval.x86_64.astropy_1776_astropy-14096:latest to install a standalone python to /root. This might take a while (but you only have to do it once). To skip this step, set `python_standalone_dir` to None.
+2026-10-11 15:19:54,811 - INFO - rex-deploy - Starting container docker.ioswebenchsweb.eval.x86_64.astropy_1776_astropy-14096latest-f4642090-2001-44eb-a9ef-a8f3eb6762b5 with image docker.io/swebench/sweb.eval.x86_64.astropy_1776_astropy-14096:latest serving on port 37915
+2026-10-11 15:19:54,820 - INFO - rex-deploy - Starting runtime at 37915
+2026-10-11 15:19:56,985 - INFO - rex-deploy - Runtime started in 2.16s
+2026-10-11 15:19:58,051 - INFO - swea-env - Environment Initialized
+2026-10-11 15:19:59,529 - INFO - swea-agent - Setting up agent for instance astropy__astropy-14096
+2026-10-11 15:19:59,533 - INFO - swea-agent - Trajectory will be saved to /home/box/context-shaping/results/swebench/runs/astropy__astropy-14096/swe_agent_nothink/out/astropy__astropy-14096/astropy__astropy-14096.traj
+2026-10-11 15:20:04,171 - INFO - swea-tools - Resetting tools
+2026-10-11 15:20:04,559 - INFO - swea-agent - SYSTEM (main)
+You are a helpful assistant that can interact with a computer to solve tasks.
+2026-10-11 15:20:04,725 - INFO - swea-agent - 🤖 MODEL INPUT
+<uploaded_files>
+/testbed
+</uploaded_files>
+I've uploaded a python code repository in the directory /testbed. Consider the following PR description:
+
+<pr_description>
+Subclassed SkyCoord gives misleading attribute access message
+I'm trying to subclass `SkyCoord`, and add some custom properties. This all seems to be working fine, but when I have a custom property (`prop` below) that tries to access a non-existent attribute (`random_attr`) below, the error message is misleading because it says `prop` doesn't exist, where it should say `random_attr` doesn't exist.
+
+```python
+import astropy.coordinates as coord
+
+
+class custom_coord(coord.SkyCoord):
+    @property
+    def prop(self):
+        return self.random_attr
+
+
+c = custom_coord('00h42m30s', '+41d12m00s', frame='icrs')
+c.prop
+```
+
+raises
+```
+Traceback (most recent call last):
+  File "test.py", line 11, in <module>
+    c.prop
+  File "/Users/dstansby/miniconda3/lib/python3.7/site-packages/astropy/coordinates/sky_coordinate.py", line 600, in __getattr__
+    .format(self.__class__.__name__, attr))
+AttributeError: 'custom_coord' object has no attribute 'prop'
+```
+
+</pr_description>
+
+Can you help me implement the necessary changes to the repository so that the requirements specified in the <pr_description> are met?
+I've already taken care of all changes to any of the test files described in the <pr_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!
+Your task is to make the minimal changes to non-tests files in the /testbed directory to ensure the <pr_description> is satisfied.
+Follow these steps to resolve the issue:
+1. As a first step, it might be a good idea to find and read code relevant to the <pr_description>
+2. Create a script to reproduce the error and execute it with `python <filename.py>` using the bash tool, to confirm the error
+3. Edit the sourcecode of the repo to resolve the issue
+4. Rerun your reproduce script and confirm that the error is fixed!
+5. Think about edgecases and make sure your fix handles them as well
+Your thinking should be thorough and so it's fine if it's very long.
+2026-10-11 15:20:04,729 - INFO - swea-agent - ========================= STEP 1 =========================
+2026-10-11 15:20:04,888 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:20:06,234 - INFO - swea-agent - 💭 THOUGHT
+I'll start by looking at the `__getattr__` implementation in SkyCoord.
+
+🎬 ACTION
+cd /testbed && grep -n "__getattr__" -A60 astropy/coordinates/sky_coordinate.py | head -120
+2026-10-11 15:20:06,549 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+869:    def __getattr__(self, attr):
+870-        """
+871-        Overrides getattr to return coordinates that this can be transformed
+872-        to, based on the alias attr in the primary transform graph.
+873-        """
+874-        if "_sky_coord_frame" in self.__dict__:
+875-            if self._is_name(attr):
+876-                return self  # Should this be a deepcopy of self?
+877-
+878-            # Anything in the set of all possible frame_attr_names is handled
+879-            # here. If the attr is relevant for the current frame then delegate
+880-            # to self.frame otherwise get it from self._<attr>.
+881-            if attr in frame_transform_graph.frame_attributes:
+882-                if attr in self.frame.frame_attributes:
+883-                    return getattr(self.frame, attr)
+884-                else:
+885-                    return getattr(self, "_" + attr, None)
+886-
+887-            # Some attributes might not fall in the above category but still
+888-            # are available through self._sky_coord_frame.
+889-            if not attr.startswith("_") and hasattr(self._sky_coord_frame, attr):
+890-                return getattr(self._sky_coord_frame, attr)
+891-
+892-            # Try to interpret as a new frame for transforming.
+893-            frame_cls = frame_transform_graph.lookup_name(attr)
+894-            if frame_cls is not None and self.frame.is_transformable_to(frame_cls):
+895-                return self.transform_to(attr)
+896-
+897-        # Fail
+898-        raise AttributeError(
+899-            f"'{self.__class__.__name__}' object has no attribute '{attr}'"
+900-        )
+901-
+902-    def __setattr__(self, attr, val):
+903:        # This is to make anything available through __getattr__ immutable
+904-        if "_sky_coord_frame" in self.__dict__:
+905-            if self._is_name(attr):
+906-                raise AttributeError(f"'{attr}' is immutable")
+907-
+908-            if not attr.startswith("_") and hasattr(self._sky_coord_frame, attr):
+909-                setattr(self._sky_coord_frame, attr, val)
+910-                return
+911-
+912-            frame_cls = frame_transform_graph.lookup_name(attr)
+913-            if frame_cls is not None and self.frame.is_transformable_to(frame_cls):
+914-                raise AttributeError(f"'{attr}' is immutable")
+915-
+916-        if attr in frame_transform_graph.frame_attributes:
+917-            # All possible frame attributes can be set, but only via a private
+918:            # variable.  See __getattr__ above.
+919-            super().__setattr__("_" + attr, val)
+920-            # Validate it
+921-            frame_transform_graph.frame_attributes[attr].__get__(self)
+922-            # And add to set of extra attributes
+923-            self._extra_frameattr_names |= {attr}
+924-
+925-        else:
+926-            # Otherwise, do the standard Python attribute setting
+927-            super().__setattr__(attr, val)
+928-
+929-    def __delattr__(self, attr):
+930-        # mirror __setattr__ above
+931-        if "_sky_coord_frame" in self.__dict__:
+932-            if self._is_name(attr):
+933-                raise AttributeError(f"'{attr}' is immutable")
+934-
+935-            if not attr.startswith("_") and hasattr(self._sky_coord_frame, attr):
+936-                delattr(self._sky_coord_frame, attr)
+937-                return
+938-
+939-            frame_cls = frame_transform_graph.lookup_name(attr)
+940-            if frame_cls is not None and self.frame.is_transformable_to(frame_cls):
+941-                raise AttributeError(f"'{attr}' is immutable")
+942-
+943-        if attr in frame_transform_graph.frame_attributes:
+944-            # All possible frame attributes can be deleted, but need to remove
+945:            # the corresponding private variable.  See __getattr__ above.
+946-            super().__delattr__("_" + attr)
+947-            # Also remove it from the set of extra attributes
+948-            self._extra_frameattr_names -= {attr}
+949-
+950-        else:
+951-            # Otherwise, do the standard Python attribute setting
+952-            super().__delattr__(attr)
+953-
+954-    def __dir__(self):
+955-        """
+956-        Override the builtin `dir` behavior to include:
+957-        - Transforms available by aliases
+958-        - Attribute / methods of the underlying self.frame object
+959-        """
+960-        dir_values = set(super().__dir__())
+961-
+962-        # determine the aliases that this can be transformed to.
+963-        for name in frame_transform_graph.get_names():
+964-            frame_cls = frame_transform_graph.lookup_name(name)
+965-            if self.frame.is_transformable_to(frame_cls):
+966-                dir_values.add(name)
+967-
+968-        # Add public attributes of self.frame
+969-        dir_values.update(
+970-            {attr for attr in dir(self.frame) if not attr.startswith("_")}
+971-        )
+972-
+973-        # Add all possible frame attributes
+974-        dir_values.update(frame_transform_graph.frame_attributes.keys())
+975-
+976-        return sorted(dir_values)
+977-
+978-    def __repr__(self):
+979-        clsnm = self.__class__.__name__
+980-        coonm = self.frame.__class__.__name__
+981-        frameattrs = self.frame._frame_attrs_repr()
+982-        if frameattrs:
+983-            frameattrs = ": " + frameattrs
+984-
+985-        data = self.frame._data_repr()
+986-        if data:
+987-            data = ": " + data
+988-
+
+2026-10-11 15:20:06,558 - INFO - swea-agent - ========================= STEP 2 =========================
+2026-10-11 15:20:06,563 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:20:08,491 - INFO - swea-agent - 💭 THOUGHT
+The root cause: when a property raises `AttributeError` internally, Python falls back to `__getattr__("prop")`, which then raises a misleading error about `prop`. The fix is to, in `__getattr__`, detect when the requested attribute is a real class attribute (e.g. a property) and re-raise the original error, so the true cause surfaces. The standard approach is to check whether `attr` is a defined class attribute and, if so, let the underlying error propagate.
+
+Let me reproduce first.
+
+🎬 ACTION
+cd /testbed && cat > /tmp/repro.py <<'EOF'
+import astropy.coordinates as coord
+
+class custom_coord(coord.SkyCoord):
+    @property
+    def prop(self):
+        return self.random_attr
+
+c = custom_coord('00h42m30s', '+41d12m00s', frame='icrs')
+c.prop
+EOF
+python /tmp/repro.py 2>&1 | tail -3
+2026-10-11 15:20:10,444 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+  File "/testbed/astropy/coordinates/sky_coordinate.py", line 898, in __getattr__
+    raise AttributeError(
+AttributeError: 'custom_coord' object has no attribute 'prop'
+
+2026-10-11 15:20:10,448 - INFO - swea-agent - ========================= STEP 3 =========================
+2026-10-11 15:20:10,454 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:20:12,929 - INFO - swea-agent - 💭 THOUGHT
+Reproduced. I'll fix `__getattr__` so that if the attribute is a real class-level attribute (such as a property whose getter raised), the error is re-raised from the property's own getter rather than masked.
+
+The cleanest way to surface the original error: when `attr` exists on the class, invoke the descriptor directly so its real exception propagates.
+
+🎬 ACTION
+str_replace_editor str_replace /testbed/astropy/coordinates/sky_coordinate.py   --old_str '        # Fail
+        raise AttributeError(
+            f"'"'"'{self.__class__.__name__}'"'"' object has no attribute '"'"'{attr}'"'"'"
+        )
+
+    def __setattr__(self, attr, val):' --new_str '        # If the attribute is defined on the class (e.g. a property in a
+        # subclass) then __getattr__ was only reached because the descriptor
+        # raised AttributeError. Re-evaluate it so the real error surfaces,
+        # rather than a misleading message about the property itself.
+        if attr in dir(type(self)) and not attr.startswith("__"):
+            return object.__getattribute__(self, attr)
+
+        # Fail
+        raise AttributeError(
+            f"'"'"'{self.__class__.__name__}'"'"' object has no attribute '"'"'{attr}'"'"'"
+        )
+
+    def __setattr__(self, attr, val):'
+2026-10-11 15:20:13,349 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+The file /testbed/astropy/coordinates/sky_coordinate.py has been edited. Here's the result of running `cat -n` on a snippet of /testbed/astropy/coordinates/sky_coordinate.py:
+   892	            # Try to interpret as a new frame for transforming.
+   893	            frame_cls = frame_transform_graph.lookup_name(attr)
+   894	            if frame_cls is not None and self.frame.is_transformable_to(frame_cls):
+   895	                return self.transform_to(attr)
+   896	
+   897	        # If the attribute is defined on the class (e.g. a property in a
+   898	        # subclass) then __getattr__ was only reached because the descriptor
+   899	        # raised AttributeError. Re-evaluate it so the real error surfaces,
+   900	        # rather than a misleading message about the property itself.
+   901	        if attr in dir(type(self)) and not attr.startswith("__"):
+   902	            return object.__getattribute__(self, attr)
+   903	
+   904	        # Fail
+   905	        raise AttributeError(
+   906	            f"'{self.__class__.__name__}' object has no attribute '{attr}'"
+   907	        )
+   908	
+   909	    def __setattr__(self, attr, val):
+   910	        # This is to make anything available through __getattr__ immutable
+   911	        if "_sky_coord_frame" in self.__dict__:
+   912	            if self._is_name(attr):
+Review the changes and make sure they are as expected. Edit the file again if necessary.
+
+2026-10-11 15:20:13,356 - INFO - swea-agent - ========================= STEP 4 =========================
+2026-10-11 15:20:13,363 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:20:15,512 - INFO - swea-agent - 💭 THOUGHT
+Before rerunning, I should consider the edge cases in that change. `dir(type(self))` is somewhat heavy and checks names by string; a cleaner check is `hasattr(type(self), attr)`, which looks up the class MRO without triggering instance `__getattr__`. Re-calling `object.__getattribute__` on a property whose getter raises will re-run the getter, which is what we want (it raises the real error). For a non-descriptor class attribute, it just returns the value, which is the correct behavior too. Let me tighten the check and run the repro plus the test suite.
+
+🎬 ACTION
+cd /testbed && sed -i 's/        if attr in dir(type(self)) and not attr.startswith("__"):/        if not attr.startswith("__") and hasattr(type(self), attr):/' astropy/coordinates/sky_coordinate.py && sed -n 897,903p astropy/coordinates/sky_coordinate.py && echo ---- && python /tmp/repro.py 2>&1 | tail -4; echo ----; python -m pytest astropy/coordinates/tests/test_sky_coord.py -q 2>&1 | tail -5
+2026-10-11 15:20:22,754 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+        # If the attribute is defined on the class (e.g. a property in a
+        # subclass) then __getattr__ was only reached because the descriptor
+        # raised AttributeError. Re-evaluate it so the real error surfaces,
+        # rather than a misleading message about the property itself.
+        if not attr.startswith("__") and hasattr(type(self), attr):
+            return object.__getattribute__(self, attr)
+
+----
+    return self.random_attr
+  File "/testbed/astropy/coordinates/sky_coordinate.py", line 905, in __getattr__
+    raise AttributeError(
+AttributeError: 'custom_coord' object has no attribute 'random_attr'
+----
+
+astropy/time/core.py:3315: AstropyWarning
+=========================== short test summary info ============================
+FAILED astropy/coordinates/tests/test_sky_coord.py::test_repr_altaz - astropy.utils.exceptions.AstropyWarning: leap-second auto-update failed due...
+1 failed, 426 passed, 3 skipped, 1 xfailed in 4.46s
+
+2026-10-11 15:20:22,763 - INFO - swea-agent - ========================= STEP 5 =========================
+2026-10-11 15:20:22,777 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:20:24,059 - INFO - swea-agent - 💭 THOUGHT
+The repro now reports `'custom_coord' object has no attribute 'random_attr'`, which is the correct message. The one failing test (`test_repr_altaz`) is a leap-second auto-update network warning, unrelated to this change. Let me confirm it fails without my change too.
+
+🎬 ACTION
+cd /testbed && git stash -q && python -m pytest astropy/coordinates/tests/test_sky_coord.py -q 2>&1 | tail -2; git stash pop -q && git diff --stat
+2026-10-11 15:20:29,200 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+FAILED astropy/coordinates/tests/test_sky_coord.py::test_repr_altaz - astropy.utils.exceptions.AstropyWarning: leap-second auto-update failed due...
+1 failed, 426 passed, 3 skipped, 1 xfailed in 3.55s
+ astropy/coordinates/sky_coordinate.py | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+2026-10-11 15:20:29,215 - INFO - swea-agent - ========================= STEP 6 =========================
+2026-10-11 15:20:29,226 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:20:30,946 - INFO - swea-agent - 💭 THOUGHT
+That failure is pre-existing (network-related) and occurs without my change too. Let me also check a few edge cases: a missing plain attribute should still give the normal message, and dunder lookups should not be affected.
+
+🎬 ACTION
+cd /testbed && python -c "
+import astropy.coordinates as coord, copy, pickle
+c = coord.SkyCoord(1*__import__('astropy.units').units.deg, 2*__import__('astropy.units').units.deg, frame='icrs')
+try: c.nonexistent
+except AttributeError as e: print('OK:', e)
+print(hasattr(c,'__deepcopy__'), type(copy.deepcopy(c)).__name__)
+print(type(pickle.loads(pickle.dumps(c))).__name__)
+"
+2026-10-11 15:20:31,893 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+OK: 'SkyCoord' object has no attribute 'nonexistent'
+False SkyCoord
+SkyCoord
+
+2026-10-11 15:20:31,898 - INFO - swea-agent - ========================= STEP 7 =========================
+2026-10-11 15:20:31,947 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:20:34,087 - WARNING - swea-agent - Requerying model after FunctionCallingFormatError (1th requery)
+2026-10-11 15:20:34,096 - WARNING - swea-agent - Your last output did not use any tool calls!
+Please make sure your output includes exactly _ONE_ function call!
+You must invoke the function directly using the function call format.
+You cannot invoke commands with ```, you have to use the function call format.
+If you think you have already resolved the issue, please submit your changes by running the `submit` command.
+If you think you cannot solve the problem, please run `exit_forfeit` (if available) or `submit`.
+Else, please continue with a new tool call!
+2026-10-11 15:20:34,103 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:20:35,307 - INFO - swea-agent - 💭 THOUGHT
+The fix is already in place and verified, so I'll submit it.
+
+🎬 ACTION
+submit
+2026-10-11 15:20:35,705 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+Thank you for your work on this issue. Please carefully follow the steps below to help review your changes.
+
+1. If you made any changes to your code after running the reproduction script, please run the reproduction script again.
+  If the reproduction script is failing, please revisit your changes and make sure they are correct.
+  If you have already removed your reproduction script, please ignore this step.
+2. Remove your reproduction script (if you haven't done so already).
+3. If you have modified any TEST files, please revert them to the state they had before you started fixing the issue.
+  You can do this with `git checkout -- /path/to/test/file.py`. Use below <diff> to find the files you need to revert.
+4. Run the submit command again to confirm.
+
+Here is a list of all of your changes:
+
+<diff>
+diff --git a/astropy/coordinates/sky_coordinate.py b/astropy/coordinates/sky_coordinate.py
+index ab475f7d0..1cfdfc0fd 100644
+--- a/astropy/coordinates/sky_coordinate.py
++++ b/astropy/coordinates/sky_coordinate.py
+@@ -894,6 +894,13 @@ class SkyCoord(ShapedLikeNDArray):
+             if frame_cls is not None and self.frame.is_transformable_to(frame_cls):
+                 return self.transform_to(attr)
+ 
++        # If the attribute is defined on the class (e.g. a property in a
++        # subclass) then __getattr__ was only reached because the descriptor
++        # raised AttributeError. Re-evaluate it so the real error surfaces,
++        # rather than a misleading message about the property itself.
++        if not attr.startswith("__") and hasattr(type(self), attr):
++            return object.__getattribute__(self, attr)
++
+         # Fail
+         raise AttributeError(
+             f"'{self.__class__.__name__}' object has no attribute '{attr}'"
+
+</diff>
+
+
+2026-10-11 15:20:35,712 - INFO - swea-agent - ========================= STEP 9 =========================
+2026-10-11 15:20:35,720 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:20:36,982 - WARNING - swea-agent - Requerying model after FunctionCallingFormatError (1th requery)
+2026-10-11 15:20:36,986 - WARNING - swea-agent - Your last output included multiple tool calls!
+Please make sure your output includes a thought and exactly _ONE_ function call.
+2026-10-11 15:20:36,993 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:20:38,711 - INFO - swea-agent - 💭 THOUGHT
+Understood. Going forward I'll make exactly one function call per message. My previous message was a summary that ended with a submit call, so the only remaining step is to remove the temp repro script with a single call.
+
+🎬 ACTION
+rm -f /tmp/repro.py && echo removed
+2026-10-11 15:20:38,997 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+removed
+
+2026-10-11 15:20:39,005 - INFO - swea-agent - ========================= STEP 11 =========================
+2026-10-11 15:20:39,012 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:20:39,928 - INFO - swea-agent - 💭 THOUGHT
+The reproduction script is removed and no test files were touched. The diff is limited to `astropy/coordinates/sky_coordinate.py`, so I'm ready to submit.
+
+🎬 ACTION
+submit
+2026-10-11 15:20:40,296 - INFO - swea-agent - Found submission: diff --git a/astropy/coordinates/sky_coordinate.py b/astropy/coordinates/sky_coordinate.py
+index ab475f7d0..1cfdfc0fd 100644
+--- a/astropy/coordinates/sky_coordinate.py
++++ b/astropy/coordinates/sky_coordinate.py
+@@ -894,6 +894,13 @@ class SkyCoord(ShapedLikeNDArray):
+             if frame_cls is not None and self.frame.is_transformable_to(frame_cls):
+                 return self.transform_to(attr)
+ 
++        # If the attribute is defined on the class (e.g. a property in a
++        # subclass) then __getattr__ was only reached because the descriptor
++        # raised AttributeError. Re-evaluate it so the real error surfaces,
++        # rather than a misleading message about the property itself.
++        if not attr.startswith("__") and hasattr(type(self), attr):
++            return object.__getattribute__(self, attr)
++
+         # Fail
+         raise AttributeError(
+             f"'{self.__class__.__name__}' object has no attribute '{attr}'"
+
+2026-10-11 15:20:40,300 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+diff --git a/astropy/coordinates/sky_coordinate.py b/astropy/coordinates/sky_coordinate.py
+index ab475f7d0..1cfdfc0fd 100644
+--- a/astropy/coordinates/sky_coordinate.py
++++ b/astropy/coordinates/sky_coordinate.py
+@@ -894,6 +894,13 @@ class SkyCoord(ShapedLikeNDArray):
+             if frame_cls is not None and self.frame.is_transformable_to(frame_cls):
+                 return self.transform_to(attr)
+ 
++        # If the attribute is defined on the class (e.g. a property in a
++        # subclass) then __getattr__ was only reached because the descriptor
++        # raised AttributeError. Re-evaluate it so the real error surfaces,
++        # rather than a misleading message about the property itself.
++        if not attr.startswith("__") and hasattr(type(self), attr):
++            return object.__getattribute__(self, attr)
++
+         # Fail
+         raise AttributeError(
+             f"'{self.__class__.__name__}' object has no attribute '{attr}'"
+
+2026-10-11 15:20:40,320 - INFO - swea-agent - Trajectory saved to /home/box/context-shaping/results/swebench/runs/astropy__astropy-14096/swe_agent_nothink/out/astropy__astropy-14096/astropy__astropy-14096.traj
+2026-10-11 15:20:40,329 - INFO - swea-env - Beginning environment shutdown...

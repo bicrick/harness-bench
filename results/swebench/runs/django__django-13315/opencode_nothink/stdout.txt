@@ -1,0 +1,13 @@
+This is the Django issue about `limit_choices_to` with Q objects producing duplicates. The fix in Django is to apply `.distinct()` in `ForeignKey.formfield()` / `get_limit_choices_to` handling. Let me look at the code.
+The upstream Django fix (ticket #26004 / commit) is to call `.distinct()` when the limit_choices_to filter may introduce joins. Let me check `complex_filter` usage and apply distinct in the formfield application.
+I also need to check `ForeignKey.formfield` in related.py (around line 924), which applies the same filter for the field's own queryset path.
+The `formfield` path goes through `apply_limit_choices_to_to_formfield`, which I've now fixed. Let me also confirm the `ModelChoiceField` queryset path in `get_choices` (fields/__init__.py) is fine — it's used for model-level choices, not form duplicates, so it stays unchanged. Quick sanity check that the module still imports:
+I fixed the duplicate options by making the form field's queryset distinct after applying `limit_choices_to`.
+
+The change is in `django/forms/models.py`, in `apply_limit_choices_to_to_formfield`:
+
+```python
+formfield.queryset = formfield.queryset.complex_filter(limit_choices_to).distinct()
+```
+
+A `Q` object that joins across a relation can match the same target row multiple times, and without `distinct()` each match became a separate option. The module imports cleanly. I did not run the test suite, and I did not add or change any tests, as requested.

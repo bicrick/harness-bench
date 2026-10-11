@@ -1,0 +1,82 @@
+Detected dumb terminal, disabling fancy input and pretty output.
+
+Update git name with: git config user.name "Your Name"
+Update git email with: git config user.email "you@example.com"
+Aider v0.86.2
+Model: anthropic/claude-haiku-5-5 with diff edit format, prompt cache
+Git repo: .git with 1,921 files
+Warning: For large repos, consider using --subtree-only and .aiderignore
+See: https://aider.chat/docs/faq.html#can-i-use-aider-in-a-large-mono-repo
+Repo-map: using 4096 tokens, files refresh
+
+
+https://aider.chat/HISTORY.html#release-notes
+
+Initial repo scan can be slow in larger repos, but only happens once.
+I can't edit the repository yet: `astropy/coordinates/sky_coordinate.py` has not
+been added to the chat, and I can only propose SEARCH/REPLACE edits to files 
+you've added. Once you add that file, I'll make the fix.
+
+The problem is in `SkyCoord.__getattr__`. When a property raises 
+`AttributeError` internally (here, from accessing `self.random_attr`), Python 
+falls back to `__getattr__('prop')`. That method then raises a generic "has no 
+attribute 'prop'" error, hiding the real cause. The fix is to have `__getattr__`
+detect that the requested name is a property defined on the class and re-raise 
+the original error in that case, rather than masking it.
+
+Please add `astropy/coordinates/sky_coordinate.py` to the chat and I'll propose 
+the change.
+
+Tokens: 31k sent, 15k cache write, 265 received. Cost: $0.0021 message, $0.0021 
+session.
+
+astropy/coordinates/sky_coordinate.py
+The fix goes in `SkyCoord.__getattr__`. Before raising the generic "no 
+attribute" error, check whether the requested name is a property on the class. 
+If it is, the `AttributeError` must have come from inside that property, so 
+re-raise a message that doesn't blame the property name. I'll let the original 
+error propagate by evaluating the property directly, which surfaces the real 
+missing attribute.
+
+astropy/coordinates/sky_coordinate.py
+```python
+<<<<<<< SEARCH
+        # Fail
+        raise AttributeError(
+            f"'{self.__class__.__name__}' object has no attribute '{attr}'"
+        )
+=======
+        # If the attribute is a property defined on the class, an AttributeError
+        # was raised from inside the property getter. Re-evaluate the property 
+so
+        # the underlying error (e.g. the missing attribute it accessed) 
+propagates
+        # instead of being masked by the generic message below.
+        if isinstance(getattr(type(self), attr, None), property):
+            return getattr(type(self), attr).__get__(self, type(self))
+
+        # Fail
+        raise AttributeError(
+            f"'{self.__class__.__name__}' object has no attribute '{attr}'"
+        )
+>>>>>>> REPLACE
+```
+
+After applying this, running the example from the issue should report 
+`'custom_coord' object has no attribute 'random_attr'`.
+
+Suggested check:
+
+```bash
+python -c "import astropy.coordinates as coord; c = type('custom_coord', 
+(coord.SkyCoord,), {'prop': property(lambda self: 
+self.random_attr)})('00h42m30s', '+41d12m00s', frame='icrs'); c.prop"
+```
+
+Tokens: 80k sent, 38k cache write, 2.4k cache hit, 553 received.
+Cost: $0.0052 message, $0.0074 session.
+Applied edit to astropy/coordinates/sky_coordinate.py
+
+python -c "import astropy.coordinates as coord; c = type('custom_coord', 
+(coord.SkyCoord,), {'prop': property(lambda self: 
+self.random_attr)})('00h42m30s', '+41d12m00s', frame='icrs'); c.prop"

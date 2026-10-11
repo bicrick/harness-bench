@@ -1,0 +1,21 @@
+I'll look at how TemplateView's get_context_data receives kwargs.
+The deprecation wrapper returns `SimpleLazyObject`s that are passed as kwargs to `get_context_data`, so ORM lookups receive a lazy wrapper rather than the real value. The fix is to keep the deprecation warning for template access but pass the real values to `get_context_data`. The cleanest approach that preserves the template-level deprecation is to emit the warning lazily in the template context rather than wrap the value itself. Let me check how the upstream fix was done: the warning is only meaningful for template usage, so I'll wrap values in a lazy object only at the context level via `get_context_data` return, while passing plain values as kwargs.
+
+I'll make the wrapper a plain value and emit the warning from the context dict via a `SimpleLazyObject` only for the template-facing output. Simplest correct fix: pass the raw values through `get_context_data`, and make the deprecated access happen in the returned context instead.
+I referenced a helper that doesn't exist yet and dropped the deprecation warning entirely, which is wrong. Let me restore the warning properly: the deprecated behaviour is that URL kwargs appear in the template context, so the warning should fire when a template actually reads them. I'll implement that by adding the URL kwargs to the context as lazy values only in the context returned from `get_context_data`, with real values passed in.
+Pytest isn't installed, so I'll use Django's test runner.
+The generic views tests pass. Now I'll confirm the issue scenario is fixed: `get_context_data` receives plain strings, so ORM lookups work.
+One test fails. Let me see which one.
+That failure is a permissions test that fails because the sandbox runs as root, so it's unrelated to my change. The generic views tests all pass.
+
+I'll verify the issue scenario directly:
+The fix is in place. In `django/views/generic/base.py`, `TemplateView.get()` was wrapping every URL kwarg in a `SimpleLazyObject` before passing them to `get_context_data()`. That's why `kwargs.get("offer_slug")` returned a lazy object that SQLite couldn't bind.
+
+The change:
+- `get_context_data()` now receives the real URL kwarg values.
+- The deprecation wrapper is applied afterward, only to keys that end up in the returned template context. Templates that still reference `{{ offer_slug }}` get the same deprecation warning as before.
+
+Verification:
+- The issue scenario now yields a plain `str` in `get_context_data`.
+- `generic_views` tests pass (214 tests).
+- The one failure in `template_tests` (`test_permissions_error`) is caused by running as root in the sandbox, not by this change.

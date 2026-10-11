@@ -1,0 +1,68 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m✱ [0mGrep "execute_sql_flush"[90m in . · 5 matches[0m
+[0m→ [0mRead django/db/backends/base/operations.py[90m [offset=400, limit=25][0m
+[0m→ [0mRead django/core/management/commands/flush.py[90m [offset=50, limit=20][0m
+[0m
+[0m← [0mEdit django/db/backends/base/operations.py
+Index: /testbed/django/db/backends/base/operations.py
+===================================================================
+--- /testbed/django/db/backends/base/operations.py
++++ /testbed/django/db/backends/base/operations.py
+@@ -399,11 +399,14 @@
+     PostgreSQL requires a cascade even if these tables are empty.
+     """
+     raise NotImplementedError('subclasses of BaseDatabaseOperations must provide a sql_flush() method')
+ 
+-def execute_sql_flush(self, using, sql_list):
++def execute_sql_flush(self, sql_list):
+     """Execute a list of SQL statements to flush the database."""
+-    with transaction.atomic(using=using, savepoint=self.connection.features.can_rollback_ddl):
++    with transaction.atomic(
++        using=self.connection.alias,
++        savepoint=self.connection.features.can_rollback_ddl,
++    ):
+         with self.connection.cursor() as cursor:
+             for sql in sql_list:
+                 cursor.execute(sql)
+ 
+
+[0m
+[0m← [0mEdit django/core/management/commands/flush.py
+Index: /testbed/django/core/management/commands/flush.py
+===================================================================
+--- /testbed/django/core/management/commands/flush.py
++++ /testbed/django/core/management/commands/flush.py
+@@ -59,9 +59,9 @@
+     confirm = 'yes'
+ 
+ if confirm == 'yes':
+     try:
+-        connection.ops.execute_sql_flush(database, sql_list)
++        connection.ops.execute_sql_flush(sql_list)
+     except Exception as exc:
+         raise CommandError(
+             "Database %s couldn't be flushed. Possible reasons:\n"
+             "  * The database isn't running or isn't configured correctly.\n"
+
+[0m
+[0m$ [0mcd /testbed && grep -n "database" django/core/management/commands/flush.py; sed -i 's/connection.ops.execute_sql_flush(connection.alias, sql_list)/connection.ops.execute_sql_flush(sql_list)/' tests/backends/tests.py tests/backends/base/test_operations.py; grep -rn "execute_sql_flush" --include=*.py --include=*.txt --include=*.rst . 
+12:        'Removes ALL DATA from the database, including data added during '
+23:            '--database', default=DEFAULT_DB_ALIAS,
+24:            help='Nominates a database to flush. Defaults to the "default" database.',
+28:        database = options['database']
+29:        connection = connections[database]
+52:            confirm = input("""You have requested a flush of the database.
+53:This will IRREVERSIBLY DESTROY all data currently in the %r database,
+67:                    "  * The database isn't running or isn't configured correctly.\n"
+68:                    "  * At least one of the expected database tables doesn't exist.\n"
+76:            # Empty sql_list may signify an empty database and post_migrate would then crash
+79:                # respond as if the database had been migrated from scratch.
+80:                emit_post_migrate_signal(verbosity, interactive, database)
+./django/db/backends/base/operations.py:403:    def execute_sql_flush(self, sql_list):
+./django/core/management/commands/flush.py:63:                connection.ops.execute_sql_flush(sql_list)
+./tests/backends/base/test_operations.py:159:    def test_execute_sql_flush_statements(self):
+./tests/backends/base/test_operations.py:175:        connection.ops.execute_sql_flush(sql_list)
+./tests/backends/tests.py:165:        connection.ops.execute_sql_flush(sql_list)
+[0m

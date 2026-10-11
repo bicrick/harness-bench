@@ -1,0 +1,10 @@
+Let me look at the `__getattr__` implementation in SkyCoord.
+The problem: when a property raises AttributeError internally, Python falls back to `__getattr__("prop")`, which then raises a misleading error. The standard fix is to re-raise the original error when the attribute being looked up is a real property/descriptor on the class. I'll check for that case and surface the original exception via a lookup through the class.
+
+The cleanest fix: in `__getattr__`, if the attribute exists as a class attribute (e.g., a property), re-raise an AttributeError that reflects the actual failure. But the original exception is lost once `__getattr__` is called. The reliable approach is to call the property getter directly so its real exception propagates.
+Now let me verify the fix with the issue's example.
+The error now correctly reports `'custom_coord' object has no attribute 'random_attr'`.
+
+**Fix:** In `SkyCoord.__getattr__` (`astropy/coordinates/sky_coordinate.py`), when the requested name is a `property` defined on the class, the getter is now invoked directly. Previously Python swallowed the property's `AttributeError` and fell back to `__getattr__`, which then raised a generic error naming the property. Now the real exception from inside the property propagates.
+
+The test suite passes except `test_repr_altaz`, which fails due to an expired leap-second file (an environment/network issue unrelated to this change).

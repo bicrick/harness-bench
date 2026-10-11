@@ -1,0 +1,48 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m✱ [0mGrep "def __getattr__"[90m in astropy/coordinates/sky_coordinate.py · 3 matches[0m
+[0m→ [0mRead astropy/coordinates/sky_coordinate.py[90m [offset=860, limit=60][0m
+[0m
+[0m← [0mEdit astropy/coordinates/sky_coordinate.py
+Index: /testbed/astropy/coordinates/sky_coordinate.py
+===================================================================
+--- /testbed/astropy/coordinates/sky_coordinate.py
++++ /testbed/astropy/coordinates/sky_coordinate.py
+@@ -893,8 +893,17 @@
+     frame_cls = frame_transform_graph.lookup_name(attr)
+     if frame_cls is not None and self.frame.is_transformable_to(frame_cls):
+         return self.transform_to(attr)
+ 
++# If the attribute is a property (or other descriptor) defined on the
++# class, Python fell back to __getattr__ only because the property
++# getter raised an AttributeError. Call the getter directly so that the
++# real underlying error (e.g. for a missing attribute used inside the
++# property) is reported instead of a misleading message.
++cls_attr = getattr(type(self), attr, None)
++if isinstance(cls_attr, property):
++    return cls_attr.__get__(self, type(self))
++
+ # Fail
+ raise AttributeError(
+     f"'{self.__class__.__name__}' object has no attribute '{attr}'"
+ )
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+import astropy.coordinates as coord
+class custom_coord(coord.SkyCoord):
+    @property
+    def prop(self):
+        return self.random_attr
+c = custom_coord('00h42m30s', '+41d12m00s', frame='icrs')
+try:
+    c.prop
+except AttributeError as e:
+    print(repr(e))
+" && python -m pytest astropy/coordinates/tests/test_sky_coord.py -q 2>&1 | tail -3
+AttributeError("'custom_coord' object has no attribute 'random_attr'")
+[36m[1m=========================== short test summary info ============================[0m
+[31mFAILED[0m astropy/coordinates/tests/test_sky_coord.py::[1mtest_repr_altaz[0m - astropy.utils.exceptions.AstropyWarning: leap-second auto-update failed due to the following exception: IERSStaleWarning('leap-second file is expired.')
+[31m[31m[1m1 failed[0m, [32m426 passed[0m, [33m3 skipped[0m, [33m1 xfailed[0m[31m in 3.37s[0m[0m
+[0m
