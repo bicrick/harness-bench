@@ -22,7 +22,7 @@ Every harness ran the whole pinned 50-task subset (`results/swebench/subset.json
 ### What the full run says
 
 - The harness moves the score by 17 points on the same model: Cursor 78%, then SWE-agent 73%, Claude Code 71%, mini-SWE-agent 69%, OpenCode 63%, Aider 61%. The confidence intervals still overlap at n=49, so only the ends of the ranking (Cursor vs. Aider/OpenCode) are a real gap.
-- Cost spreads far more than accuracy. Aider pays about $0.085 per solve, roughly 15x OpenCode ($0.0055) and 11x mini-SWE-agent ($0.0076), and solves fewer tasks. Its prompts carry repo maps and whole files with an 8% cache hit rate, while every other proxied harness hits 79-91%.
+- Cost spreads far more than accuracy. Aider pays about $0.085 per solve, roughly 15x OpenCode ($0.0055) and 11x mini-SWE-agent ($0.0076), and solves fewer tasks. Its prompts carry repo maps and whole files with a 4% cache hit rate, while the other five sit at 90-93% (cache hit = cache_read / (input + cache_read + cache_write), summed over every call of the final scored row per task; Cursor from its own token logs).
 - mini-SWE-agent is the efficiency standout: 69% at about 196k tokens per solve, less than half of what Claude Code (456k) or SWE-agent (426k) spend for 2-4 more solves.
 - 26 of 49 tasks were solved by all six harnesses and 8 by none. Unique solves: Cursor 3 (django-10554, django-14376, sphinx-8638), SWE-agent 1 (pytest-10356), Aider 1 (matplotlib-23299).
 
