@@ -50,20 +50,59 @@ SLOT_DIR = Path(os.environ.get("SBR_SLOT_DIR", Path.home() / "sbr-slots"))
 REGIME = f"slots{SLOTS}_cpus{CPUS}_mem{MEM}"
 
 def _acquire_slot(label):
+    """FIFO fair slot handout: take a ticket, then only the oldest living waiter may grab a free slot.
+
+    Without this, multi-shard / fast harnesses win the LOCK_NB race and starve slower ones
+    (e.g. aider waiting 70 min while mini_swe_agent and swe_agent each run two shards).
+    Ticket files live in SLOT_DIR/waiters/; dead PIDs are pruned so a crashed waiter can't block the queue.
+    """
     SLOT_DIR.mkdir(exist_ok=True)
+    waiters = SLOT_DIR / "waiters"
+    waiters.mkdir(exist_ok=True)
+    # allocate a monotonically increasing ticket under an exclusive lock
+    seq_path = SLOT_DIR / "ticket_seq"
+    with open(SLOT_DIR / "ticket_seq.lock", "a+") as seq_lock:
+        fcntl.flock(seq_lock, fcntl.LOCK_EX)
+        try:
+            n = int(seq_path.read_text().strip() or "0") if seq_path.exists() else 0
+        except ValueError:
+            n = 0
+        n += 1
+        seq_path.write_text(str(n))
+        fcntl.flock(seq_lock, fcntl.LOCK_UN)
+    ticket = n
+    mine = waiters / f"{ticket:08d}.{os.getpid()}"
+    mine.write_text(f"{os.getpid()} {label}\n")
     t0 = last = time.time()
-    while True:
-        for k in range(SLOTS):
-            f = open(SLOT_DIR / f"slot{k}.lock", "a+")
-            try:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                f.seek(0); f.truncate(); f.write(f"{os.getpid()} {label}\n"); f.flush()
-                return f, time.time() - t0
-            except BlockingIOError:
-                f.close()
-        if time.time() - last > 300:  # heartbeat so the manager's stall detector sees a live runner
-            print(f"  waiting for a slot ({(time.time()-t0)/60:.0f} min)", flush=True); last = time.time()
-        time.sleep(5)
+    try:
+        while True:
+            # drop waiter files whose PIDs are gone so a crash can't pin the head of the queue
+            for w in list(waiters.iterdir()):
+                try:
+                    pid = int(w.name.split(".", 1)[1])
+                except (IndexError, ValueError):
+                    continue
+                if pid != os.getpid() and not Path(f"/proc/{pid}").exists():
+                    try: w.unlink()
+                    except FileNotFoundError: pass
+            living = sorted(waiters.iterdir(), key=lambda w: w.name)
+            if living and living[0] == mine:
+                for k in range(SLOTS):
+                    f = open(SLOT_DIR / f"slot{k}.lock", "a+")
+                    try:
+                        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        f.seek(0); f.truncate(); f.write(f"{os.getpid()} {label}\n"); f.flush()
+                        return f, time.time() - t0
+                    except BlockingIOError:
+                        f.close()
+            if time.time() - last > 300:  # heartbeat so the manager's stall detector sees a live runner
+                ahead = sum(1 for w in living if w.name < mine.name) if living else 0
+                print(f"  waiting for a slot ({(time.time()-t0)/60:.0f} min, ticket {ticket}, {ahead} ahead)", flush=True)
+                last = time.time()
+            time.sleep(2)
+    finally:
+        try: mine.unlink()
+        except FileNotFoundError: pass
 
 def _enforce_limits(stop):
     """Host-side agents (mini-swe-agent, SWE-agent) and the SWE-bench grader create their own containers;
