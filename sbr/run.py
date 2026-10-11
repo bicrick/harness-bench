@@ -19,6 +19,29 @@ from .harnesses import HARNESSES, PROXIED, CHECKS, DOCKER, CPUS, MEM
 RESULTS = OUT / "results.jsonl"
 MIN_FREE_GB = 25
 RERUN = OUT / "rerun_queue.json"  # pairs whose old-regime row is flagged (timeouts/conn errors under box pressure)
+SKIP_FILE = OUT / "skip_instances.json"  # infra-broken instances; never grade, excluded from scoring
+EXCLUDE_NOTE = "excluded: infra (httpbin unreachable)"
+
+def _skip_ids():
+    if not SKIP_FILE.exists():
+        return set()
+    return set(json.loads(SKIP_FILE.read_text()).get("instances") or [])
+
+def _ensure_excluded(iid, harnesses, repo=""):
+    """Append exclusion rows for (iid, h) pairs that lack one, so resume + scoring stay consistent."""
+    have = set()
+    if RESULTS.exists():
+        for l in RESULTS.read_text().splitlines():
+            if not l.strip(): continue
+            r = json.loads(l)
+            if r.get("instance_id") == iid and (r.get("excluded") or r.get("notes") == EXCLUDE_NOTE):
+                have.add(r["harness"])
+    with open(RESULTS, "a") as f:
+        for h in harnesses:
+            if h in have: continue
+            f.write(json.dumps(dict(instance_id=iid, repo=repo, harness=h, model=MODEL, resolved=None,
+                                    notes=EXCLUDE_NOTE, excluded=True, calls=0, usd=0.0, peak_prompt=0,
+                                    wall_s=0, concurrency_regime=REGIME, cost_source="n/a")) + "\n")
 
 # Concurrency control: at most SLOTS agent runs (agent + grading) at once across every runner on the box,
 # via flock'd slot files. wall_s is measured from slot acquisition, so time spent queueing doesn't count.
@@ -61,11 +84,24 @@ def _rerun_pairs():
 
 def _done():
     if not RESULTS.exists():
-        return set()
+        return set(), set()
     rows = [json.loads(l) for l in RESULTS.read_text().splitlines() if l.strip()]
-    good = {(r["instance_id"], r["harness"]) for r in rows if not r.get("error") and r.get("resolved") is not None}
-    fresh = {(r["instance_id"], r["harness"]) for r in rows if not r.get("error") and r.get("resolved") is not None
-             and r.get("concurrency_regime", "unconstrained") != "unconstrained"}
+    skip = _skip_ids()
+    good, fresh = set(), set()
+    for r in rows:
+        k = (r["instance_id"], r["harness"])
+        excluded = r.get("excluded") or r.get("notes") == EXCLUDE_NOTE or r["instance_id"] in skip
+        if excluded and not r.get("error"):
+            good.add(k); fresh.add(k); continue
+        if not r.get("error") and r.get("resolved") is not None:
+            good.add(k)
+            if r.get("concurrency_regime", "unconstrained") != "unconstrained":
+                fresh.add(k)
+    # every real harness is done for a skipped instance even before a row lands
+    for iid in skip:
+        for h in HARNESSES:
+            if h in CHECKS: continue
+            good.add((iid, h)); fresh.add((iid, h))
     return good, fresh
 
 def _instances(ids):
@@ -178,8 +214,14 @@ def main():
           f"spent ${proxy.spent():.2f} of ${HARD_CAP_USD:.0f}", flush=True)
     # pass 1: everything not yet done; pass 2: flagged old-regime pairs, rerun under the new regime
     plan = [(n, inst, False) for n, inst in enumerate(insts, 1)] + [(n, inst, True) for n, inst in enumerate(insts, 1)]
+    skip = _skip_ids()
     for n, inst, second in plan:
         iid = inst["instance_id"]
+        if iid in skip:
+            if not second:
+                print(f"[{n}/{len(insts)}] {iid}  SKIP {EXCLUDE_NOTE}", flush=True)
+                _ensure_excluded(iid, harnesses, inst.get("repo", ""))
+            continue
         if second:
             todo = [h for h in harnesses if (iid, h) in rerun]
         else:

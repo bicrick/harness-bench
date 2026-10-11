@@ -3,10 +3,16 @@ Reads results/swebench/results.jsonl (latest row per instance+harness) and runs/
 Writes results/swebench/summary_tokens.csv (per run) and prints a per-harness table."""
 import json, csv, pathlib, collections
 R = pathlib.Path(__file__).resolve().parent.parent / "results/swebench"
+_skip = set()
+if (R / "skip_instances.json").exists():
+    _skip = set(json.loads((R / "skip_instances.json").read_text()).get("instances") or [])
 rows = {}
 for l in (R / "results.jsonl").read_text().splitlines():
     if l.strip():
-        d = json.loads(l); rows[(d["instance_id"], d["harness"])] = d
+        d = json.loads(l)
+        if d["instance_id"] in _skip or d.get("excluded") or d.get("notes") == "excluded: infra (httpbin unreachable)":
+            continue
+        rows[(d["instance_id"], d["harness"])] = d
 K = ["input", "output", "cache_read", "cache_write"]
 LE100K = dict(input=0.10, cache_write=0.125, cache_read=0.01, output=0.50)  # Haiku 5.5 USD/M, lower tier (cursor estimate only)
 USD_COL = "usd_est"
