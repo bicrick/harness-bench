@@ -2,18 +2,18 @@
 
 ## Full run (Stage 2, finished 2026-10-11 06:08 CDT)
 
-Every harness ran the whole pinned 50-task subset (`results/swebench/subset.json`) on `claude-haiku-5-5`, graded with the official SWE-bench harness. psf__requests-2317 is excluded for every harness (its grader needs httpbin.org, which is unreachable from the box), so each harness is scored on 49 tasks. Latest good row per pair wins, so the 10 queued old-regime re-runs replace their earlier rows. Generated from `scripts/swebench_tokens.py`, `scripts/swebench_pilot_report.py 50`, `python3 -m sbr.report` and `scripts/swebench_figures.py`.
+Every harness ran the whole pinned 50-task subset (`results/swebench/subset.json`) on `claude-haiku-5-5`, graded with the official SWE-bench harness. psf__requests-2317 was dropped from the subset because its grader needs httpbin.org, which is unreachable from the box. It was replaced by psf__requests-1142 using the subset's existing same-repo swap rule (`sbr/subset.py` EXCLUDE). The rule first drew 1724, 1766 and 1921, which use the same live-httpbin tests, then 2931, whose gold patch fails in this environment. 1142's gold patch resolves offline in 22 s. The other 49 tasks are unchanged. All six harnesses ran 1142 on 2026-10-11 under the fair regime, so every harness is scored on the full 50. Latest good row per pair wins, so the 10 queued old-regime re-runs replace their earlier rows. Generated from `scripts/swebench_tokens.py`, `scripts/swebench_final.py`, `scripts/swebench_pilot_report.py 50`, `python3 -m sbr.report` and `scripts/swebench_figures.py`.
 
-| harness | solved | pass rate (95% CI) | $ total | $/solve | tokens/task | tokens/solve | median wall s/task* |
+| harness | solved | pass rate (95% CI) | $ total | $/solve | tokens/task | tokens/solve | min/solve* |
 |---|---|---|---|---|---|---|---|
-| cursor | 38/49 | 78% (64-87%) | 0.421 (est.) | 0.0111 (est.) | 296,691 | 382,575 | 107 |
-| swe_agent | 36/49 | 73% (60-84%) | 0.618 | 0.0172 | 312,775 | 425,721 | 226 |
-| claude_code | 35/49 | 71% (58-82%) | 0.420 | 0.0120 | 326,016 | 456,423 | 65 |
-| mini_swe_agent | 34/49 | 69% (55-80%) | 0.260 | 0.0076 | 136,123 | 196,178 | 74 |
-| opencode | 31/49 | 63% (49-75%) | 0.170 | 0.0055 | 94,481 | 149,341 | 57 |
-| aider | 30/49 | 61% (47-74%) | 2.560 | 0.0853 | 162,674 | 265,701 | 87 |
+| cursor | 39/50 | 78% (65-87%) | 0.424 (est.) | 0.0109 (est.) | 292,662 | 375,207 | 8.6 |
+| swe_agent | 37/50 | 74% (60-84%) | 0.622 | 0.0168 | 307,879 | 416,052 | 14.2 |
+| claude_code | 36/50 | 72% (58-83%) | 0.426 | 0.0118 | 323,186 | 448,870 | 7.2 |
+| mini_swe_agent | 35/50 | 70% (56-81%) | 0.264 | 0.0075 | 135,000 | 192,858 | 5.8 |
+| opencode | 32/50 | 64% (50-76%) | 0.173 | 0.0054 | 93,850 | 146,641 | 5.4 |
+| aider | 31/50 | 62% (48-74%) | 2.566 | 0.0828 | 160,499 | 258,870 | 7.0 |
 
-\* Wall time uses only rows run under the controlled regime (`concurrency_regime="slots3_cpus2_mem4g"`: 3 agent runs box-wide, 2 CPU / 4 GB per container), 169 of 294 scored rows. $ total counts the final scored row per pair; total proxied API spend across both stages, including retries and preflight, is about $5.34 against the $45 cap (Cursor not included, since it bills through Cursor).
+Pass-rate CIs are 95% Wilson intervals. \* Minutes per solve use only rows run under the controlled regime (`concurrency_regime="slots3_cpus2_mem4g"`: 3 agent runs box-wide, 2 CPU / 4 GB per container), 175 of 300 scored rows: their total wall time divided by their solves. $ total counts the final scored row per pair; total proxied API spend across both stages, including retries and preflight, is about $5.36 against the $45 cap (Cursor not included, since it bills through Cursor).
 
 ![pass rate](../figures/swebench_pass_rate.png)
 ![cost vs pass rate](../figures/swebench_cost_vs_pass.png)
@@ -21,10 +21,10 @@ Every harness ran the whole pinned 50-task subset (`results/swebench/subset.json
 
 ### What the full run says
 
-- The harness moves the score by 17 points on the same model: Cursor 78%, then SWE-agent 73%, Claude Code 71%, mini-SWE-agent 69%, OpenCode 63%, Aider 61%. The confidence intervals still overlap at n=49, so only the ends of the ranking (Cursor vs. Aider/OpenCode) are a real gap.
-- Cost spreads far more than accuracy. Aider pays about $0.085 per solve, roughly 15x OpenCode ($0.0055) and 11x mini-SWE-agent ($0.0076), and solves fewer tasks. Its prompts carry repo maps and whole files with a 4% cache hit rate, while the other five sit at 90-93% (cache hit = cache_read / (input + cache_read + cache_write), summed over every call of the final scored row per task; Cursor from its own token logs).
-- mini-SWE-agent is the efficiency standout: 69% at about 196k tokens per solve, less than half of what Claude Code (456k) or SWE-agent (426k) spend for 2-4 more solves.
-- 26 of 49 tasks were solved by all six harnesses and 8 by none. Unique solves: Cursor 3 (django-10554, django-14376, sphinx-8638), SWE-agent 1 (pytest-10356), Aider 1 (matplotlib-23299).
+- The harness moves the score by 16 points on the same model: Cursor 78%, then SWE-agent 74%, Claude Code 72%, mini-SWE-agent 70%, OpenCode 64%, Aider 62%. The confidence intervals still overlap at n=50, so only the ends of the ranking (Cursor vs. Aider/OpenCode) are a real gap.
+- Cost spreads far more than accuracy. Aider pays about $0.083 per solve, roughly 15x OpenCode ($0.0054) and 11x mini-SWE-agent ($0.0075), and solves fewer tasks. Its prompts carry repo maps and whole files with a 4% cache hit rate, while the other five sit at 90-93% (cache hit = cache_read / (input + cache_read + cache_write), summed over every call of the final scored row per task; Cursor from its own token logs).
+- mini-SWE-agent is the efficiency standout: 70% at about 193k tokens per solve, less than half of what Claude Code (449k) or SWE-agent (416k) spend for 2-4 more solves.
+- 27 of 50 tasks were solved by all six harnesses and 8 by none. Unique solves: Cursor 3 (django-10554, django-14376, sphinx-8638), SWE-agent 1 (pytest-10356), Aider 1 (matplotlib-23299).
 
 ### Full-run caveats and deviations (full log: `~/sbr-deviations.md` on the box)
 
