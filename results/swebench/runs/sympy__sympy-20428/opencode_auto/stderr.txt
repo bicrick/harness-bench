@@ -1,0 +1,329 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "def clear_denoms" -A60 sympy/polys/polytools.py | head -90; grep -n "def clear_denoms" -A30 sympy/polys/polyclasses.py
+2219:    def clear_denoms(self, convert=False):
+2220-        """
+2221-        Clear denominators, but keep the ground domain.
+2222-
+2223-        Examples
+2224-        ========
+2225-
+2226-        >>> from sympy import Poly, S, QQ
+2227-        >>> from sympy.abc import x
+2228-
+2229-        >>> f = Poly(x/2 + S(1)/3, x, domain=QQ)
+2230-
+2231-        >>> f.clear_denoms()
+2232-        (6, Poly(3*x + 2, x, domain='QQ'))
+2233-        >>> f.clear_denoms(convert=True)
+2234-        (6, Poly(3*x + 2, x, domain='ZZ'))
+2235-
+2236-        """
+2237-        f = self
+2238-
+2239-        if not f.rep.dom.is_Field:
+2240-            return S.One, f
+2241-
+2242-        dom = f.get_domain()
+2243-        if dom.has_assoc_Ring:
+2244-            dom = f.rep.dom.get_ring()
+2245-
+2246-        if hasattr(f.rep, 'clear_denoms'):
+2247-            coeff, result = f.rep.clear_denoms()
+2248-        else:  # pragma: no cover
+2249-            raise OperationNotSupported(f, 'clear_denoms')
+2250-
+2251-        coeff, f = dom.to_sympy(coeff), f.per(result)
+2252-
+2253-        if not convert or not dom.has_assoc_Ring:
+2254-            return coeff, f
+2255-        else:
+2256-            return coeff, f.to_ring()
+2257-
+2258-    def rat_clear_denoms(self, g):
+2259-        """
+2260-        Clear denominators in a rational function ``f/g``.
+2261-
+2262-        Examples
+2263-        ========
+2264-
+2265-        >>> from sympy import Poly
+2266-        >>> from sympy.abc import x, y
+2267-
+2268-        >>> f = Poly(x**2/y + 1, x)
+2269-        >>> g = Poly(x**3 + y, x)
+2270-
+2271-        >>> p, q = f.rat_clear_denoms(g)
+2272-
+2273-        >>> p
+2274-        Poly(x**2 + y, x, domain='ZZ[y]')
+2275-        >>> q
+2276-        Poly(y*x**3 + y**2, x, domain='ZZ[y]')
+2277-
+2278-        """
+2279-        f = self
+586:    def clear_denoms(f):
+587-        """Clear denominators, but keep the ground domain. """
+588-        coeff, F = dmp_clear_denoms(f.rep, f.lev, f.dom)
+589-        return coeff, f.per(F)
+590-
+591-    def integrate(f, m=1, j=0):
+592-        """Computes the ``m``-th order indefinite integral of ``f`` in ``x_j``. """
+593-        if not isinstance(m, int):
+594-            raise TypeError("``int`` expected, got %s" % type(m))
+595-
+596-        if not isinstance(j, int):
+597-            raise TypeError("``int`` expected, got %s" % type(j))
+598-
+599-        return f.per(dmp_integrate_in(f.rep, m, j, f.lev, f.dom))
+600-
+601-    def diff(f, m=1, j=0):
+602-        """Computes the ``m``-th order derivative of ``f`` in ``x_j``. """
+603-        if not isinstance(m, int):
+604-            raise TypeError("``int`` expected, got %s" % type(m))
+605-
+606-        if not isinstance(j, int):
+607-            raise TypeError("``int`` expected, got %s" % type(j))
+608-
+609-        return f.per(dmp_diff_in(f.rep, m, j, f.lev, f.dom))
+610-
+611-    def eval(f, a, j=0):
+612-        """Evaluates ``f`` at the given point ``a`` in ``x_j``. """
+613-        if not isinstance(j, int):
+614-            raise TypeError("``int`` expected, got %s" % type(j))
+615-
+616-        return f.per(dmp_eval_in(f.rep,
+[0m
+[0m$ [0mcd /testbed && grep -n "def dmp_clear_denoms" -A50 sympy/polys/densetools.py; grep -n "def dup_clear_denoms" -A40 sympy/polys/densetools.py
+1223:def dmp_clear_denoms(f, u, K0, K1=None, convert=False):
+1224-    """
+1225-    Clear denominators, i.e. transform ``K_0`` to ``K_1``.
+1226-
+1227-    Examples
+1228-    ========
+1229-
+1230-    >>> from sympy.polys import ring, QQ
+1231-    >>> R, x,y = ring("x,y", QQ)
+1232-
+1233-    >>> f = QQ(1,2)*x + QQ(1,3)*y + 1
+1234-
+1235-    >>> R.dmp_clear_denoms(f, convert=False)
+1236-    (6, 3*x + 2*y + 6)
+1237-    >>> R.dmp_clear_denoms(f, convert=True)
+1238-    (6, 3*x + 2*y + 6)
+1239-
+1240-    """
+1241-    if not u:
+1242-        return dup_clear_denoms(f, K0, K1, convert=convert)
+1243-
+1244-    if K1 is None:
+1245-        if K0.has_assoc_Ring:
+1246-            K1 = K0.get_ring()
+1247-        else:
+1248-            K1 = K0
+1249-
+1250-    common = _rec_clear_denoms(f, u, K0, K1)
+1251-
+1252-    if not K1.is_one(common):
+1253-        f = dmp_mul_ground(f, common, u, K0)
+1254-
+1255-    if not convert:
+1256-        return common, f
+1257-    else:
+1258-        return common, dmp_convert(f, u, K0, K1)
+1259-
+1260-
+1261-def dup_revert(f, n, K):
+1262-    """
+1263-    Compute ``f**(-1)`` mod ``x**n`` using Newton iteration.
+1264-
+1265-    This function computes first ``2**n`` terms of a polynomial that
+1266-    is a result of inversion of a polynomial modulo ``x**n``. This is
+1267-    useful to efficiently compute series expansion of ``1/f``.
+1268-
+1269-    Examples
+1270-    ========
+1271-
+1272-    >>> from sympy.polys import ring, QQ
+1273-    >>> R, x = ring("x", QQ)
+1169:def dup_clear_denoms(f, K0, K1=None, convert=False):
+1170-    """
+1171-    Clear denominators, i.e. transform ``K_0`` to ``K_1``.
+1172-
+1173-    Examples
+1174-    ========
+1175-
+1176-    >>> from sympy.polys import ring, QQ
+1177-    >>> R, x = ring("x", QQ)
+1178-
+1179-    >>> f = QQ(1,2)*x + QQ(1,3)
+1180-
+1181-    >>> R.dup_clear_denoms(f, convert=False)
+1182-    (6, 3*x + 2)
+1183-    >>> R.dup_clear_denoms(f, convert=True)
+1184-    (6, 3*x + 2)
+1185-
+1186-    """
+1187-    if K1 is None:
+1188-        if K0.has_assoc_Ring:
+1189-            K1 = K0.get_ring()
+1190-        else:
+1191-            K1 = K0
+1192-
+1193-    common = K1.one
+1194-
+1195-    for c in f:
+1196-        common = K1.lcm(common, K0.denom(c))
+1197-
+1198-    if not K1.is_one(common):
+1199-        f = dup_mul_ground(f, common, K0)
+1200-
+1201-    if not convert:
+1202-        return common, f
+1203-    else:
+1204-        return common, dup_convert(f, K0, K1)
+1205-
+1206-
+1207-def _rec_clear_denoms(g, v, K0, K1):
+1208-    """Recursive helper for :func:`dmp_clear_denoms`."""
+1209-    common = K1.one
+[0m
+[0m$ [0mcd /testbed && grep -n "def dup_mul_ground" -A25 sympy/polys/densearith.py; grep -n "def dmp_mul_ground" -A30 sympy/polys/densearith.py | tail -12
+255:def dup_mul_ground(f, c, K):
+256-    """
+257-    Multiply ``f`` by a constant value in ``K[x]``.
+258-
+259-    Examples
+260-    ========
+261-
+262-    >>> from sympy.polys import ring, ZZ
+263-    >>> R, x = ring("x", ZZ)
+264-
+265-    >>> R.dup_mul_ground(x**2 + 2*x - 1, ZZ(3))
+266-    3*x**2 + 6*x - 3
+267-
+268-    """
+269-    if not c or not f:
+270-        return []
+271-    else:
+272-        return [ cf * c for cf in f ]
+273-
+274-
+275-def dmp_mul_ground(f, c, u, K):
+276-    """
+277-    Multiply ``f`` by a constant value in ``K[X]``.
+278-
+279-    Examples
+280-    ========
+294-    return [ dmp_mul_ground(cf, c, v, K) for cf in f ]
+295-
+296-
+297-def dup_quo_ground(f, c, K):
+298-    """
+299-    Quotient by a constant in ``K[x]``.
+300-
+301-    Examples
+302-    ========
+303-
+304-    >>> from sympy.polys import ring, ZZ, QQ
+305-
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy import *
+x=symbols('x')
+f = Poly(sympify('-117968192370600*18**(1/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3)) - 15720318185*2**(2/3)*3**(1/3)*(24201 + 253*sqrt(9165))**(2/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3)) + 15720318185*12**(1/3)*(24201 + 253*sqrt(9165))**(2/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3)) + 117968192370600*2**(1/3)*3**(2/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3))'), x)
+c,b=f.clear_denoms(); print(b.rep, b.is_zero)
+"; grep -n "def dup_strip" -A12 sympy/polys/densebasic.py | head -20; grep -n "def __bool__" -A3 sympy/polys/domains/expressiondomain.py sympy/polys/domains/domainelement.py
+DMP([EX(0)], EX, None) False
+252:def dup_strip(f):
+253-    """
+254-    Remove leading zeros from ``f`` in ``K[x]``.
+255-
+256-    Examples
+257-    ========
+258-
+259-    >>> from sympy.polys.densebasic import dup_strip
+260-
+261-    >>> dup_strip([0, 0, 1, 2, 3, 0])
+262-    [1, 2, 3, 0]
+263-
+264-    """
+sympy/polys/domains/expressiondomain.py:122:        def __bool__(f):
+sympy/polys/domains/expressiondomain.py-123-            return f.ex != 0
+sympy/polys/domains/expressiondomain.py-124-
+sympy/polys/domains/expressiondomain.py-125-        def gcd(f, g):
+[0m
+[0m$ [0mcd /testbed && sed -n 275,296p sympy/polys/densearith.py; grep -n "^from\|^import\|dup_strip\|dmp_strip" sympy/polys/densearith.py | head -30
+def dmp_mul_ground(f, c, u, K):
+    """
+    Multiply ``f`` by a constant value in ``K[X]``.
+
+    Examples
+    ========
+
+    >>> from sympy.polys import ring, ZZ
+    >>> R, x,y = ring("x,y", ZZ)
+
+    >>> R.dmp_mul_ground(2*x + 2*y, ZZ(3))
+    6*x + 6*y
+
+    """
+    if not u:
+        return dup_mul_ground(f, c, K)
+
+    v = u - 1
+
+    return [ dmp_mul_ground(cf, c, v, K) for cf in f ]
+
+
+4:from sympy.polys.densebasic import (
+8:    dup_strip, dmp_strip,
+12:from sympy.polys.polyerrors import (ExactQuotientFailed, PolynomialDivisionFailed)
+35:        return dup_strip([f[0] + c] + f[1:])
+69:        return dmp_strip([dmp_add(f[0], c, v, K)] + f[1:], u)
+98:        return dup_strip([f[0] - c] + f[1:])
+132:        return dmp_strip([dmp_sub(f[0], c, v, K)] + f[1:], u)
+536:        return dup_strip([ a + b for a, b in zip(f, g) ])
+578:        return dmp_strip([ dmp_add(a, b, v, K) for a, b in zip(f, g) ], u)
+613:        return dup_strip([ a - b for a, b in zip(f, g) ])
+655:        return dmp_strip([ dmp_sub(a, b, v, K) for a, b in zip(f, g) ], u)
+771:        return dup_strip(h)
+832:    return dmp_strip(h, u)
+872:    return dup_strip(h)
+920:    return dmp_strip(h, u)
+1452:            r = dup_strip(r[1:])
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+p='sympy/polys/densearith.py'
+s=open(p).read()
+s=s.replace("""        return [ cf * c for cf in f ]
+""","""        return dup_strip([ cf * c for cf in f ])
+""",1)
+s=s.replace("""    return [ dmp_mul_ground(cf, c, v, K) for cf in f ]
+""","""    return dmp_strip([ dmp_mul_ground(cf, c, v, K) for cf in f ], u)
+""",1)
+open(p,'w').write(s)
+EOF
+git diff --stat; python -c "
+from sympy import *
+x=symbols('x')
+f = Poly(sympify('-117968192370600*18**(1/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3)) - 15720318185*2**(2/3)*3**(1/3)*(24201 + 253*sqrt(9165))**(2/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3)) + 15720318185*12**(1/3)*(24201 + 253*sqrt(9165))**(2/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3)) + 117968192370600*2**(1/3)*3**(2/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3))'), x)
+c,b=f.clear_denoms(); print(b.rep, b.is_zero, b.terms_gcd(), b.primitive())
+"
+python -m pytest -q sympy/polys 2>&1 | tail -3
+sympy/polys/densearith.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+DMP([], EX, None) True ((0,), Poly(0, x, domain='EX')) (0, Poly(0, x, domain='EX'))
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed && python bin/test sympy/polys 2>&1 | tail -5; python -m doctest sympy/polys/densearith.py 2>&1 | tail -3
+________________________________ xpassed tests _________________________________
+sympy/polys/tests/test_partfrac.py: test_apart_extension_xfail
+
+ tests finished: 944 passed, 5 skipped, 3 expected to fail, 
+1 expected to fail but passed, in 78.13 seconds 
+   1 of   4 in densearith.dup_exquo
+   1 of   4 in densearith.dup_pexquo
+***Test Failed*** 4 failures.
+[0m

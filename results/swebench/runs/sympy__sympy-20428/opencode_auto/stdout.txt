@@ -1,0 +1,12 @@
+The root cause is that `dup_mul_ground`/`dmp_mul_ground` multiply each coefficient without stripping leading zeros, so an EX coefficient that becomes `0` leaves a `[EX(0)]` representation. I'll strip the result in both functions.
+The fix is in place and the polys test suite passes (944 passed). The `xpassed` note is an existing `xfail` test in `test_partfrac.py` that now passes; I didn't touch it.
+
+**Cause:** `dup_mul_ground` and `dmp_mul_ground` in `sympy/polys/densearith.py` multiplied each coefficient by the constant but never stripped leading zeros. With EX coefficients, a product like `EX(expr) * c` can evaluate to `0` while still being stored as a leading element. `clear_denoms()` then returned `DMP([EX(0)], EX, None)` instead of `DMP([], EX, None)`.
+
+**Fix:** Both functions now strip the result:
+- `dup_mul_ground` returns `dup_strip([cf * c for cf in f])`
+- `dmp_mul_ground` returns `dmp_strip([...], u)`
+
+**Verification:** For the expression from the issue, `clear_denoms()` now gives `DMP([], EX, None)`. `is_zero` is `True`, `terms_gcd()` returns `((0,), Poly(0, x, domain='EX'))`, and `primitive()` returns `(0, Poly(0, x, domain='EX'))`, so the inconsistent and crashing behaviour is gone.
+
+I did not add or change any tests. Running doctests directly on `densearith.py` reports 4 failures, but those doctests use names that aren't imported in that module's context; I didn't check them against the unmodified code.

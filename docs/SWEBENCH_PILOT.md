@@ -34,6 +34,34 @@ Pass-rate CIs are 95% Wilson intervals. \* Minutes per solve use only rows run u
 - Infra fixes during the run: build-cache pruning for disk, one retry for proxied 0-call rows, upstream 4xx rejections counted as harness failures (one Aider task), and a 300 s hard per-call deadline in `sbr/proxy.py` after two hung SWE-agent calls on django-10554.
 - `sbr/report.py` was fixed to let a later good row replace an earlier good row, matching the latest-row rule; before the fix it kept the first good row, which ignored the re-run queue.
 
+## Confound check (2026-10-11): OpenCode auto-approve, Cursor without thinking
+
+Two things in the original run were not purely "the harness": OpenCode stopped 7 times at a permission prompt nobody was there to answer, and Cursor's default Haiku 5.5 id resolved to a thinking variant (thinking events in 49 of 50 runs), which no other harness got. Both were rerun on all 50 tasks under the same fair regime (3 slots box-wide, 2 CPU / 4 GB, same subset, same grader) as two extra harness ids. The original rows are kept unchanged.
+
+- `opencode_auto`: identical to `opencode` except the config sets `"permission": "allow"` (every permission, including external_directory and doom_loop, auto-approved).
+- `cursor_nothink`: identical to `cursor` except `--model claude-haiku-5-5-high` (Cursor's "Haiku 5.5 High No Thinking"). Verified: 0 of 50 stream-json logs contain a thinking event (original Cursor: 49 of 50).
+
+All eight, out of 50:
+
+| harness | solved | pass rate (95% CI) | $ total | $/solve | tokens/task | tokens/solve | min/solve* | cache hit |
+|---|---|---|---|---|---|---|---|---|
+| cursor | 39/50 | 78% (65-87%) | 0.424 (est.) | 0.0109 (est.) | 292,662 | 375,207 | 8.6 | 93% |
+| swe_agent | 37/50 | 74% (60-84%) | 0.622 | 0.0168 | 307,879 | 416,052 | 14.2 | 92% |
+| claude_code | 36/50 | 72% (58-83%) | 0.426 | 0.0118 | 323,186 | 448,870 | 7.2 | 93% |
+| opencode_auto | 36/50 | 72% (58-83%) | 0.254 | 0.0071 | 163,300 | 226,806 | 3.8 | 93% |
+| mini_swe_agent | 35/50 | 70% (56-81%) | 0.264 | 0.0075 | 135,000 | 192,858 | 5.8 | 91% |
+| cursor_nothink | 35/50 | 70% (56-81%) | 0.325 (est.) | 0.0093 (est.) | 275,038 | 392,911 | 4.9 | 94% |
+| opencode | 32/50 | 64% (50-76%) | 0.173 | 0.0054 | 93,850 | 146,641 | 5.4 | 90% |
+| aider | 31/50 | 62% (48-74%) | 2.566 | 0.0828 | 160,499 | 258,870 | 7.0 | 4% |
+
+\* min/solve uses fair-regime rows only (all 50 for the variants). The variants ran with only each other on the box, so their wall times are a bit flattering against the originals.
+
+**OpenCode (permissions):** 32 -> 36 solved (64% -> 72%). Permission-stop runs 7 -> 0 and empty-patch runs 5 -> 0. It gained 5 tasks (django-13297, django-15916, pytest-6197, sphinx-8548, sympy-13031) and lost 1 (matplotlib-25960). Cost per solve rises from $0.0054 to $0.0071 because runs that used to stop early now finish; it is still the second cheapest. The original OpenCode gap was mostly an unattended-configuration artifact.
+
+**Cursor (thinking):** 39 -> 35 solved (78% -> 70%). It lost 6 tasks, including all 3 tasks only Cursor had solved (django-10554, django-14376, sphinx-8638), and gained 2 (astropy-14369, matplotlib-25960). On django-14376 the no-thinking run edited only `mysql/base.py`, like the other five harnesses, and failed. Cursor's lead in the original table was mostly the extra thinking, not the harness.
+
+**Net effect:** with both confounds removed, the top is a near tie: SWE-agent 74%, Claude Code 72%, OpenCode-auto 72%, mini-SWE-agent 70%, Cursor-no-thinking 70%, with Aider at 62%. The CIs all overlap. The pass-rate spread from the harness shrinks from 16 points to about 12 (Aider to SWE-agent), and the clear, robust difference is cost: Aider still pays about 12x OpenCode-auto per solve.
+
 ## Pilot (first 10 tasks)
 
 Pilot = the first 10 instances of the pinned 50-task subset (`results/swebench/subset.json`, seed 20261010): 2 astropy + 8 django. Every harness used `claude-haiku-5-5`, graded with the official SWE-bench harness. Generated 2026-10-10 23:10 CDT from `scripts/swebench_tokens.py` + `scripts/swebench_pilot_report.py 10`.
