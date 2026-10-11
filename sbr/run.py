@@ -79,6 +79,27 @@ def _enforce_limits(stop):
                 subprocess.run(DOCKER + ["update", f"--cpus={CPUS}", f"--memory={MEM}", f"--memory-swap={MEM}", cid],
                                capture_output=True)
 
+# Shards: several runners of one harness may run concurrently on overlapping instance lists. A pair is run only
+# by the runner holding its flock'd claim file (released automatically if that runner dies), and only if a fresh
+# read of results.jsonl still says it's needed, so no two shards ever run the same (instance, harness) pair.
+CLAIM_DIR = Path(os.environ.get("SBR_CLAIM_DIR", Path.home() / "sbr-claims"))
+
+def _claim(iid, harness):
+    CLAIM_DIR.mkdir(exist_ok=True)
+    f = open(CLAIM_DIR / f"{iid}__{harness}.lock", "a+")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        f.close(); return None
+    f.seek(0); f.truncate(); f.write(f"{os.getpid()}\n"); f.flush()
+    return f
+
+def _still_needed(iid, harness, second):
+    done, fresh = _done()
+    if second:
+        return (iid, harness) in _rerun_pairs() and (iid, harness) not in fresh
+    return (iid, harness) not in done
+
 def _rerun_pairs():
     return {tuple(p) for p in json.loads(RERUN.read_text())["pairs"]} if RERUN.exists() else set()
 
@@ -242,8 +263,16 @@ def main():
             print(f"  skip: {e}", flush=True)
             continue
         for h in todo:
-            if second: print(f"  rerun (flagged old-regime row)", flush=True)
-            run_one(inst, h)
+            claim = _claim(iid, h)
+            if not claim:
+                print(f"  {h}: claimed by another shard; skipping", flush=True); continue
+            try:
+                if not _still_needed(iid, h, second):
+                    print(f"  {h}: already done by another shard; skipping", flush=True); continue
+                if second: print(f"  rerun (flagged old-regime row)", flush=True)
+                run_one(inst, h)
+            finally:
+                claim.close()
         if not a.keep_images:
             subprocess.run(DOCKER + ["rmi", "-f", image_for(iid)], capture_output=True)
             subprocess.run(DOCKER + ["image", "prune", "-f"], capture_output=True)
