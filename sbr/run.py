@@ -198,7 +198,15 @@ def run_one(inst, harness):
                cost_source="proxy" if harness in PROXIED else "harness")
     # A harness that never reached the model (crashed, bad config, network) is an infrastructure failure,
     # not an unresolved task: log it as an error so it's retried on resume and kept out of the score.
-    if not row.get("error") and harness in PROXIED and not calls:
+    # Exception: the upstream API answered with a 4xx other than 429 (e.g. 400 invalid request). The harness did
+    # reach the model; the API rejected what it sent. That's the harness failing the task, not infrastructure, so
+    # it's logged as unresolved (the 0-call rule in _done still gives it one retry before it counts).
+    rejected = {k for k in row["http_status"] if k.startswith("4") and k != "429"}
+    if not row.get("error") and harness in PROXIED and not calls and rejected:
+        row.setdefault("notes", {})
+        if isinstance(row["notes"], dict): row["notes"]["upstream_rejected"] = sorted(rejected)
+        row["resolved"] = False
+    elif not row.get("error") and harness in PROXIED and not calls:
         row["error"] = f"no model calls reached the proxy (exit {row.get('notes', {}).get('exit_code')}); see {logdir}/stderr.txt"
     if not row.get("error") and harness == "cursor" and row.get("notes", {}).get("exit_code") not in (0, None) and not row.get("patch_lines"):
         row["error"] = f"cursor exited {row['notes']['exit_code']} with no patch; see {logdir}/stderr.txt"
