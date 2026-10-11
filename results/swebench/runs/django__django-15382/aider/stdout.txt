@@ -1,0 +1,136 @@
+Detected dumb terminal, disabling fancy input and pretty output.
+
+Update git name with: git config user.name "Your Name"
+Update git email with: git config user.email "you@example.com"
+Aider v0.86.2
+Model: anthropic/claude-haiku-5-5 with diff edit format, prompt cache
+Git repo: .git with 6,603 files
+Warning: For large repos, consider using --subtree-only and .aiderignore
+See: https://aider.chat/docs/faq.html#can-i-use-aider-in-a-large-mono-repo
+Repo-map: using 4096 tokens, files refresh
+
+
+https://aider.chat/HISTORY.html#release-notes
+
+Initial repo scan can be slow in larger repos, but only happens once.
+The issue is in `Exists.as_sql()` in `django/db/models/expressions.py`. When the
+subquery is an empty queryset, compiling it raises `EmptyResultSet`. Under 
+`~Exists(...)`, that should mean the condition is always true, but the exception
+propagates instead. That makes the WHERE compiler drop the whole clause, 
+including `name='test'`.
+
+The fix is to catch `EmptyResultSet` in `Exists.as_sql()`. If the expression is 
+negated, return a constant true condition. Otherwise, re-raise. Backends without
+boolean expressions in the SELECT clause get `1=1`, matching the existing 
+convention.
+
+I'm working from my knowledge of Django's source rather than the file contents, 
+since the file isn't in the chat. If the SEARCH block doesn't match, the file is
+likely a different version and I'll need you to add it so I can see the exact 
+text.
+
+django/db/models/expressions.py
+```python
+<<<<<<< SEARCH
+        sql, params = super().as_sql(
+            compiler,
+            connection,
+            template=template,
+            query=query,
+            **extra_context,
+        )
+        if self.negated:
+            sql = 'NOT {}'.format(sql)
+        return sql, params
+=======
+        try:
+            sql, params = super().as_sql(
+                compiler,
+                connection,
+                template=template,
+                query=query,
+                **extra_context,
+            )
+        except EmptyResultSet:
+            if self.negated:
+                features = compiler.connection.features
+                if not features.supports_boolean_expr_in_select_clause:
+                    return '1=1', ()
+                return compiler.compile(Value(True))
+            raise
+        if self.negated:
+            sql = 'NOT {}'.format(sql)
+        return sql, params
+>>>>>>> REPLACE
+```
+
+Tokens: 28k sent, 12k cache write, 2.4k cache hit, 2.3k received.
+Cost: $0.0028 message, $0.0028 session.
+
+django/db/models/expressions.py
+No other files are needed. The change is limited to `Exists.as_sql()` in 
+`django/db/models/expressions.py`, which you've added. I checked the SEARCH 
+block from my last reply against the file contents you provided, and it matches 
+exactly. Here is the edit again so it's clearly in the chat's current state:
+
+django/db/models/expressions.py
+```python
+<<<<<<< SEARCH
+        sql, params = super().as_sql(
+            compiler,
+            connection,
+            template=template,
+            query=query,
+            **extra_context,
+        )
+        if self.negated:
+            sql = 'NOT {}'.format(sql)
+        return sql, params
+=======
+        try:
+            sql, params = super().as_sql(
+                compiler,
+                connection,
+                template=template,
+                query=query,
+                **extra_context,
+            )
+        except EmptyResultSet:
+            if self.negated:
+                features = compiler.connection.features
+                if not features.supports_boolean_expr_in_select_clause:
+                    return '1=1', ()
+                return compiler.compile(Value(True))
+            raise
+        if self.negated:
+            sql = 'NOT {}'.format(sql)
+        return sql, params
+>>>>>>> REPLACE
+```
+
+To check the fix against the issue's reproduction, you can run the existing 
+expressions tests:
+
+```bash
+cd tests && python runtests.py expressions
+```
+
+Tokens: 53k sent, 24k cache write, 2.4k cache hit, 1.7k received.
+Cost: $0.0041 message, $0.0069 session.
+
+tests/runtests.py
+No other files are needed. `tests/runtests.py` is only the test runner, and the 
+fix is fully contained in `Exists.as_sql()` in 
+`django/db/models/expressions.py`, which you've already added. I won't change 
+`runtests.py`.
+
+Run the affected test modules from the project root:
+
+```bash
+python tests/runtests.py expressions queries
+```
+
+Tokens: 76k sent, 36k cache write, 2.4k cache hit, 922 received.
+Cost: $0.0052 message, $0.01 session.
+
+python tests/runtests.py expressions queries

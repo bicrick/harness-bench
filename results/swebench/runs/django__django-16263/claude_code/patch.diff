@@ -1,0 +1,75 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..73ab6812a7 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -550,9 +550,70 @@ class Query(BaseExpression):
+         Perform a COUNT() query using the current filter constraints.
+         """
+         obj = self.clone()
++        obj.strip_unused_annotations()
+         obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+         return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++    def strip_unused_annotations(self):
++        """
++        Remove annotations that are not referenced by the WHERE clause, the
++        ordering or other annotations that are kept, along with the joins
++        only they used. Annotations are left alone when they can affect the
++        rows being counted (distinct, slicing, combinators).
++        """
++        if self.distinct or self.is_sliced or self.combinator or not self.annotations:
++            return
++        annotation_aliases = {
++            id(annotation): alias for alias, annotation in self.annotations.items()
++        }
++        referenced_annotations = set()
++        referenced_cols = set()
++        pending = [self.where, *self.order_by]
++        seen = set()
++        while pending:
++            node = pending.pop()
++            if isinstance(node, str):
++                name = node.removeprefix("-")
++                if name in self.annotations:
++                    referenced_annotations.add(name)
++                continue
++            if id(node) in seen:
++                continue
++            seen.add(id(node))
++            if id(node) in annotation_aliases:
++                referenced_annotations.add(annotation_aliases[id(node)])
++            if isinstance(node, Ref):
++                referenced_annotations.add(node.refs)
++            if isinstance(node, Col):
++                referenced_cols.add(node.alias)
++            if isinstance(node, WhereNode):
++                pending.extend(node.children)
++            elif hasattr(node, "get_source_expressions"):
++                pending.extend(node.get_source_expressions())
++        # Keep the joins needed by the remaining references, including the
++        # parent joins they're chained from.
++        join_aliases = {self.get_initial_alias()}
++        for alias in referenced_cols:
++            while alias is not None:
++                join_aliases.add(alias)
++                alias = self.alias_map[alias].parent_alias
++        # A GROUP BY over all the model's columns (set by aggregate
++        # annotations) collapses rows multiplied by joins, so it can only be
++        # dropped when no such joins remain.
++        if self.group_by is True:
++            if len(join_aliases) > 1:
++                return
++            self.group_by = None
++        if len(referenced_annotations) == len(self.annotations):
++            return
++        self.annotations = {
++            alias: annotation
++            for alias, annotation in self.annotations.items()
++            if alias in referenced_annotations
++        }
++        self._annotation_select_cache = None
++        self.reset_refcounts({alias: 1 for alias in join_aliases})
++
+     def has_filters(self):
+         return self.where
+ 

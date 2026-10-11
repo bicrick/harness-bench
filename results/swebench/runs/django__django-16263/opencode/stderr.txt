@@ -1,0 +1,601 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "def get_count" -A 25 django/db/models/sql/query.py && grep -n "def get_aggregation" django/db/models/sql/query.py && git log --oneline -1
+548:    def get_count(self, using):
+549-        """
+550-        Perform a COUNT() query using the current filter constraints.
+551-        """
+552-        obj = self.clone()
+553-        obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+554-        return obj.get_aggregation(using, ["__count"])["__count"]
+555-
+556-    def has_filters(self):
+557-        return self.where
+558-
+559-    def exists(self, limit=True):
+560-        q = self.clone()
+561-        if not (q.distinct and q.is_sliced):
+562-            if q.group_by is True:
+563-                q.add_fields(
+564-                    (f.attname for f in self.model._meta.concrete_fields), False
+565-                )
+566-                # Disable GROUP BY aliases to avoid orphaning references to the
+567-                # SELECT clause which is about to be cleared.
+568-                q.set_group_by(allow_aliases=False)
+569-            q.clear_select_clause()
+570-        if q.combined_queries and q.combinator == "union":
+571-            q.combined_queries = tuple(
+572-                combined_query.exists(limit=False)
+573-                for combined_query in q.combined_queries
+438:    def get_aggregation(self, using, added_aggregate_names):
+d4645f1248 SWE-bench
+[0m
+[0m$ [0mcd /testbed && sed -n 438,548p django/db/models/sql/query.py
+def get_aggregation(self, using, added_aggregate_names):
+        """
+        Return the dictionary with the values of the existing aggregations.
+        """
+        if not self.annotation_select:
+            return {}
+        existing_annotations = [
+            annotation
+            for alias, annotation in self.annotations.items()
+            if alias not in added_aggregate_names
+        ]
+        # Decide if we need to use a subquery.
+        #
+        # Existing annotations would cause incorrect results as get_aggregation()
+        # must produce just one result and thus must not use GROUP BY. But we
+        # aren't smart enough to remove the existing annotations from the
+        # query, so those would force us to use GROUP BY.
+        #
+        # If the query has limit or distinct, or uses set operations, then
+        # those operations must be done in a subquery so that the query
+        # aggregates on the limit and/or distinct results instead of applying
+        # the distinct and limit after the aggregation.
+        if (
+            isinstance(self.group_by, tuple)
+            or self.is_sliced
+            or existing_annotations
+            or self.distinct
+            or self.combinator
+        ):
+            from django.db.models.sql.subqueries import AggregateQuery
+
+            inner_query = self.clone()
+            inner_query.subquery = True
+            outer_query = AggregateQuery(self.model, inner_query)
+            inner_query.select_for_update = False
+            inner_query.select_related = False
+            inner_query.set_annotation_mask(self.annotation_select)
+            # Queries with distinct_fields need ordering and when a limit is
+            # applied we must take the slice from the ordered query. Otherwise
+            # no need for ordering.
+            inner_query.clear_ordering(force=False)
+            if not inner_query.distinct:
+                # If the inner query uses default select and it has some
+                # aggregate annotations, then we must make sure the inner
+                # query is grouped by the main model's primary key. However,
+                # clearing the select clause can alter results if distinct is
+                # used.
+                has_existing_aggregate_annotations = any(
+                    annotation
+                    for annotation in existing_annotations
+                    if getattr(annotation, "contains_aggregate", True)
+                )
+                if inner_query.default_cols and has_existing_aggregate_annotations:
+                    inner_query.group_by = (
+                        self.model._meta.pk.get_col(inner_query.get_initial_alias()),
+                    )
+                inner_query.default_cols = False
+
+            relabels = {t: "subquery" for t in inner_query.alias_map}
+            relabels[None] = "subquery"
+            # Remove any aggregates marked for reduction from the subquery
+            # and move them to the outer AggregateQuery.
+            col_cnt = 0
+            for alias, expression in list(inner_query.annotation_select.items()):
+                annotation_select_mask = inner_query.annotation_select_mask
+                if expression.is_summary:
+                    expression, col_cnt = inner_query.rewrite_cols(expression, col_cnt)
+                    outer_query.annotations[alias] = expression.relabeled_clone(
+                        relabels
+                    )
+                    del inner_query.annotations[alias]
+                    annotation_select_mask.remove(alias)
+                # Make sure the annotation_select wont use cached results.
+                inner_query.set_annotation_mask(inner_query.annotation_select_mask)
+            if (
+                inner_query.select == ()
+                and not inner_query.default_cols
+                and not inner_query.annotation_select_mask
+            ):
+                # In case of Model.objects[0:3].count(), there would be no
+                # field selected in the inner query, yet we must use a subquery.
+                # So, make sure at least one field is selected.
+                inner_query.select = (
+                    self.model._meta.pk.get_col(inner_query.get_initial_alias()),
+                )
+        else:
+            outer_query = self
+            self.select = ()
+            self.default_cols = False
+            self.extra = {}
+
+        empty_set_result = [
+            expression.empty_result_set_value
+            for expression in outer_query.annotation_select.values()
+        ]
+        elide_empty = not any(result is NotImplemented for result in empty_set_result)
+        outer_query.clear_ordering(force=True)
+        outer_query.clear_limits()
+        outer_query.select_for_update = False
+        outer_query.select_related = False
+        compiler = outer_query.get_compiler(using, elide_empty=elide_empty)
+        result = compiler.execute_sql(SINGLE)
+        if result is None:
+            result = empty_set_result
+
+        converters = compiler.get_converters(outer_query.annotation_select.values())
+        result = next(compiler.apply_converters((result,), converters))
+
+        return dict(zip(outer_query.annotation_select, result))
+
+    def get_count(self, using):
+[0m
+[0m$ [0mcd /testbed && grep -rn "referenced\|def get_refs\|def set_annotation_mask\|def trim_start\|def clear_ordering" django/db/models/sql/*.py django/db/models/expressions.py | head -40; grep -n "get_count\|def count" -A3 django/db/models/query.py | head -30
+django/db/models/sql/query.py:1151:        # If wrapper is referenced by an alias for an explicit GROUP BY through
+django/db/models/sql/query.py:2197:    def clear_ordering(self, force=False, clear_default=True):
+django/db/models/sql/query.py:2363:    def set_annotation_mask(self, names):
+django/db/models/sql/query.py:2472:    def trim_start(self, names_with_path):
+614:    def count(self):
+615-        """
+616-        Perform a SELECT COUNT() and return the number of records as an
+617-        integer.
+--
+625:        return self.query.get_count(using=self.db)
+626-
+627-    async def acount(self):
+628-        return await sync_to_async(self.count)()
+[0m
+[0m$ [0mcd /testbed && sed -n 2363,2385p django/db/models/sql/query.py; grep -n "def flatten\|class Ref\|self.refs" django/db/models/expressions.py django/db/models/lookups.py django/db/models/sql/where.py | head; grep -n "def split_having\|def flatten" -A3 django/db/models/sql/where.py
+def set_annotation_mask(self, names):
+        """Set the mask of annotations that will be returned by the SELECT."""
+        if names is None:
+            self.annotation_select_mask = None
+        else:
+            self.annotation_select_mask = set(names)
+        self._annotation_select_cache = None
+
+    def append_annotation_mask(self, names):
+        if self.annotation_select_mask is not None:
+            self.set_annotation_mask(self.annotation_select_mask.union(names))
+
+    def set_extra_mask(self, names):
+        """
+        Set the mask of extra select items that will be returned by SELECT.
+        Don't remove them from the Query since they might be used later.
+        """
+        if names is None:
+            self.extra_select_mask = None
+        else:
+            self.extra_select_mask = set(names)
+        self._extra_select_cache = None
+
+django/db/models/expressions.py:444:    def flatten(self):
+django/db/models/expressions.py:1144:class Ref(Expression):
+django/db/models/expressions.py:1152:        self.refs, self.source = refs, source
+django/db/models/expressions.py:1155:        return "{}({}, {})".format(self.__class__.__name__, self.refs, self.source)
+django/db/models/expressions.py:1174:        return connection.ops.quote_name(self.refs), []
+38:    def split_having_qualify(self, negated=False, must_group_by=False):
+39-        """
+40-        Return three possibly None nodes: one for those parts of self that
+41-        should be included in the WHERE clause, one for those parts of self
+[0m
+[0m$ [0mcd /testbed && sed -n 440,452p django/db/models/expressions.py; grep -n "def get_source_expressions\|def flatten" django/db/models/lookups.py django/db/models/sql/where.py django/utils/tree.py; grep -n "class WhereNode" -A3 django/db/models/sql/where.py; grep -n "def get_group_by_cols" -A12 django/db/models/sql/where.py | head -5
+def reverse_ordering(self):
+        return self
+
+    def flatten(self):
+        """
+        Recursively yield this expression and all subexpressions, in
+        depth-first order.
+        """
+        yield self
+        for expr in self.get_source_expressions():
+            if expr:
+                if hasattr(expr, "flatten"):
+django/db/models/lookups.py:69:    def get_source_expressions(self):
+django/db/models/sql/where.py:190:    def get_source_expressions(self):
+19:class WhereNode(tree.Node):
+20-    """
+21-    An SQL WHERE clause.
+22-
+184:    def get_group_by_cols(self):
+185-        cols = []
+186-        for child in self.children:
+187-            cols.extend(child.get_group_by_cols())
+188-        return cols
+[0m
+[0m$ [0mcd /testbed && sed -n 186,200p django/db/models/sql/where.py; sed -n 66,75p django/db/models/lookups.py
+for child in self.children:
+            cols.extend(child.get_group_by_cols())
+        return cols
+
+    def get_source_expressions(self):
+        return self.children[:]
+
+    def set_source_expressions(self, children):
+        assert len(children) == len(self.children)
+        self.children = children
+
+    def relabel_aliases(self, change_map):
+        """
+        Relabel the alias values of any children. 'change_map' is a dictionary
+        mapping old (current) alias values to the new values.
+            sqls, sqls_params = ["%s"] * len(params), params
+        return sqls, sqls_params
+
+    def get_source_expressions(self):
+        if self.rhs_is_direct_value():
+            return [self.lhs]
+        return [self.lhs, self.rhs]
+
+    def set_source_expressions(self, new_exprs):
+        if len(new_exprs) == 1:
+[0m
+[0m$ [0mcd /testbed && grep -n "^from\|^import" django/db/models/sql/query.py | head -60; grep -n "class Node" django/utils/tree.py
+9:import copy
+10:import difflib
+11:import functools
+12:import sys
+13:from collections import Counter, namedtuple
+14:from collections.abc import Iterator, Mapping
+15:from itertools import chain, count, product
+16:from string import ascii_uppercase
+18:from django.core.exceptions import FieldDoesNotExist, FieldError
+19:from django.db import DEFAULT_DB_ALIAS, NotSupportedError, connections
+20:from django.db.models.aggregates import Count
+21:from django.db.models.constants import LOOKUP_SEP
+22:from django.db.models.expressions import (
+32:from django.db.models.fields import Field
+33:from django.db.models.fields.related_lookups import MultiColSource
+34:from django.db.models.lookups import Lookup
+35:from django.db.models.query_utils import (
+40:from django.db.models.sql.constants import INNER, LOUTER, ORDER_DIR, SINGLE
+41:from django.db.models.sql.datastructures import BaseTable, Empty, Join, MultiJoin
+42:from django.db.models.sql.where import AND, OR, ExtraWhere, NothingNode, WhereNode
+43:from django.utils.functional import cached_property
+44:from django.utils.regex_helper import _lazy_re_compile
+45:from django.utils.tree import Node
+11:class Node:
+[0m
+[0m$ [0mcd /testbed && sed -n 22,31p django/db/models/sql/query.py
+from django.db.models.expressions import (
+    BaseExpression,
+    Col,
+    Exists,
+    F,
+    OuterRef,
+    Ref,
+    ResolvedOuterRef,
+    Value,
+)
+[0m
+[0m← [0mEdit django/db/models/sql/query.py
+Index: /testbed/django/db/models/sql/query.py
+===================================================================
+--- /testbed/django/db/models/sql/query.py
++++ /testbed/django/db/models/sql/query.py
+@@ -549,11 +549,89 @@
+     """
+     Perform a COUNT() query using the current filter constraints.
+     """
+     obj = self.clone()
++    obj.strip_unused_annotations()
+     obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+     return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++def _get_referenced_annotation_aliases(self):
++    """
++    Return the set of annotation aliases referenced by the WHERE clause,
++    the ordering, or (transitively) by other referenced annotations.
++    """
++    annotations = self.annotations
++    alias_by_id = {id(expr): alias for alias, expr in annotations.items()}
++    referenced = set()
++    visited = set()
++    pending = []
++
++    def visit(obj):
++        if obj is None or isinstance(obj, (bool, int, float)):
++            return
++        if isinstance(obj, str):
++            name = obj[1:] if obj.startswith("-") else obj
++            if name in annotations:
++                referenced.add(name)
++                pending.append(annotations[name])
++            return
++        if id(obj) in visited:
++            return
++        visited.add(id(obj))
++        if id(obj) in alias_by_id:
++            alias = alias_by_id[id(obj)]
++            referenced.add(alias)
++        if isinstance(obj, Ref):
++            if obj.refs in annotations:
++                referenced.add(obj.refs)
++                pending.append(annotations[obj.refs])
++            return
++        if isinstance(obj, Node):
++            for child in obj.children:
++                visit(child)
++            return
++        if isinstance(obj, (list, tuple)):
++            for child in obj:
++                visit(child)
++            return
++        get_source_expressions = getattr(obj, "get_source_expressions", None)
++        if get_source_expressions is not None:
++            for expr in get_source_expressions():
++                visit(expr)
++
++    visit(self.where)
++    for item in self.order_by:
++        visit(item)
++    # Annotations referenced by other referenced annotations are also used.
++    while pending:
++        visit(pending.pop())
++    return referenced
++
++def strip_unused_annotations(self):
++    """
++    Remove annotations that cannot affect the result of a COUNT() query,
++    i.e. those not referenced by filters, ordering or other annotations.
++    """
++    if not self.annotations or self.distinct or self.combinator:
++        return
++    if self.group_by is not True and self.group_by is not None:
++        # An explicit GROUP BY (e.g. from values()) determines row counts.
++        return
++    if self.is_sliced:
++        return
++    referenced = self._get_referenced_annotation_aliases()
++    for alias in list(self.annotations):
++        if alias in referenced:
++            continue
++        if self.annotations[alias].is_summary:
++            continue
++        del self.annotations[alias]
++        if self.annotation_select_mask is not None:
++            self.annotation_select_mask.discard(alias)
++    self._annotation_select_cache = None
++    if self.annotation_select_mask is not None:
++        self.set_annotation_mask(self.annotation_select_mask)
++
+ def has_filters(self):
+     return self.where
+ 
+ def exists(self, limit=True):
+
+[0m
+[0m$ [0mcd /testbed && grep -n "annotation_select_mask" django/db/models/sql/query.py | head -5; cat > /tmp/t.py <<'EOF'
+import django,os
+os.environ.setdefault("DJANGO_SETTINGS_MODULE","tests.test_sqlite")
+EOF
+ls tests | head -3; cd tests && timeout 900 python runtests.py aggregation annotations queries expressions expressions_case m2m_through  -q 2>&1 | tail -15
+209:    annotation_select_mask = None
+330:        if self.annotation_select_mask is not None:
+331:            obj.annotation_select_mask = self.annotation_select_mask.copy()
+502:                annotation_select_mask = inner_query.annotation_select_mask
+509:                    annotation_select_mask.remove(alias)
+README.rst
+absolute_url_overrides
+admin_autodiscover
+usage: runtests.py [-h] [-v {0,1,2,3}] [--noinput] [--failfast] [--keepdb]
+                   [--settings SETTINGS] [--bisect BISECT] [--pair PAIR]
+                   [--shuffle [SEED]] [--reverse] [--selenium BROWSERS]
+                   [--headless] [--selenium-hub SELENIUM_HUB]
+                   [--external-host EXTERNAL_HOST] [--debug-sql]
+                   [--parallel [N]] [--tag TAGS] [--exclude-tag EXCLUDE_TAGS]
+                   [--start-after START_AFTER] [--start-at START_AT] [--pdb]
+                   [-b] [--timing] [-k TEST_NAME_PATTERNS]
+                   [module ...]
+runtests.py: error: unrecognized arguments: -q
+[0m
+[0m$ [0mcd /testbed/tests && timeout 1500 python runtests.py aggregation annotations queries expressions expressions_case m2m_through model_fields order_with_respect_to basic lookup 2>&1 | tail -15
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+[0m
+[0m$ [0mcd /testbed/tests && timeout 1500 python runtests.py aggregation annotations queries expressions expressions_case m2m_through model_fields basic lookup 2>&1 | grep -E "^(FAIL|ERROR):|^Ran|^OK|FAILED" | head -30
+FAIL: test_aggregation_subquery_annotation_multivalued (aggregation.tests.AggregateTestCase)
+Ran 1573 tests in 1.359s
+FAILED (failures=1, skipped=31, expected failures=3)
+[0m
+[0m$ [0mcd /testbed/tests && timeout 600 python runtests.py aggregation.tests.AggregateTestCase.test_aggregation_subquery_annotation_multivalued 2>&1 | sed -n 1,40p; grep -n "def test_aggregation_subquery_annotation_multivalued" -A22 aggregation/tests.py
+Creating test database for alias 'default'...
+Testing against Django installed in '/testbed/django' with up to 8 processes
+Found 1 test(s).
+System check identified no issues (0 silenced).
+F
+======================================================================
+FAIL: test_aggregation_subquery_annotation_multivalued (aggregation.tests.AggregateTestCase)
+Subquery annotations must be included in the GROUP BY if they use
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/testbed/django/test/testcases.py", line 1604, in skip_wrapper
+    return test_func(*args, **kwargs)
+  File "/testbed/tests/aggregation/tests.py", line 1539, in test_aggregation_subquery_annotation_multivalued
+    self.assertEqual(author_qs.count(), Author.objects.count())
+AssertionError: 10 != 9
+
+----------------------------------------------------------------------
+Ran 1 test in 0.012s
+
+FAILED (failures=1)
+Destroying test database for alias 'default'...
+1527:    def test_aggregation_subquery_annotation_multivalued(self):
+1528-        """
+1529-        Subquery annotations must be included in the GROUP BY if they use
+1530-        potentially multivalued relations (contain the LOOKUP_SEP).
+1531-        """
+1532-        subquery_qs = Author.objects.filter(
+1533-            pk=OuterRef("pk"),
+1534-            book__name=OuterRef("book__name"),
+1535-        ).values("pk")
+1536-        author_qs = Author.objects.annotate(
+1537-            subquery_id=Subquery(subquery_qs),
+1538-        ).annotate(count=Count("book"))
+1539-        self.assertEqual(author_qs.count(), Author.objects.count())
+1540-
+1541-    def test_aggregation_order_by_not_selected_annotation_values(self):
+1542-        result_asc = [
+1543-            self.b4.pk,
+1544-            self.b3.pk,
+1545-            self.b1.pk,
+1546-            self.b2.pk,
+1547-            self.b5.pk,
+1548-            self.b6.pk,
+1549-        ]
+[0m
+[0m$ [0mcd /testbed/tests && sed -i 's/        self.assertEqual(author_qs.count(), Author.objects.count())/        print(author_qs.query); self.assertEqual(author_qs.count(), Author.objects.count())/' aggregation/tests.py && timeout 600 python runtests.py aggregation.tests.AggregateTestCase.test_aggregation_subquery_annotation_multivalued 2>&1 | grep SELECT; git checkout aggregation/tests.py
+SELECT "aggregation_author"."id", "aggregation_author"."name", "aggregation_author"."age", "aggregation_author"."rating", (SELECT U0."id" FROM "aggregation_author" U0 INNER JOIN "aggregation_book_authors" U1 ON (U0."id" = U1."author_id") INNER JOIN "aggregation_book" U2 ON (U1."book_id" = U2."id") WHERE (U2."name" = ("aggregation_book"."name") AND U0."id" = ("aggregation_author"."id"))) AS "subquery_id", COUNT("aggregation_book_authors"."book_id") AS "count" FROM "aggregation_author" LEFT OUTER JOIN "aggregation_book_authors" ON ("aggregation_author"."id" = "aggregation_book_authors"."author_id") LEFT OUTER JOIN "aggregation_book" ON ("aggregation_book_authors"."book_id" = "aggregation_book"."id") GROUP BY "aggregation_author"."id", "aggregation_author"."name", "aggregation_author"."age", "aggregation_author"."rating", "subquery_id"
+Updated 1 path from the index
+[0m
+[0m$ [0mcd /testbed && git stash -q && cd tests && timeout 600 python runtests.py aggregation.tests.AggregateTestCase.test_aggregation_subquery_annotation_multivalued 2>&1 | grep -E "^Ran|^OK|FAILED|Error"; cd /testbed && git stash pop -q && git status --short
+Ran 1 test in 0.009s
+OK
+ M django/db/models/sql/query.py
+[0m
+[0m$ [0mcd /testbed/tests && sed -i 's/        self.assertEqual(author_qs.count(), Author.objects.count())/        print("DBG", author_qs.query.group_by, author_qs.query.annotations, author_qs.query._get_referenced_annotation_aliases()); print(author_qs.query.get_count.__name__); q=author_qs.query.clone(); q.strip_unused_annotations(); print("DBG2", q.annotations, q.group_by); self.assertEqual(author_qs.count(), Author.objects.count())/' aggregation/tests.py && timeout 600 python runtests.py aggregation.tests.AggregateTestCase.test_aggregation_subquery_annotation_multivalued 2>&1 | grep DBG; git checkout -q aggregation/tests.py
+print("DBG", author_qs.query.group_by, author_qs.query.annotations, author_qs.query._get_referenced_annotation_aliases()); print(author_qs.query.get_count.__name__); q=author_qs.query.clone(); q.strip_unused_annotations(); print("DBG2", q.annotations, q.group_by); self.assertEqual(author_qs.count(), Author.objects.count())
+DBG True {'subquery_id': <django.db.models.expressions.Subquery object at 0x7f5bdf7a0160>, 'count': Count(Col(aggregation_book_authors, aggregation.Book_authors.book))} set()
+DBG2 {} True
+[0m
+[0m$ [0mcd /testbed && grep -n "class Subquery\|class Exists\|class ResolvedOuterRef\|class OuterRef" -A2 django/db/models/expressions.py | head -20; grep -n "def unref_alias" -A8 django/db/models/sql/query.py
+837:class ResolvedOuterRef(F):
+838-    """
+839-    An object that contains a reference to an outer query.
+--
+869:class OuterRef(F):
+870-    contains_aggregate = False
+871-
+--
+1487:class Subquery(BaseExpression, Combinable):
+1488-    """
+1489-    An explicit subquery. It may contain OuterRef() references to the outer
+--
+1539:class Exists(Subquery):
+1540-    template = "EXISTS(%(subquery)s)"
+1541-    output_field = fields.BooleanField()
+898:    def unref_alias(self, alias, amount=1):
+899-        """Decreases the reference count for this alias."""
+900-        self.alias_refcount[alias] -= amount
+901-
+902-    def promote_joins(self, aliases):
+903-        """
+904-        Promote recursively the join type of given aliases and its children to
+905-        an outer join. If 'unconditional' is False, only promote the join if
+906-        it is nullable or the parent join is an outer join.
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+import re
+p='django/db/models/sql/query.py'
+s=open(p).read()
+old='''        referenced = self._get_referenced_annotation_aliases()
+        for alias in list(self.annotations):
+            if alias in referenced:
+                continue
+            if self.annotations[alias].is_summary:
+                continue
+            del self.annotations[alias]
+            if self.annotation_select_mask is not None:
+                self.annotation_select_mask.discard(alias)
+        self._annotation_select_cache = None
+        if self.annotation_select_mask is not None:
+            self.set_annotation_mask(self.annotation_select_mask)'''
+new='''        referenced = self._get_referenced_annotation_aliases()
+        removed = False
+        for alias in list(self.annotations):
+            if alias in referenced or self.annotations[alias].is_summary:
+                continue
+            annotation = self.annotations[alias]
+            # Subqueries may hold outer references that are hard to track, so
+            # keep such annotations to avoid changing the query's joins.
+            if any(
+                isinstance(expr, (Subquery, Exists, OuterRef, ResolvedOuterRef))
+                for expr in annotation.flatten()
+            ):
+                continue
+            # Release the join references held by the removed annotation so
+            # that joins only needed by it are no longer emitted.
+            for expr in annotation.flatten():
+                if isinstance(expr, Col) and expr.alias in self.alias_map:
+                    alias_name = expr.alias
+                    while alias_name is not None:
+                        self.unref_alias(alias_name)
+                        alias_name = getattr(
+                            self.alias_map.get(alias_name), "parent_alias", None
+                        )
+            del self.annotations[alias]
+            removed = True
+        if removed and self.annotation_select_mask is not None:
+            self.set_annotation_mask(
+                self.annotation_select_mask & set(self.annotations)
+            )
+        self._annotation_select_cache = None'''
+assert s.count(old)==1
+s=s.replace(old,new)
+s=s.replace("    Exists,\n    F,\n    OuterRef,\n    Ref,\n    ResolvedOuterRef,\n    Value,\n)","    Exists,\n    F,\n    OuterRef,\n    Ref,\n    ResolvedOuterRef,\n    Subquery,\n    Value,\n)",1)
+open(p,'w').write(s)
+EOF
+sed -n 22,33p django/db/models/sql/query.py; cd tests && timeout 1500 python runtests.py aggregation annotations queries expressions expressions_case m2m_through model_fields basic lookup count 2>&1 | grep -E "^(FAIL|ERROR):|^Ran|^OK|FAILED" | head
+from django.db.models.expressions import (
+    BaseExpression,
+    Col,
+    Exists,
+    F,
+    OuterRef,
+    Ref,
+    ResolvedOuterRef,
+    Subquery,
+    Value,
+)
+from django.db.models.fields import Field
+ERROR: count (unittest.loader._FailedTest)
+Ran 1574 tests in 0.973s
+FAILED (errors=1, skipped=31, expected failures=3)
+[0m
+[93m[1m! [0mpermission requested: external_directory (/tmp/*); auto-rejecting
+[0m✗ [0mcd /testbed/tests && cat > /tmp/check_test.py <<'EOF'
+from django.db.models import Count
+from django.test import TestCase
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+from aggregation.models import Author, Book
+
+class T(TestCase):
+    def test_x(self):
+        a = Author.objects.create(name="a", age=1)
+        b1 = Book.objects.create(name="b1", pages=1, rating=1, price=1, pubdate="2000-01-01", contact=a, publisher=None) if False else None
+        for qs in [Author.objects.annotate(c=Count("book")), Author.objects.annotate(c=Count("book")).filter(c__gt=0)]:
+            with CaptureQueriesContext(connection) as ctx:
+                print(qs.count())
+            print(ctx.captured_queries[0]["sql"])
+EOF
+cp /tmp/check_test.py aggregation/test_tmpcheck.py && timeout 600 python runtests.py aggregation.test_tmpcheck 2>&1 | grep -E "SELECT|^[0-9]|Error"; rm -f aggregation/test_tmpcheck.py failed
+[91m[1mError: [0mThe user rejected permission to use this specific tool call.

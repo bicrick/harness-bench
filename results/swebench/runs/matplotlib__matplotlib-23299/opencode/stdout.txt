@@ -1,0 +1,10 @@
+The cause is in `rc_context`: it snapshots `rcParams` while `backend` is still the unresolved auto sentinel, then restores that sentinel on exit. The next `rcParams['backend']` read sees the sentinel and calls `switch_backend()`, which runs `close("all")` and wipes `Gcf`. I'll drop the sentinel from the snapshot so exiting the context doesn't reset backend resolution.
+The snapshot is an `RcParams` object, so `del` goes through the mapping's `__delitem__` and raises. I'll convert it to a plain dict first.
+The reproducer now passes. The test run shows 3 failures, though, so I need to check whether my change caused any of them.
+`get_backend()` no longer clears `Gcf` when the first figure was created under `rc_context`. The issue's reproducer now passes.
+
+The cause was in `rc_context` in `lib/matplotlib/__init__.py`. It snapshotted `rcParams` before the backend was resolved, so the auto-backend sentinel was restored on exit. The next `rcParams['backend']` read then re-ran `switch_backend()`, which calls `close("all")`.
+
+The fix drops the unresolved sentinel from the snapshot, so exiting the context leaves backend resolution alone. I also wrapped the snapshot in `dict(...)`, because the `RcParams` copy's `del` raised `KeyError`.
+
+Test results: the same three tests fail with and without my change (`test_rcparams_update`, `test_rcparams_init`, `test_pylab_integration`). They fail with the same messages on the untouched code, so they are pre-existing and not caused by this edit. I did not add or change any tests.

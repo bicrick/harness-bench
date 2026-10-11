@@ -1,0 +1,15 @@
+The recorder never consults the router, so it creates and writes the `django_migrations` table on every connection. I'll add `router.allow_migrate_model` checks to each method that touches the table.
+My change broke `test_migrate_fake_initial`. Let me look at that test.
+The test router forbids the `migration` model on `other`, yet this test expects migrations to be recorded there. Let me find exactly which call fails.
+The failing call is the final `migrate database="other"`: with the recorder gated, 0001 on `other` is no longer seen as applied and reruns. Let me check the repo version and whether the docs say anything about the recorder and routers.
+The fix is in place, but it breaks one existing test, and I stopped short of changing the test per your instructions.
+
+**What I changed** (`django/db/migrations/recorder.py`): `MigrationRecorder` now asks the routers via `router.allow_migrate_model(connection.alias, self.Migration)` before touching `django_migrations`:
+
+- `ensure_schema()` returns without creating the table when the router disallows it.
+- `applied_migrations()` returns `{}` when disallowed.
+- `record_applied()`, `record_unapplied()` and `flush()` become no-ops when disallowed.
+
+**Test result:** `runtests.py migrations` gives 628 passing and 1 error: `migrations.test_commands.MigrateTests.test_migrate_fake_initial`. The failure is at line 174, the final `migrate database="other"`. The test's `TestRouter` (`tests/migrations/routers.py`) forbids the `migration` model on `other`, yet the test expects migration 0001 to be recorded there so it isn't re-run. With the recorder gated, it reruns and fails with `table "migrations_tribble" already exists`.
+
+So the issue's requested behaviour and this existing test directly conflict. The test encodes the old behaviour, so it probably needs its router to allow the `migration` model on `other` (e.g. `if model_name == 'migration': return True`). I didn't make that change because you asked me not to modify tests. Let me know if you want that done.

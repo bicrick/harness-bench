@@ -1,0 +1,6 @@
+The per-request threads spawned by `ThreadedWSGIServer` never close their DB connections, and `daemon_threads = True` means the server doesn't wait for them. I'll override `process_request_thread` so each request thread closes its own connections when it finishes.
+I changed `ThreadedWSGIServer` in `django/core/servers/basehttp.py` so each request-handling thread closes its database connections when it finishes.
+
+The server uses `daemon_threads = True` and never joins those threads, so their connections could still be open when `destroy_test_db()` ran. I added a `process_request_thread` override that calls `connections.close_all()` in a `finally` block after the request is handled. I also imported `connections` from `django.db` in that module.
+
+The `servers` test suite passes (25 tests, 1 skipped). I did not reproduce the original race, since it's intermittent, and I did not add or change any tests.

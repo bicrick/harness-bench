@@ -1,0 +1,13 @@
+The bug is in the `division_of_units` grammar rule: `a/b/c` is parsed right-associatively as `a/(b/c)`. In CDS, everything after the first `/` belongs in the denominator, so `J/m/s/kpc2` should be `J/(m·s·kpc2)`. I'll add a `denominator` rule that multiplies all following units together.
+The output is unchanged, so the new rule isn't being used. I suspect a cached parse table. Checking where it lives and what the 17 test failures are.
+The stale `cds_parsetab.py` is being loaded instead of regenerated. Following the header note in `cds.py`, I'll delete it so it gets regenerated from the new grammar, and check whether the 17 failures predate my change.
+The units now parse correctly. Next I'll confirm the 17 test failures existed before my change.
+CDS composite units now parse correctly. `10+3J/m/s/kpc2` gives `1000 J / (kpc2 m s)` and `10-7J/s/kpc2` gives `1e-07 J / (kpc2 s)`, matching the issue's input.
+
+**Cause:** the `division_of_units` grammar rule was right-associative, so `a/b/c` was parsed as `a/(b/c)`. Under the CDS convention, everything after the first `/` belongs in the denominator, so `J/m/s/kpc2` means `J/(m·s·kpc2)`.
+
+**Fix** (`astropy/units/format/cds.py`): I added a `denominator` rule that multiplies all units following a `/` (separated by `/` or `.`), and the division rule now uses it.
+
+**Parser table:** `cds_parsetab.py` was stale and was being loaded instead of regenerated. I deleted it so it rebuilds from the new grammar, which is why that file shows as modified.
+
+**Tests:** `astropy/units/tests` shows 17 failures both before and after the change, so I did not introduce them. I did not add or change any tests.

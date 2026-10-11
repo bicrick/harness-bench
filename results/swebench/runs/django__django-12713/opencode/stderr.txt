@@ -1,0 +1,116 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "def formfield_for_manytomany" -A 40 django/contrib/admin/options.py && grep -n "def formfield_for_foreignkey" -A 25 django/contrib/admin/options.py
+242:    def formfield_for_manytomany(self, db_field, request, **kwargs):
+243-        """
+244-        Get a form Field for a ManyToManyField.
+245-        """
+246-        # If it uses an intermediary model that isn't auto created, don't show
+247-        # a field in admin.
+248-        if not db_field.remote_field.through._meta.auto_created:
+249-            return None
+250-        db = kwargs.get('using')
+251-
+252-        autocomplete_fields = self.get_autocomplete_fields(request)
+253-        if db_field.name in autocomplete_fields:
+254-            kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
+255-        elif db_field.name in self.raw_id_fields:
+256-            kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
+257-        elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
+258-            kwargs['widget'] = widgets.FilteredSelectMultiple(
+259-                db_field.verbose_name,
+260-                db_field.name in self.filter_vertical
+261-            )
+262-
+263-        if 'queryset' not in kwargs:
+264-            queryset = self.get_field_queryset(db, db_field, request)
+265-            if queryset is not None:
+266-                kwargs['queryset'] = queryset
+267-
+268-        form_field = db_field.formfield(**kwargs)
+269-        if (isinstance(form_field.widget, SelectMultiple) and
+270-                not isinstance(form_field.widget, (CheckboxSelectMultiple, AutocompleteSelectMultiple))):
+271-            msg = _('Hold down “Control”, or “Command” on a Mac, to select more than one.')
+272-            help_text = form_field.help_text
+273-            form_field.help_text = format_lazy('{} {}', help_text, msg) if help_text else msg
+274-        return form_field
+275-
+276-    def get_autocomplete_fields(self, request):
+277-        """
+278-        Return a list of ForeignKey and/or ManyToMany fields which should use
+279-        an autocomplete widget.
+280-        """
+281-        return self.autocomplete_fields
+282-
+218:    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+219-        """
+220-        Get a form Field for a ForeignKey.
+221-        """
+222-        db = kwargs.get('using')
+223-
+224-        if 'widget' not in kwargs:
+225-            if db_field.name in self.get_autocomplete_fields(request):
+226-                kwargs['widget'] = AutocompleteSelect(db_field.remote_field, self.admin_site, using=db)
+227-            elif db_field.name in self.raw_id_fields:
+228-                kwargs['widget'] = widgets.ForeignKeyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
+229-            elif db_field.name in self.radio_fields:
+230-                kwargs['widget'] = widgets.AdminRadioSelect(attrs={
+231-                    'class': get_ul_class(self.radio_fields[db_field.name]),
+232-                })
+233-                kwargs['empty_label'] = _('None') if db_field.blank else None
+234-
+235-        if 'queryset' not in kwargs:
+236-            queryset = self.get_field_queryset(db, db_field, request)
+237-            if queryset is not None:
+238-                kwargs['queryset'] = queryset
+239-
+240-        return db_field.formfield(**kwargs)
+241-
+242-    def formfield_for_manytomany(self, db_field, request, **kwargs):
+243-        """
+[0m
+[0m← [0mEdit django/contrib/admin/options.py
+Index: /testbed/django/contrib/admin/options.py
+===================================================================
+--- /testbed/django/contrib/admin/options.py
++++ /testbed/django/contrib/admin/options.py
+@@ -248,18 +248,19 @@
+ if not db_field.remote_field.through._meta.auto_created:
+     return None
+ db = kwargs.get('using')
+ 
+-autocomplete_fields = self.get_autocomplete_fields(request)
+-if db_field.name in autocomplete_fields:
+-    kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
+-elif db_field.name in self.raw_id_fields:
+-    kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
+-elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
+-    kwargs['widget'] = widgets.FilteredSelectMultiple(
+-        db_field.verbose_name,
+-        db_field.name in self.filter_vertical
+-    )
++if 'widget' not in kwargs:
++    autocomplete_fields = self.get_autocomplete_fields(request)
++    if db_field.name in autocomplete_fields:
++        kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
++    elif db_field.name in self.raw_id_fields:
++        kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
++    elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
++        kwargs['widget'] = widgets.FilteredSelectMultiple(
++            db_field.verbose_name,
++            db_field.name in self.filter_vertical
++        )
+ 
+ if 'queryset' not in kwargs:
+     queryset = self.get_field_queryset(db, db_field, request)
+     if queryset is not None:
+
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py admin_widgets modeladmin --parallel 1 -v 0 2>&1 | tail -5
+----------------------------------------------------------------------
+Ran 237 tests in 0.530s
+
+OK (skipped=14)
+System check identified no issues (0 silenced).
+[0m

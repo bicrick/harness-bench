@@ -1,0 +1,217 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m→ [0mRead django/db/migrations/recorder.py
+[0m
+[0m$ [0mcd /testbed && grep -n "def allow_migrate" -A12 django/db/utils.py | head -60; git log --oneline -1
+272:    def allow_migrate(self, db, app_label, **hints):
+273-        for router in self.routers:
+274-            try:
+275-                method = router.allow_migrate
+276-            except AttributeError:
+277-                # If the router doesn't have a method, skip to the next one.
+278-                continue
+279-
+280-            allow = method(db, app_label, **hints)
+281-
+282-            if allow is not None:
+283-                return allow
+284-        return True
+--
+286:    def allow_migrate_model(self, db, model):
+287-        return self.allow_migrate(
+288-            db,
+289-            model._meta.app_label,
+290-            model_name=model._meta.model_name,
+291-            model=model,
+292-        )
+293-
+294-    def get_migratable_models(self, app_config, db, include_auto_created=False):
+295-        """Return app models allowed to be migrated on provided db."""
+296-        models = app_config.get_models(include_auto_created=include_auto_created)
+297-        return [model for model in models if self.allow_migrate_model(db, model)]
+1b7f1217c7 SWE-bench
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+p='django/db/migrations/recorder.py'
+s=open(p).read()
+s=s.replace("from django.db import DatabaseError, models\n","from django.db import DatabaseError, models, router\n",1)
+s=s.replace('''    def has_table(self):''','''    def allowed_to_migrate(self):
+        """
+        Return True if the migration table may be created/used on this
+        connection according to the database routers.
+        """
+        return router.allow_migrate_model(self.connection.alias, self.Migration)
+
+    def has_table(self):''',1)
+s=s.replace('''        """Ensure the table exists and has the correct schema."""
+''','''        """Ensure the table exists and has the correct schema."""
+        if not self.allowed_to_migrate():
+            return
+''',1)
+s=s.replace('''        for all applied migrations.
+        """
+        if self.has_table():''','''        for all applied migrations.
+        """
+        if not self.allowed_to_migrate():
+            return {}
+        if self.has_table():''',1)
+s=s.replace('''        """Record that a migration was applied."""
+        self.ensure_schema()
+''','''        """Record that a migration was applied."""
+        self.ensure_schema()
+        if not self.allowed_to_migrate():
+            return
+''',1)
+s=s.replace('''        """Record that a migration was unapplied."""
+        self.ensure_schema()
+''','''        """Record that a migration was unapplied."""
+        self.ensure_schema()
+        if not self.allowed_to_migrate():
+            return
+''',1)
+s=s.replace('''        """Delete all migration records. Useful for testing migrations."""
+''','''        """Delete all migration records. Useful for testing migrations."""
+        if not self.allowed_to_migrate():
+            return
+''',1)
+open(p,'w').write(s)
+EOF
+git diff --stat && python -m pytest -q tests/migrations/test_recorder.py 2>&1 | tail -3 || true; ls tests/migrations | head -3
+django/db/migrations/recorder.py | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+__init__.py
+deprecated_field_migrations
+faulty_migrations
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py migrations --parallel 1 2>&1 | tail -5
+Ran 629 tests in 3.902s
+
+FAILED (errors=1, skipped=1)
+Destroying test database for alias 'default'...
+Destroying test database for alias 'other'...
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py migrations --parallel 1 2>&1 | grep -A15 "^ERROR:" | head -30; git stash -q; python runtests.py migrations --parallel 1 2>&1 | tail -3; git stash pop -q
+ERROR: test_migrate_fake_initial (migrations.test_commands.MigrateTests)
+--fake-initial only works if all tables created in the initial
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/testbed/django/db/backends/utils.py", line 83, in _execute
+    return self.cursor.execute(sql)
+  File "/testbed/django/db/backends/sqlite3/base.py", line 332, in execute
+    return Database.Cursor.execute(self, query)
+sqlite3.OperationalError: table "migrations_tribble" already exists
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/testbed/django/test/utils.py", line 437, in inner
+    return func(*args, **kwargs)
+  File "/testbed/tests/migrations/test_commands.py", line 174, in test_migrate_fake_initial
+OK (skipped=1)
+Destroying test database for alias 'default'...
+Destroying test database for alias 'other'...
+[0m
+[0m$ [0mcd /testbed/tests && sed -n 150,180p migrations/test_commands.py; grep -n "routers\|ROUTER" migrations/test_commands.py | head
+self.assertTableNotExists("migrations_author", using="other")
+        self.assertTableExists("migrations_tribble", using="other")
+
+        # Fake a roll-back
+        call_command("migrate", "migrations", "zero", fake=True, verbosity=0)
+        call_command("migrate", "migrations", "zero", fake=True, verbosity=0, database="other")
+        # Make sure the tables still exist
+        self.assertTableExists("migrations_author")
+        self.assertTableExists("migrations_tribble", using="other")
+        # Try to run initial migration
+        with self.assertRaises(DatabaseError):
+            call_command("migrate", "migrations", "0001", verbosity=0)
+        # Run initial migration with an explicit --fake-initial
+        out = io.StringIO()
+        with mock.patch('django.core.management.color.supports_color', lambda *args: False):
+            call_command("migrate", "migrations", "0001", fake_initial=True, stdout=out, verbosity=1)
+            call_command("migrate", "migrations", "0001", fake_initial=True, verbosity=0, database="other")
+        self.assertIn(
+            "migrations.0001_initial... faked",
+            out.getvalue().lower()
+        )
+        try:
+            # Run migrations all the way.
+            call_command('migrate', verbosity=0)
+            call_command('migrate', verbosity=0, database="other")
+            self.assertTableExists('migrations_author')
+            self.assertTableNotExists('migrations_tribble')
+            self.assertTableExists('migrations_book')
+            self.assertTableNotExists('migrations_author', using='other')
+            self.assertTableNotExists('migrations_tribble', using='other')
+            self.assertTableNotExists('migrations_book', using='other')
+24:from .routers import TestRouter
+131:        DATABASE_ROUTERS=['migrations.routers.TestRouter'],
+136:        migration of an app exists. Database routers must be obeyed when doing
+1117:    def test_makemigrations_consistency_checks_respect_routers(self):
+1120:        settings.DATABASE_ROUTERS.
+1141:                with self.settings(DATABASE_ROUTERS=['migrations.routers.TestRouter']):
+1147:                with self.settings(DATABASE_ROUTERS=['migrations.routers.DefaultOtherRouter']):
+1154:                with self.settings(DATABASE_ROUTERS=['migrations.routers.TestRouter']):
+[0m
+[0m$ [0mcd /testbed/tests && cat migrations/routers.py; sed -n 125,150p migrations/test_commands.py
+class DefaultOtherRouter:
+    def allow_migrate(self, db, app_label, model_name=None, **hints):
+        return db in {'default', 'other'}
+
+
+class TestRouter:
+    def allow_migrate(self, db, app_label, model_name=None, **hints):
+        """
+        The Tribble model should be the only one to appear in the 'other' db.
+        """
+        if model_name == 'tribble':
+            return db == 'other'
+        elif db != 'default':
+            return False
+        self.assertTableNotExists("migrations_author")
+        self.assertTableNotExists("migrations_tribble")
+        self.assertTableNotExists("migrations_book")
+
+    @override_settings(
+        MIGRATION_MODULES={"migrations": "migrations.test_migrations"},
+        DATABASE_ROUTERS=['migrations.routers.TestRouter'],
+    )
+    def test_migrate_fake_initial(self):
+        """
+        --fake-initial only works if all tables created in the initial
+        migration of an app exists. Database routers must be obeyed when doing
+        that check.
+        """
+        # Make sure no tables are created
+        for db in self.databases:
+            self.assertTableNotExists("migrations_author", using=db)
+            self.assertTableNotExists("migrations_tribble", using=db)
+        # Run the migrations to 0001 only
+        call_command("migrate", "migrations", "0001", verbosity=0)
+        call_command("migrate", "migrations", "0001", verbosity=0, database="other")
+        # Make sure the right tables exist
+        self.assertTableExists("migrations_author")
+        self.assertTableNotExists("migrations_tribble")
+        # Also check the "other" database
+        self.assertTableNotExists("migrations_author", using="other")
+[0m
+[0m$ [0mcd /testbed/tests && sed -n 172,176p migrations/test_commands.py; python runtests.py migrations.test_commands.MigrateTests.test_migrate_fake_initial --parallel 1 2>&1 | grep -B2 "test_commands.py" | head
+# Run migrations all the way.
+            call_command('migrate', verbosity=0)
+            call_command('migrate', verbosity=0, database="other")
+            self.assertTableExists('migrations_author')
+            self.assertTableNotExists('migrations_tribble')
+  File "/testbed/django/test/utils.py", line 437, in inner
+    return func(*args, **kwargs)
+  File "/testbed/tests/migrations/test_commands.py", line 174, in test_migrate_fake_initial
+[0m
+[0m$ [0mcd /testbed && cat django/__init__.py | head -3; rg -n "django_migrations|MigrationRecorder|recorder" docs | head -20
+from django.utils.version import get_version
+
+VERSION = (4, 1, 0, 'alpha', 0)
+/usr/bin/bash: line 1: rg: command not found
+[0m
+[0m$ [0mcd /testbed && grep -rn "django_migrations\|MigrationRecorder" docs | head -20
+docs/intro/tutorial02.txt:346:database called ``django_migrations``) and runs them against your database -
+[0m

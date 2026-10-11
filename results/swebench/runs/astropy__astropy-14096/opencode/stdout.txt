@@ -1,0 +1,6 @@
+The cause is Python's fallback: when a property raises `AttributeError`, Python calls `__getattr__("prop")`, which then raises its own generic error and hides the original one. I'll make `__getattr__` re-run a class property that is being looked up, so the real exception propagates.
+Accessing a missing attribute from inside a property on a `SkyCoord` subclass now reports the real missing name. The reproducer raises `'custom_coord' object has no attribute 'random_attr'` instead of complaining about `prop`.
+
+The fix is in `astropy/coordinates/sky_coordinate.py`, in `SkyCoord.__getattr__`. When a name is a property on the class, the fallback now re-runs that property's getter so its original `AttributeError` propagates. Otherwise the generic error is raised as before.
+
+In `astropy/coordinates/tests/test_sky_coord.py`, 426 tests pass and one fails: `test_repr_altaz`. That failure is an `IERSStaleWarning` (leap-second file expired) from the sandbox having no current IERS data, unrelated to this change. I did not add or change any tests.

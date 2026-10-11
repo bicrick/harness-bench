@@ -1,0 +1,19 @@
+The root cause is in `TemplateView.get()`: URL kwargs are wrapped in `SimpleLazyObject`s for the deprecation warning, so `get_object_or_404` receives a proxy object that the SQLite backend cannot bind. I'll check the existing deprecation tests before changing anything.
+The existing deprecation tests expect the warning to fire when a URL kwarg is accessed through the context, so the lazy wrapper is there on purpose. I'll make the smallest change that removes the proxy: pass the real values through and emit the deprecation warning once in `get()`.
+The eager warning changes behavior beyond the bug: it fires for every request with URL kwargs and becomes an error under the test runner's warnings-as-errors setting. The lazy wrapper is intentional, so I'll revert that and fix the crash where it actually occurs: the value reaches the DB unconverted because `CharField.to_python` treats a `SimpleLazyObject` as a `str`.
+The `isinstance(value, str)` check in `CharField.to_python` passes for a `SimpleLazyObject` because the proxy forwards `__class__`, so the proxy is returned unconverted. I'll change the check to an exact type test so non-`str` proxies get converted with `str()`.
+Now I'll reproduce the issue with a SimpleLazyObject slug and run the related test suites.
+The reproduction passes with the fix and the suites are green. I'll confirm the repro actually fails without the change.
+The crash is fixed. Filtering a `CharField`/`SlugField` with a `SimpleLazyObject` now converts it to a real `str` first, so SQLite can bind it.
+
+**Cause:** `CharField.to_python()` in `django/db/models/fields/__init__.py` used `isinstance(value, str)` to decide whether to convert. A `SimpleLazyObject` proxies `__class__`, so it passes that check and was returned unconverted. The SQLite driver then rejected it as an unsupported parameter type.
+
+**Fix:** I changed the check to `value is None or type(value) is str`, so any non-exact-`str` value (including lazy proxies) goes through `str()`.
+
+**Verification:**
+- A standalone reproduction (`filter(name=SimpleLazyObject(...))` on SQLite) fails with `Error binding parameter 0` before the change and returns the right row after it.
+- The `generic_views`, `model_fields`, `lookup`, `queries`, and `model_forms` test suites pass (1231 tests, OK).
+
+**Not changed:** I tried a different approach first, passing plain values from `TemplateView.get()` and warning eagerly. That broke existing deprecation tests because the warning became an error under the test runner, so I reverted it. The `SimpleLazyObject` wrapper for the deprecated URL-kwargs context is still there.
+
+I did not add or modify any tests.

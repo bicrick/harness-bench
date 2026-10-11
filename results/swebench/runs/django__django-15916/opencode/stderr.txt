@@ -1,0 +1,127 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "formfield_callback" django/forms/models.py
+140:    formfield_callback=None,
+161:    ``formfield_callback`` is a callable that takes a model field and returns
+223:        if formfield_callback is None:
+225:        elif not callable(formfield_callback):
+226:            raise TypeError("formfield_callback must be a function or callable")
+228:            formfield = formfield_callback(f, **kwargs)
+260:        base_formfield_callback = None
+262:            if hasattr(b, "Meta") and hasattr(b.Meta, "formfield_callback"):
+263:                base_formfield_callback = b.Meta.formfield_callback
+266:        formfield_callback = attrs.pop("formfield_callback", base_formfield_callback)
+311:                formfield_callback,
+568:    formfield_callback=None,
+593:    ``formfield_callback`` is a callable that takes a model field and returns
+633:    if formfield_callback:
+634:        Meta.formfield_callback = staticmethod(formfield_callback)
+639:    form_class_attrs = {"Meta": Meta, "formfield_callback": formfield_callback}
+1009:    formfield_callback=None,
+1047:        formfield_callback=formfield_callback,
+1279:    formfield_callback=None,
+1306:        "formfield_callback": formfield_callback,
+[0m
+[0m$ [0mcd /testbed && sed -n 255,275p django/forms/models.py && echo ---- && sed -n 625,650p django/forms/models.py
+self.field_classes = getattr(options, "field_classes", None)
+
+
+class ModelFormMetaclass(DeclarativeFieldsMetaclass):
+    def __new__(mcs, name, bases, attrs):
+        base_formfield_callback = None
+        for b in bases:
+            if hasattr(b, "Meta") and hasattr(b.Meta, "formfield_callback"):
+                base_formfield_callback = b.Meta.formfield_callback
+                break
+
+        formfield_callback = attrs.pop("formfield_callback", base_formfield_callback)
+
+        new_class = super().__new__(mcs, name, bases, attrs)
+
+        if bases == (BaseModelForm,):
+            return new_class
+
+        opts = new_class._meta = ModelFormOptions(getattr(new_class, "Meta", None))
+
+        # We check if a string was passed to `fields` or `exclude`,
+----
+        attrs["error_messages"] = error_messages
+    if field_classes is not None:
+        attrs["field_classes"] = field_classes
+
+    # If parent form class already has an inner Meta, the Meta we're
+    # creating needs to inherit from the parent's inner meta.
+    bases = (form.Meta,) if hasattr(form, "Meta") else ()
+    Meta = type("Meta", bases, attrs)
+    if formfield_callback:
+        Meta.formfield_callback = staticmethod(formfield_callback)
+    # Give this new form class a reasonable name.
+    class_name = model.__name__ + "Form"
+
+    # Class attributes for the new form class.
+    form_class_attrs = {"Meta": Meta, "formfield_callback": formfield_callback}
+
+    if getattr(Meta, "fields", None) is None and getattr(Meta, "exclude", None) is None:
+        raise ImproperlyConfigured(
+            "Calling modelform_factory without defining 'fields' or "
+            "'exclude' explicitly is prohibited."
+        )
+
+    # Instantiate type(form) in order to use the same metaclass as form.
+    return type(form)(class_name, (form,), form_class_attrs)
+[0m
+[0m← [0mEdit django/forms/models.py
+Index: /testbed/django/forms/models.py
+===================================================================
+--- /testbed/django/forms/models.py
++++ /testbed/django/forms/models.py
+@@ -635,9 +635,11 @@
+ # Give this new form class a reasonable name.
+ class_name = model.__name__ + "Form"
+ 
+ # Class attributes for the new form class.
+-form_class_attrs = {"Meta": Meta, "formfield_callback": formfield_callback}
++form_class_attrs = {"Meta": Meta}
++if formfield_callback is not None:
++    form_class_attrs["formfield_callback"] = formfield_callback
+ 
+ if getattr(Meta, "fields", None) is None and getattr(Meta, "exclude", None) is None:
+     raise ImproperlyConfigured(
+         "Calling modelform_factory without defining 'fields' or "
+
+[0m
+[0m$ [0mcd /testbed && cat > /tmp/opencode/t.py <<'EOF'
+import django
+from django.conf import settings
+settings.configure(INSTALLED_APPS=["django.contrib.contenttypes","django.contrib.auth"], DATABASES={"default":{"ENGINE":"django.db.backends.sqlite3","NAME":":memory:"}})
+django.setup()
+from django import forms
+from django.db import models
+class MyModel(models.Model):
+    active = models.BooleanField()
+    name = models.CharField(max_length=64, blank=True, null=True)
+    class Meta:
+        app_label = "auth"
+def all_required(field, **kwargs):
+    ff = field.formfield(**kwargs)
+    ff.required = True
+    return ff
+class MyForm(forms.ModelForm):
+    formfield_callback = all_required
+    class Meta:
+        model = MyModel
+        fields = ["active", "name"]
+F = forms.modelform_factory(MyModel, form=MyForm)
+print({n: f.required for n, f in F().fields.items()})
+EOF
+python /tmp/opencode/t.py && python -m pytest -q tests/model_forms 2>&1 | tail -3
+{'active': False, 'name': False}
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed && sed -i 's/        fields = \["active", "name"\]/        formfield_callback = all_required\n        fields = ["active", "name"]/' /tmp/opencode/t.py && python /tmp/opencode/t.py && git stash -q && python /tmp/opencode/t.py; git stash pop -q && git diff --stat
+{'active': True, 'name': True}
+{'active': False, 'name': False}
+ django/forms/models.py | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+[0m
