@@ -72,7 +72,7 @@ def _patch(cname):
     r = _sh(DOCKER + ["exec", cname, "bash", "-lc", f"cd /testbed && git add -A && git diff --cached --binary HEAD -- . {excl}"])
     return r.stdout
 
-def _in_container(inst, name, argv, env, logdir, env_file=False, keep_home=False):
+def _in_container(inst, name, argv, env, logdir, env_file=False, keep_home=False, keep_stdout=False):
     cname = _container(inst, name)
     base_env = {**_net_env(), "HOME": "/tmp/sbr/home", "TERM": "dumb", "NO_COLOR": "1", "CI": "1",
                 "PATH": f"{TESTBED_PATH}:{TOOLS}/node/bin:{TOOLS}/npm/bin:{TOOLS}/cursor/bin:/usr/local/bin:/usr/bin:/bin"}
@@ -97,7 +97,7 @@ def _in_container(inst, name, argv, env, logdir, env_file=False, keep_home=False
             notes["timeout"] = True
         if envpath:
             os.unlink(envpath)
-        (logdir / "stdout.txt").write_text(out if keep_home else out[-200000:])
+        (logdir / "stdout.txt").write_text(out if (keep_home or keep_stdout) else out[-200000:])
         if keep_home:  # SBR_KEEP_CURSOR_HOME: save the run's Cursor HOME (chat store) so /context can be read later
             dest = logdir / "home"; dest.mkdir(exist_ok=True)
             _sh(DOCKER + ["exec", cname, "bash", "-c", 'h=$(cat /tmp/sbr/cursorhome.path) && tar -C "$h" --exclude=./.npm -cf /tmp/sbr/home.tar .'])
@@ -113,13 +113,14 @@ def _in_container(inst, name, argv, env, logdir, env_file=False, keep_home=False
 def _anthropic_env(url):
     return {"ANTHROPIC_API_KEY": os.environ["ANTHROPIC_API_KEY"], "ANTHROPIC_BASE_URL": url, "ANTHROPIC_API_BASE": url}
 
-def claude_code(inst, url, logdir):
+def claude_code(inst, url, logdir, full_log=False, name="claude_code"):
     env = {**_anthropic_env(url), "IS_SANDBOX": "1", "ANTHROPIC_SMALL_FAST_MODEL": MODEL,
            "ANTHROPIC_DEFAULT_HAIKU_MODEL": MODEL, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
            "DISABLE_TELEMETRY": "1", "DISABLE_AUTOUPDATER": "1"}
     argv = (f'claude -p "$(cat /tmp/sbr/prompt.txt)" --model {MODEL} --dangerously-skip-permissions '
-            f'--max-turns {MAX_TURNS} --output-format json')
-    return _in_container(inst, "claude_code", argv, env, logdir)
+            f'--max-turns {MAX_TURNS} ' + ('--output-format stream-json --verbose' if full_log else '--output-format json'))
+    # full_log: stdout is the full step-by-step stream-json (every tool call and result), saved untruncated
+    return _in_container(inst, name, argv, env, logdir, keep_stdout=full_log)
 
 def opencode(inst, url, logdir, auto=False):
     cfg = {"$schema": "https://opencode.ai/config.json", "model": f"anthropic/{MODEL}", "small_model": f"anthropic/{MODEL}",
@@ -255,7 +256,9 @@ HARNESSES = {
 for _h in ("mini_swe_agent", "swe_agent", "aider", "claude_code"):
     HARNESSES[f"{_h}_nothink"] = HARNESSES[_h]
 HARNESSES["opencode_nothink"] = HARNESSES["opencode_auto"]
+# Same as claude_code_nothink (thinking forced off at the proxy) but logs the full stream-json transcript untruncated.
+HARNESSES["claude_code_nothink2"] = lambda inst, url, logdir: claude_code(inst, url, logdir, full_log=True, name="claude_code_nothink2")
 CURSOR_NOTHINK_MODEL = os.environ.get("SBR_CURSOR_NOTHINK_MODEL", "claude-haiku-5-5-high")  # "Haiku 5.5 High No Thinking"
 PROXIED = set(HARNESSES) - {"cursor", "cursor_nothink", "cursor_nothink2", "gold"}
 CHECKS = {"gold", "opencode_auto", "cursor_nothink", "cursor_nothink2", "mini_swe_agent_nothink", "swe_agent_nothink", "aider_nothink",
-          "claude_code_nothink", "opencode_nothink"}  # not run unless asked for by name
+          "claude_code_nothink", "claude_code_nothink2", "opencode_nothink"}  # not run unless asked for by name

@@ -10,6 +10,7 @@ For each instance in the pinned subset:
   python -m sbr.run --harnesses claude_code,aider    # some harnesses, whole subset
   python -m sbr.run --instances psf__requests-2317   # specific instances
 """
+import re
 import argparse, fcntl, json, os, shutil, subprocess, sys, threading, time
 from pathlib import Path
 from .config import OUT, DATASET, TASK_BUDGET_USD, HARD_CAP_USD, MODEL, TOOLS, image_for
@@ -216,7 +217,7 @@ def run_one(inst, harness):
                concurrency_regime=REGIME, slot_wait_s=round(waited, 1))
     srv = rec = None
     try:
-        srv, rec, url = proxy.start(TASK_BUDGET_USD, logdir / "calls.jsonl", thinking="disabled" if harness.endswith("_nothink") else None)
+        srv, rec, url = proxy.start(TASK_BUDGET_USD, logdir / "calls.jsonl", thinking="disabled" if re.search(r"_nothink\d*$", harness) else None)
         patch, notes = HARNESSES[harness](inst, url, logdir)
         (logdir / "patch.diff").write_text(patch)
         row.update(notes=notes, patch_lines=patch.count("\n"),
