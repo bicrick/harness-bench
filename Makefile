@@ -1,10 +1,16 @@
-PY = . /workspace/.venv/bin/activate 2>/dev/null;
+# SWE-bench harness comparison. See swebench/README.md for VM setup.
+PY ?= $(SBR_TOOLS)/host/bin/python
+
+preflight:
+	$(PY) -m sbr.preflight
+
+run:
+	$(PY) -m sbr.run --harnesses claude_code_nothink,cursor_nothink,opencode_nothink,swe_agent_nothink,mini_swe_agent_nothink
+
+report:
+	$(PY) -m sbr.report
 
 figures:
-	$(PY) python -m cshape.audit && python -m cshape.report && python -m cshape.article && python scripts/publish_bundle.py
+	uv run --with matplotlib python3 scripts/swebench_figures.py
 
-article:
-	$(PY) python -m cshape.article && python scripts/publish_bundle.py
-
-reproduce:
-	$(PY) bash scripts/reproduce.sh
+.PHONY: preflight run report figures

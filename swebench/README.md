@@ -26,7 +26,7 @@ The only thing that changes is the harness.
 Needs x86_64, Docker your user can run, 60+ GB free, and outbound internet.
 
 ```bash
-git clone https://github.com/bicrick/context-shaping && cd context-shaping
+git clone https://github.com/bicrick/harness-bench && cd harness-bench
 bash swebench/check_vm.sh                         # specs, docker, network: read-only
 SBR_TOOLS=$HOME/sbr-tools bash swebench/setup_tools.sh   # ~3 GB, ~5 min
 
