@@ -1,0 +1,50 @@
+    test_autocomplete_view.py
+
+  $ cd /testbed/tests && python runtests.py admin_views.test_autocomplete_view -v 1 2>&1 | grep -B2 -A12 "^ERROR" | head -40 1.1s
+
+  $ cd /testbed/tests && python runtests.py admin_views.test_autocomplete_view -v 2 2>&1 | grep -iE "error|Error|fail" | head -20 1.2s
+
+  The grep found nothing, so the error output may differ between runs. I'll run it with the module name directly and capture the full output.
+
+  $ cd /testbed/tests && python runtests.py admin_views.test_autocomplete_view > /tmp/ac.log 2>&1; grep -n -A10 "ERROR\|Traceback" /tmp/ac.log | head -50; tail -3
+    /tmp/ac.log 1.2s
+    … 1 output lines hidden · ctrl+o to expand
+    Destroying test database for alias 'default'...
+    Destroying test database for alias 'default'...
+
+  This run shows no errors, so the earlier failure was from the selector I passed (AutocompleteJsonViewTests doesn't exist). I'll run the module on its own and
+  confirm the result.
+
+  $ cd /testbed/tests && python runtests.py admin_views.test_autocomplete_view 2>&1 | grep -E "^(Ran|OK|FAILED)" 1.6s
+    Ran 18 tests in 0.662s
+    OK (skipped=3)
+
+  I refactored AutocompleteJsonView so result serialization is an overridable method, as the issue proposes.
+
+  Change in django/contrib/admin/views/autocomplete.py:
+  • Added serialize_result(self, obj, to_field_name), which returns {'id': ..., 'text': ...}.
+  • get() now builds results with self.serialize_result(obj, to_field_name).
+
+  Subclasses can now add fields without overriding get():
+
+  class CustomAutocompleteJsonView(AutocompleteJsonView):
+      def serialize_result(self, obj, to_field_name):
+          return super().serialize_result(obj, to_field_name) | {'notes': obj.notes}
+
+  The output is unchanged for existing users. The autocomplete view test module (admin_views.test_autocomplete_view) passes: 18 tests, 3 skipped. I didn't add or
+  modify any tests.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    18.7K / 300K  6.3%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.1K • 2.1%
+   Rules                                                                344 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  435 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        6.1K • 2.1%      Free space                                                         281K • 93.7%
+
+ Esc to close
+

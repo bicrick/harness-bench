@@ -1,0 +1,50 @@
+  I'll look at the relevant code in the engine.
+
+    Grepped, read 2 greps, 1 file
+    Grepped "def render_to_string" in /testbed/django/template/engine.py
+    Grepped "autoescape" in /testbed/django/template/engine.py
+    Read /testbed/django/template/engine.py lines 160-171
+
+  The Context(context) call doesn't pass autoescape. I'll fix it to honor self.autoescape.
+
+    Edited engine.py +1 -1
+
+    ▎          if isinstance(context, Context):
+    ▎              return t.render(context)
+    ▎          else:
+    ▎-             return t.render(Context(context))
+    ▎+             return t.render(Context(context, autoescape=self.autoescape))
+    ▎
+    ▎      def select_template(self, template_name_list):
+    ▎          """
+
+  Let me verify the Context signature accepts autoescape and run a quick check.
+
+  $ cd /testbed && grep -n "def __init__" django/template/context.py | head -3 && python -c "
+    import django 925ms
+    … 22 input + 3 output lines hidden · ctrl+o to expand
+    1
+    <b>
+
+  The fix works: an Engine(autoescape=False) now renders {{ x }} as <b> unescaped through render_to_string().
+
+  Change in django/template/engine.py, Engine.render_to_string():
+
+  return t.render(Context(context, autoescape=self.autoescape))
+
+  Previously the Context was built without autoescape, so it always defaulted to True and ignored the engine's setting. I didn't add or modify any tests.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    15.0K / 300K  5.0%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                349 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  442 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        2.2K • 0.8%      Free space                                                         284K • 95.0%
+
+ Esc to close
+

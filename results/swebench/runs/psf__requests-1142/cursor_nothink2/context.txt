@@ -1,0 +1,50 @@
+    … 4 input + 18 output lines hidden · ctrl+o to expand
+    FAILED test_requests.py::RequestsTestCase::test_user_agent_transfers - TypeError: __init__() got an unexpected keyword argument 'strict'
+    21 failed, 5 passed, 2 warnings in 0.47s
+
+  The header behavior is now correct: GET and POST-without-body no longer send Content-Length, while bodied requests still do. The test failures (strict kwarg) look
+  like a pre-existing environment issue with the test suite's HTTP server. Let me confirm they also fail without my change.
+
+  $ cd /testbed && git stash -q && python -m pytest test_requests.py -q 2>&1 | tail -1; git stash pop -q && git diff --stat 707ms
+    … 1 output lines hidden · ctrl+o to expand
+     requests/models.py | 9 ++++++---
+     1 file changed, 6 insertions(+), 3 deletions(-)
+
+  The same 21 tests fail before and after my change (a pre-existing strict kwarg incompatibility with the installed Python's httplib), so my change introduces no
+  regressions.
+
+  Summary
+
+  requests was always setting Content-Length (to '0' when there was no body), even on a plain GET. I changed prepare_content_length in /testbed/requests/models.py so
+  it only sets the header when there is an actual body, and removes it otherwise:
+
+  def prepare_content_length(self, body):
+      """Sets the Content-Length header only when there is a body to send."""
+      if body is None:
+          # No body (e.g. a plain GET): don't send a Content-Length header.
+          self.headers.pop('Content-Length', None)
+      elif hasattr(body, 'seek') and hasattr(body, 'tell'):
+          ...
+
+  Verified results:
+  • GET (with or without auth): no Content-Length header
+  • POST with no body: no Content-Length header
+  • POST/PUT with data: Content-Length is still set correctly
+
+  I did not modify any tests. The 21 failing tests in test_requests.py fail identically without my change, due to a pre-existing incompatibility with the installed
+  Python version (strict argument to httplib).
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    18.1K / 300K  6.1%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                346 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  438 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        5.4K • 1.8%      Free space                                                         281K • 93.9%
+
+ Esc to close
+

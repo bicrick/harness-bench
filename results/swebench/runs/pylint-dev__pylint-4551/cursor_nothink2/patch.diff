@@ -1,0 +1,142 @@
+diff --git a/pylint/pyreverse/inspector.py b/pylint/pyreverse/inspector.py
+index 8fa12202..e9b7979a 100644
+--- a/pylint/pyreverse/inspector.py
++++ b/pylint/pyreverse/inspector.py
+@@ -28,6 +28,27 @@ def _iface_hdlr(_):
+     return True
+ 
+ 
++def _annotated_or_inferred(node, infer):
++    """return the possible types of an assignment target
++
++    PEP 484 annotations take precedence over inference: an explicit
++    annotation on the target (``x: int = None``), or on the parameter the
++    assigned value comes from (``def f(self, a: str = None): self.a = a``),
++    describes the intended type even when the default value is ``None``.
++    Falls back to plain inference via ``infer`` otherwise.
++    """
++    parent = node.parent
++    if isinstance(parent, astroid.AnnAssign) and parent.target is node:
++        annotated = utils.infer_annotation(parent.annotation)
++        if annotated:
++            return annotated
++    if isinstance(parent, astroid.Assign):
++        annotated = utils.annotated_values(parent.value)
++        if annotated:
++            return annotated
++    return list(infer())
++
++
+ def _astroid_wrapper(func, modname):
+     print("parsing %s..." % modname)
+     try:
+@@ -218,7 +239,7 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+                     self.visit_module(frame)
+ 
+             current = frame.locals_type[node.name]
+-            values = set(node.infer())
++            values = set(_annotated_or_inferred(node, node.infer))
+             frame.locals_type[node.name] = list(set(current) | values)
+         except astroid.InferenceError:
+             pass
+@@ -230,7 +251,7 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+         handle instance_attrs_type
+         """
+         try:
+-            values = set(node.infer())
++            values = set(_annotated_or_inferred(node, node.infer))
+             current = set(parent.instance_attrs_type[node.attrname])
+             parent.instance_attrs_type[node.attrname] = list(current | values)
+         except astroid.InferenceError:
+diff --git a/pylint/pyreverse/utils.py b/pylint/pyreverse/utils.py
+index a24d227e..f80c3a91 100644
+--- a/pylint/pyreverse/utils.py
++++ b/pylint/pyreverse/utils.py
+@@ -93,6 +93,87 @@ def is_exception(node):
+     return node.type == "exception"
+ 
+ 
++# Type annotation helpers #####################################################
++
++
++def infer_annotation(annotation):
++    """return the list of inferred values for a PEP 484 annotation node
++
++    Forward references written as strings (e.g. ``"Foo"``) are inferred from
++    their constant value. Uninferable results are discarded. Returns an empty
++    list if the annotation cannot be resolved.
++    """
++    if annotation is None:
++        return []
++    # imported lazily to keep this module free of hard astroid dependencies
++    import astroid  # pylint: disable=import-outside-toplevel
++
++    try:
++        inferred = list(annotation.infer())
++    except astroid.InferenceError:
++        return []
++    if not inferred:
++        return []
++    resolved = []
++    for value in inferred:
++        if value is astroid.Uninferable:
++            continue
++        if isinstance(value, astroid.Const) and isinstance(value.value, str):
++            # string forward reference: resolve it in the annotation's scope
++            resolved.extend(_resolve_forward_ref(value.value, annotation))
++            continue
++        resolved.append(value)
++    return resolved
++
++
++def _resolve_forward_ref(name, node):
++    """resolve a string forward reference ``name`` from the scope of ``node``"""
++    import astroid  # pylint: disable=import-outside-toplevel
++
++    try:
++        module = astroid.parse(name, module_name="")
++        expr = module.body[0].value if module.body else None
++    except (astroid.AstroidSyntaxError, AttributeError, IndexError):
++        return []
++    if not isinstance(expr, (astroid.Name, astroid.Attribute)):
++        return []
++    expr.parent = node
++    try:
++        return [v for v in expr.infer() if v is not astroid.Uninferable]
++    except astroid.InferenceError:
++        return []
++
++
++def annotated_values(value_node):
++    """return the annotated type values of the expression assigned to a name
++
++    ``value_node`` is the right-hand side of an assignment. If it is a plain
++    name referring to a function parameter with a PEP 484 annotation, the
++    annotation is resolved and returned. Otherwise an empty list is returned,
++    meaning the caller should fall back to plain inference.
++    """
++    import astroid  # pylint: disable=import-outside-toplevel
++
++    if not isinstance(value_node, astroid.Name):
++        return []
++    try:
++        definitions = value_node.lookup(value_node.name)[1]
++    except Exception:  # pylint: disable=broad-except
++        return []
++    for definition in definitions:
++        if not isinstance(definition, astroid.AssignName):
++            continue
++        if not isinstance(definition.parent, astroid.Arguments):
++            continue
++        args = definition.parent
++        for index, arg in enumerate(args.args or []):
++            if arg is definition:
++                annotation = (args.annotations or [])[index]
++                return infer_annotation(annotation)
++        return []
++    return []
++
++
+ # Helpers #####################################################################
+ 
+ _CONSTRUCTOR = 1

@@ -1,0 +1,50 @@
+    ▎                  arg) for arg in expr.args]
+    ▎-             return (expr.func(*(f[0] for f in fds)),
+    ▎-                     *(d[1] for d in fds))
+    ▎+             dims = [Dimension(1) if self.get_dimension_system().is_dimensionless(d[1]) else d[1]
+    ▎+                     for d in fds]
+    ▎+             return (expr.func(*(f[0] for f in fds)), *dims)
+    ▎          elif isinstance(expr, Dimension):
+    ▎              return S.One, expr
+    ▎          else:
+
+  Now I'll verify the issue's reproduction and run the existing unit tests.
+
+  $ cd /testbed && python -c "
+    from sympy import exp 571ms
+    … 8 input lines hidden · ctrl+o to expand
+    (E + 100, Dimension(1))
+    /opt/miniconda3/envs/testbed/bin/python: No module named pytest
+
+  The issue's reproduction now succeeds. pytest isn't installed, so I'll run the units test suite with sympy's own test runner.
+
+  $ cd /testbed && python -c "
+    import sympy 1.5s
+    … 2 input + 13 output lines hidden · ctrl+o to expand
+    ======== tests finished: 70 passed, 1 expected to fail, in 0.61 seconds ========
+
+  Fixed. SI._collect_factor_and_dimension() now handles exp(...) of a dimensionless argument, so the issue's example returns (E + 100, Dimension(1)) instead of
+  raising ValueError.
+
+  Cause: In the Function branch of sympy/physics/units/unitsystem.py, the function's result was given the dimension of its argument. For exp(second/(farad*ohm)) that
+  gave time/(capacitance*impedance) instead of a dimensionless value. The Pow branch already handled dimensionless exponents this way, but Function did not.
+
+  Change: When a function argument's dimension is dimensionless, the branch now uses Dimension(1) for it. Arguments with real dimensions are unchanged.
+
+  The units test suite passes (70 passed, 1 expected failure). No tests were added or modified. pytest is not installed in this environment, so I ran the suite with
+  sympy's built-in sympy.test() runner.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    16.7K / 300K  5.6%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                347 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  439 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        3.9K • 1.3%      Free space                                                         283K • 94.4%
+
+ Esc to close
+

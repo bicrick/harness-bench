@@ -1,0 +1,60 @@
+diff --git a/src/_pytest/mark/structures.py b/src/_pytest/mark/structures.py
+index 800a25c92..121c4ed33 100644
+--- a/src/_pytest/mark/structures.py
++++ b/src/_pytest/mark/structures.py
+@@ -355,11 +355,42 @@ class MarkDecorator:
+         return self.with_args(*args, **kwargs)
+ 
+ 
+-def get_unpacked_marks(obj: object) -> Iterable[Mark]:
+-    """Obtain the unpacked marks that are stored on an object."""
++def _get_pytestmark_list(obj: object) -> list:
++    """Return the ``pytestmark`` value of ``obj`` as a list (possibly empty)."""
+     mark_list = getattr(obj, "pytestmark", [])
+     if not isinstance(mark_list, list):
+         mark_list = [mark_list]
++    return mark_list
++
++
++def get_unpacked_marks(obj: object) -> Iterable[Mark]:
++    """Obtain the unpacked marks that are stored on an object.
++
++    For classes, marks are gathered following the method resolution order, so
++    that marks from every base class are included (not only from the first
++    class in the MRO that defines ``pytestmark``). Marks from a base are
++    deduplicated by identity, so a mark that is inherited through several
++    paths of the hierarchy is only reported once.
++    """
++    if not inspect.isclass(obj):
++        return normalize_mark_list(_get_pytestmark_list(obj))
++
++    # The class itself: go through normal attribute access so that a
++    # metaclass-provided ``pytestmark`` (e.g. a property) is honoured.
++    mark_list: List[object] = list(_get_pytestmark_list(obj))
++    seen_ids: Set[int] = {id(m) for m in mark_list}
++
++    # Bases: take only the marks each base declares itself (from its own
++    # __dict__), so that inheriting from several marked classes accumulates
++    # all of their marks rather than only the first one found by the MRO.
++    for base in inspect.getmro(obj)[1:]:
++        if "pytestmark" not in vars(base):
++            continue
++        for mark in _get_pytestmark_list(base):
++            if id(mark) in seen_ids:
++                continue
++            seen_ids.add(id(mark))
++            mark_list.append(mark)
+     return normalize_mark_list(mark_list)
+ 
+ 
+@@ -388,7 +419,9 @@ def store_mark(obj, mark: Mark) -> None:
+     assert isinstance(mark, Mark), mark
+     # Always reassign name to avoid updating pytestmark in a reference that
+     # was only borrowed.
+-    obj.pytestmark = [*get_unpacked_marks(obj), mark]
++    # Only the marks stored directly on ``obj`` are carried over; marks coming
++    # from base classes are gathered on collection (see get_unpacked_marks).
++    obj.pytestmark = [*normalize_mark_list(_get_pytestmark_list(obj)), mark]
+ 
+ 
+ # Typing for builtin pytest marks. This is cheating; it gives builtin marks

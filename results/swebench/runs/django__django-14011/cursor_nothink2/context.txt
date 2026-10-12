@@ -1,0 +1,50 @@
+    --parallel 1 -v 1 2>&1 | tail -15 5.6s
+    … 22 output lines hidden · ctrl+o to expand
+    FAILED (errors=1, skipped=1)
+    Destroying test database for alias 'default'...
+
+  The import ordering is off (isort would place django.core.handlers before django.db), so I'll fix that. The one error was just my bogus test-module name; the rest
+  of the servers suite ran.
+
+    Edited basehttp.py +1 -1
+
+    ▎  from wsgiref import simple_server
+    ▎
+    ▎  from django.core.exceptions import ImproperlyConfigured
+    ▎- from django.db import connections
+    ▎  from django.core.handlers.wsgi import LimitedStream
+    ▎  from django.core.wsgi import get_wsgi_application
+    ▎+ from django.db import connections
+    ▎  from django.utils.module_loading import import_string
+    ▎
+    ▎  __all__ = ('WSGIServer', 'WSGIRequestHandler')
+
+  $ cd /testbed/tests && python runtests.py servers test_runner --parallel 1 2>&1 | tail -5; python runtests.py live_server_url_tests --parallel 1 2>&1 | tail -4;
+    python runtests.py servers.test_liveserverthread servers.tests --parallel 1 2>&1 | tail -4; cd /testbed && git diff 14s
+    … 41 output lines hidden · ctrl+o to expand
+     class ServerHandler(simple_server.ServerHandler):
+         http_version = '1.1'
+
+  The servers suite passes (117 tests). The live_server_url_tests error was just a wrong module name on my side; the servers.test_liveserverthread/servers.tests run
+  passed too.
+
+  The fix is in django/core/servers/basehttp.py. ThreadedWSGIServer now overrides process_request_thread so that each request thread calls connections.close_all()
+  when it finishes, in a finally block. Previously, database connections opened in request threads were left open after the thread ended, which kept the test database
+  "in use" when destroy_test_db() ran. The servers test suite passes.
+
+  I didn't add or change any tests, per your instructions.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    19.9K / 300K  6.7%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                347 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  439 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        7.2K • 2.4%      Free space                                                         280K • 93.3%
+
+ Esc to close
+

@@ -1,0 +1,67 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..cfb48a4ee 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -606,6 +606,27 @@ class Documenter:
+ 
+                     for i, line in enumerate(self.process_doc(docstrings)):
+                         self.add_line(line, sourcename, i)
++                elif self.parent and inspect.isclass(self.parent):
++                    # the attribute may be inherited from a base class
++                    for cls in inspect.getmro(self.parent)[1:]:
++                        try:
++                            module = safe_getattr(cls, '__module__')
++                            qualname = safe_getattr(cls, '__qualname__')
++                            if not (module and qualname):
++                                continue
++
++                            analyzer = ModuleAnalyzer.for_module(module)
++                            base_attr_docs = analyzer.find_attr_docs()
++                            base_key = (qualname, self.objpath[-1])
++                            if base_key in base_attr_docs:
++                                no_docstring = True
++                                docstrings = [list(base_attr_docs[base_key])]
++
++                                for i, line in enumerate(self.process_doc(docstrings)):
++                                    self.add_line(line, sourcename, i)
++                                break
++                        except (AttributeError, PycodeError):
++                            pass
+ 
+         # add content from docstrings
+         if not no_docstring:
+@@ -679,6 +700,24 @@ class Documenter:
+ 
+             return False
+ 
++        def inherited_attr_docs(name: str) -> Optional[List[str]]:
++            """Find the attribute docstring of *name* defined in a base class."""
++            if inspect.isclass(self.object):
++                for cls in self.object.__mro__[1:]:
++                    try:
++                        module = self.get_attr(cls, '__module__', None)
++                        qualname = self.get_attr(cls, '__qualname__', None)
++                        if module and qualname:
++                            analyzer = ModuleAnalyzer.for_module(module)
++                            attr_docs_of_cls = analyzer.find_attr_docs()
++                            key = (qualname, name)
++                            if key in attr_docs_of_cls:
++                                return list(attr_docs_of_cls[key])
++                    except (AttributeError, PycodeError):
++                        pass
++
++            return None
++
+         ret = []
+ 
+         # search for members in source code too
+@@ -746,7 +785,8 @@ class Documenter:
+                         keep = has_doc or self.options.undoc_members
+                 else:
+                     keep = False
+-            elif (namespace, membername) in attr_docs:
++            elif (namespace, membername) in attr_docs or (
++                    inherited_attr_docs(membername) is not None):
+                 if want_all and isprivate:
+                     if self.options.private_members is None:
+                         keep = False

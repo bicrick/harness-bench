@@ -1,0 +1,50 @@
+
+  The bug is in _batched_insert: a user-supplied batch_size replaces the computed maximum rather than being capped by it. I'll apply the same min-logic used by
+  bulk_update.
+
+    Edited query.py +2 -1
+
+    ▎          if ignore_conflicts and not connections[self.db].features.supports_ignore_conflicts:
+    ▎              raise NotSupportedError('This database backend does not support ignoring conflicts.')
+    ▎          ops = connections[self.db].ops
+    ▎-         batch_size = (batch_size or max(ops.bulk_batch_size(fields, objs), 1))
+    ▎+         max_batch_size = max(ops.bulk_batch_size(fields, objs), 1)
+    ▎+         batch_size = min(batch_size, max_batch_size) if batch_size else max_batch_size
+    ▎          inserted_rows = []
+    ▎          bulk_return = connections[self.db].features.can_return_rows_from_bulk_insert
+    ▎          for item in [objs[i:i + batch_size] for i in range(0, len(objs), batch_size)]:
+
+  Now bulk_create respects the database's compatible batch size as an upper bound, the same way bulk_update does. I'll run a quick sanity check on the existing
+  bulk_create tests (without modifying them).
+
+  $ cd /testbed/tests && python runtests.py bulk_create --parallel=1 2>&1 | tail -n 5 1.1s
+    … 3 output lines hidden · ctrl+o to expand
+    Testing against Django installed in '/testbed/django'
+    System check identified no issues (0 silenced).
+
+  I fixed the bug in django/db/models/query.py. The existing bulk_create tests pass (5 skipped, which are backend-specific).
+
+  Cause: In _batched_insert, a user-supplied batch_size replaced the database-computed maximum outright (batch_size or max(...)), so a large batch_size could exceed
+  what the backend allows.
+
+  Fix: The method now caps the requested size at the compatible maximum, matching the logic in bulk_update:
+
+  max_batch_size = max(ops.bulk_batch_size(fields, objs), 1)
+  batch_size = min(batch_size, max_batch_size) if batch_size else max_batch_size
+
+  No tests were added or changed.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    15.9K / 300K  5.3%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                347 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  439 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        3.2K • 1.1%      Free space                                                         284K • 94.7%
+
+ Esc to close
+

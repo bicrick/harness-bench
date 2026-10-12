@@ -1,0 +1,50 @@
+    61:            uuids = [uuid for source, line, uuid in self.metadata[message]]
+    62:            yield Message(message, positions, uuids)
+
+  The upstream fix (Sphinx 4.x, PR #9722) deduplicates (source, line) pairs while preserving order in Catalog.__iter__. I'll apply that, keeping the uuids list
+  untouched since each uuid is unique per node.
+
+    Edited gettext.py +3 -1
+
+    ▎
+    ▎      def __iter__(self) -> Generator[Message, None, None]:
+    ▎          for message in self.messages:
+    ▎-             positions = [(source, line) for source, line, uuid in self.metadata[message]]
+    ▎+             positions = list(OrderedDict.fromkeys(
+    ▎+                 (source, line) for source, line, uuid in self.metadata[message]
+    ▎+             ))
+    ▎              uuids = [uuid for source, line, uuid in self.metadata[message]]
+    ▎              yield Message(message, positions, uuids)
+    ▎
+
+  Now I'll verify the change with a quick check and run the existing gettext tests (without modifying them).
+
+  $ cd /testbed && python -c "
+    from sphinx.builders.gettext import Catalog, MsgOrigin 4.0s
+    … 6 input + 1 output lines hidden · ctrl+o to expand
+    .s.....                                                                  [100%]
+    6 passed, 1 skipped in 2.74s
+
+  The fix is in sphinx/builders/gettext.py. In Catalog.__iter__, the (source, line) location list for each message is now deduplicated while keeping first-seen order.
+  Previously, every occurrence of a message appended its location, so the same file:0 entry repeated once per node (e.g. hair.rst:0 for "Type").
+
+  Verification:
+  • A message added three times from a.rst:0 plus once from b.rst:5 now yields [('a.rst', 0), ('b.rst', 5)].
+  • tests/test_build_gettext.py passes (6 passed, 1 skipped).
+
+  I left uuids untouched, since each entry there is unique per node and is used for the gettext_uuid output. I did not add or modify tests.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    18.1K / 300K  6.1%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                347 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  439 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        5.4K • 1.8%      Free space                                                         281K • 93.9%
+
+ Esc to close
+

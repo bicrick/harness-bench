@@ -1,0 +1,50 @@
+
+  The narrower change passes all 696 tests. It gates only ensure_schema (table creation), which is the root cause in the issue. Now I'll verify the issue scenario
+  directly: a router that forbids django_migrations on a non-default connection should leave that connection without the table.
+
+  $ cd /testbed && git diff && cat > /tmp/check_issue.py <<'EOF'
+    import django, os, sys 330ms
+    … 22 input + 40 output lines hidden · ctrl+o to expand
+    default has django_migrations: True
+    other has django_migrations: False
+
+  The issue scenario now behaves correctly: django_migrations is created on default and not on other. I'll clean up the temp script and run the broader test suite to
+  catch any other regressions.
+
+  $ rm -f /tmp/check_issue.py; cd /testbed/tests && python runtests.py migrations migrations2 backends sqlite3 multiple_database --parallel 1 2>&1 | grep -E
+    "^(ERROR|FAIL):|^Ran|^FAILED|^OK" 4.9s
+    Ran 976 tests in 4.186s
+    OK (skipped=94)
+
+  MigrationRecorder now respects allow_migrate, so the django_migrations table is no longer created on connections the router forbids.
+
+  The change (in django/db/migrations/recorder.py):
+  • Added an allowed() helper that asks the router allow_migrate(alias, "migrations", model_name="migration"), matching how the recorder's own model is routed.
+  • ensure_schema() returns early when the router disallows the connection, so the table is never created there. This is the root cause from the issue, since
+    record_applied, record_unapplied, and migrate all go through ensure_schema().
+
+  What I deliberately did not change: my first attempt also gated applied_migrations, record_applied, record_unapplied, and flush. That broke
+  migrations.test_commands.MigrateTests.test_migrate_fake_initial, which expects a migrate --database=other to still record applied migrations on a connection whose
+  router rejects the migrations app. Gating only table creation keeps that behavior and still fixes the reported problem. Reads on a connection without the table
+  already return {} via has_table(), so they stay safe.
+
+  Verification:
+  • The issue scenario (router allowing only default) now creates the table on default and not on other.
+  • migrations, migrations2, backends, sqlite3, and multiple_database suites: 976 tests, all passing.
+
+  No tests were added or modified.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                   31.1K / 300K  10.4%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.1K • 2.0%
+   Rules                                                                341 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  431 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                       18.6K • 6.2%      Free space                                                         268K • 89.6%
+
+ Esc to close
+

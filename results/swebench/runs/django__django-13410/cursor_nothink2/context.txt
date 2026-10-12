@@ -1,0 +1,50 @@
+
+  I'll look at the current implementation first.
+
+    Read /testbed/django/core/files/locks.py
+
+  The bug is confirmed: fcntl.flock returns None on success and raises OSError on failure, so ret == 0 is always False. I'll apply the fix from the issue.
+
+    Edited locks.py +10 -4
+
+    ▎              return True
+    ▎      else:
+    ▎          def lock(f, flags):
+    ▎-             ret = fcntl.flock(_fd(f), flags)
+    ▎-             return ret == 0
+    ▎+             try:
+    ▎+                 fcntl.flock(_fd(f), flags)
+    ▎+                 return True
+    ▎+             except OSError:
+    ▎+                 return False
+    ▎
+    ▎          def unlock(f):
+    ▎ … truncated (7 more lines) · ctrl+r to review
+
+  Let me run a quick sanity check against the real fcntl behavior.
+
+  $ cd /testbed && python -c "
+    import tempfile 203ms
+    … 10 input + 4 output lines hidden · ctrl+o to expand
+    unlock a: True
+    second lock after unlock: True
+
+  The POSIX lock() and unlock() in django/core/files/locks.py now return True on success and False on OSError, instead of comparing fcntl.flock's None return to 0.
+
+  The sanity check confirms the behavior: a non-blocking exclusive lock returns True when free, False when another descriptor already holds it, and True again after
+  the holder unlocks. I didn't add or change any tests.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    16.2K / 300K  5.4%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                345 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  437 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        3.6K • 1.2%      Free space                                                         283K • 94.6%
+
+ Esc to close
+

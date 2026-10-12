@@ -1,0 +1,50 @@
+  </issue>
+
+  The repository is checked out at /testbed and its Python environment is already on PATH. Resolve the issue by editing the repository's source files. Don't add
+  or change tests. Work autonomously and don't ask questions; stop when the fix is done.
+
+
+  I'll look at the ForeignKey validation code first.
+
+    Grepped "_default_manager|_base_manager" in /testbed/django/db/models/fields/related.py
+    Found 3 matches
+
+  The fix is to use _base_manager in ForeignKey.validate(), as the issue suggests. I'll make that change only; formfield() should keep the default manager.
+
+    Edited related.py +1 -1
+
+    ▎              return
+    ▎
+    ▎          using = router.db_for_read(self.remote_field.model, instance=model_instance)
+    ▎-         qs = self.remote_field.model._default_manager.using(using).filter(
+    ▎+         qs = self.remote_field.model._base_manager.using(using).filter(
+    ▎              **{self.remote_field.field_name: value}
+    ▎          )
+    ▎          qs = qs.complex_filter(self.get_limit_choices_to())
+
+  Now I'll run a quick check that the existing related-field tests still pass.
+
+  $ cd /testbed/tests && python runtests.py model_fields foreign_object invalid_models_tests model_forms --parallel 1 -v 1 2>&1 | tail -n 15 3.1s
+    … 9 output lines hidden · ctrl+o to expand
+    Testing against Django installed in '/testbed/django'
+    System check identified no issues (3 silenced).
+
+  ForeignKey.validate() now checks existence with _base_manager instead of _default_manager, so a form that uses Article._base_manager can accept archived articles.
+
+  The change is one line in django/db/models/fields/related.py. formfield() still uses _default_manager, so the form's own queryset (which the issue's example
+  overrides) is unaffected. The related field, foreign object, and model form test suites pass (836 tests, 17 skipped).
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    15.4K / 300K  5.2%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                345 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  436 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        2.8K • 0.9%      Free space                                                         284K • 94.8%
+
+ Esc to close
+

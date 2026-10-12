@@ -1,0 +1,144 @@
+2026-10-11 22:27:45,621 - INFO - Creating container for django__django-16263...
+2026-10-11 22:27:45,652 - INFO - Container for django__django-16263 created: 63ed0a2654ef872c94686804c5f99a95e6600585dba61e5068082d6f062dab2b
+2026-10-11 22:27:45,905 - INFO - Container for django__django-16263 started: 63ed0a2654ef872c94686804c5f99a95e6600585dba61e5068082d6f062dab2b
+2026-10-11 22:27:45,906 - INFO - Intermediate patch for django__django-16263 written to logs/run_evaluation/sbr-cursor_nothink2-1791775663/cursor_nothink2/django__django-16263/patch.diff, now applying to container...
+2026-10-11 22:27:46,046 - INFO - >>>>> Applied Patch:
+Checking patch django/db/models/sql/query.py...
+Applied patch django/db/models/sql/query.py cleanly.
+
+2026-10-11 22:27:47,400 - INFO - Git diff before:
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..1b6fb936a9 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -550,9 +550,58 @@ class Query(BaseExpression):
+         Perform a COUNT() query using the current filter constraints.
+         """
+         obj = self.clone()
++        obj.strip_unused_annotations()
+         obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+         return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++    def strip_unused_annotations(self):
++        """
++        Remove annotations that are not referenced by the ordering or other
++        annotations, so they don't need to be included in a COUNT() query.
++
++        Filters inline the annotation expression rather than referencing its
++        alias, so they don't keep an annotation alive. Annotations that are
++        referenced by ordering or by other remaining annotations are kept.
++        """
++        # An explicit GROUP BY (from values()) determines the row count, so
++        # leave such queries untouched.
++        if (
++            not self.annotations
++            or self.combinator
++            or isinstance(self.group_by, tuple)
++        ):
++            return
++        referenced = set()
++        for item in self.order_by:
++            if isinstance(item, str):
++                referenced.add(item.removeprefix("-"))
++            elif hasattr(item, "flatten"):
++                for expr in item.flatten():
++                    if isinstance(expr, Ref):
++                        referenced.add(expr.refs)
++        stack = [*self.annotations.values(), self.where]
++        while stack:
++            node = stack.pop()
++            if isinstance(node, Ref):
++                referenced.add(node.refs)
++            if isinstance(node, Node):
++                stack.extend(node.children)
++            elif hasattr(node, "get_source_expressions"):
++                stack.extend(e for e in node.get_source_expressions() if e)
++        for alias, annotation in list(self.annotations.items()):
++            # Aggregates change GROUP BY/row semantics and window functions
++            # can be filtered on via a wrapping subquery, so keep both.
++            if (
++                alias in referenced
++                or getattr(annotation, "contains_aggregate", False)
++                or getattr(annotation, "contains_over_clause", False)
++            ):
++                continue
++            del self.annotations[alias]
++            if self.annotation_select_mask is not None:
++                self.annotation_select_mask.discard(alias)
++        self._annotation_select_cache = None
++
+     def has_filters(self):
+         return self.where
+2026-10-11 22:27:47,401 - INFO - Eval script for django__django-16263 written to logs/run_evaluation/sbr-cursor_nothink2-1791775663/cursor_nothink2/django__django-16263/eval.sh; copying to container...
+2026-10-11 22:27:53,295 - INFO - Test runtime: 5.80 seconds
+2026-10-11 22:27:53,296 - INFO - Test output for django__django-16263 written to logs/run_evaluation/sbr-cursor_nothink2-1791775663/cursor_nothink2/django__django-16263/test_output.txt
+2026-10-11 22:27:53,385 - INFO - Git diff after:
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..1b6fb936a9 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -550,9 +550,58 @@ class Query(BaseExpression):
+         Perform a COUNT() query using the current filter constraints.
+         """
+         obj = self.clone()
++        obj.strip_unused_annotations()
+         obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+         return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++    def strip_unused_annotations(self):
++        """
++        Remove annotations that are not referenced by the ordering or other
++        annotations, so they don't need to be included in a COUNT() query.
++
++        Filters inline the annotation expression rather than referencing its
++        alias, so they don't keep an annotation alive. Annotations that are
++        referenced by ordering or by other remaining annotations are kept.
++        """
++        # An explicit GROUP BY (from values()) determines the row count, so
++        # leave such queries untouched.
++        if (
++            not self.annotations
++            or self.combinator
++            or isinstance(self.group_by, tuple)
++        ):
++            return
++        referenced = set()
++        for item in self.order_by:
++            if isinstance(item, str):
++                referenced.add(item.removeprefix("-"))
++            elif hasattr(item, "flatten"):
++                for expr in item.flatten():
++                    if isinstance(expr, Ref):
++                        referenced.add(expr.refs)
++        stack = [*self.annotations.values(), self.where]
++        while stack:
++            node = stack.pop()
++            if isinstance(node, Ref):
++                referenced.add(node.refs)
++            if isinstance(node, Node):
++                stack.extend(node.children)
++            elif hasattr(node, "get_source_expressions"):
++                stack.extend(e for e in node.get_source_expressions() if e)
++        for alias, annotation in list(self.annotations.items()):
++            # Aggregates change GROUP BY/row semantics and window functions
++            # can be filtered on via a wrapping subquery, so keep both.
++            if (
++                alias in referenced
++                or getattr(annotation, "contains_aggregate", False)
++                or getattr(annotation, "contains_over_clause", False)
++            ):
++                continue
++            del self.annotations[alias]
++            if self.annotation_select_mask is not None:
++                self.annotation_select_mask.discard(alias)
++        self._annotation_select_cache = None
++
+     def has_filters(self):
+         return self.where
+2026-10-11 22:27:53,385 - INFO - Grading answer for django__django-16263...
+2026-10-11 22:27:53,387 - INFO - report: {'django__django-16263': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'infra_failure': False, 'tests_status': {'FAIL_TO_PASS': {'success': ['test_non_aggregate_annotation_pruned (aggregation.tests.AggregateAnnotationPruningTests)'], 'failure': ['test_unreferenced_aggregate_annotation_pruned (aggregation.tests.AggregateAnnotationPruningTests)', 'test_unused_aliased_aggregate_pruned (aggregation.tests.AggregateAnnotationPruningTests)']}, 'PASS_TO_PASS': {'success': ['test_referenced_aggregate_annotation_kept (aggregation.tests.AggregateAnnotationPruningTests)', 'test_add_implementation (aggregation.tests.AggregateTestCase)', 'test_aggregate_alias (aggregation.tests.AggregateTestCase)', 'test_aggregate_annotation (aggregation.tests.AggregateTestCase)', 'test_aggregate_in_order_by (aggregation.tests.AggregateTestCase)', 'test_aggregate_join_transform (aggregation.tests.AggregateTestCase)', 'test_aggregate_multi_join (aggregation.tests.AggregateTestCase)', 'test_aggregate_over_aggregate (aggregation.tests.AggregateTestCase)', 'test_aggregate_over_complex_annotation (aggregation.tests.AggregateTestCase)', 'test_aggregate_transform (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_after_annotation (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_compound_expression (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_expression (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_group_by (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_integer (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_not_in_aggregate (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_passed_another_aggregate (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_unset (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_unsupported_by_count (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_using_date_from_database (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_using_date_from_python (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_using_datetime_from_database (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_using_datetime_from_python (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_using_decimal_from_database (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_using_decimal_from_python (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_using_duration_from_database (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_using_duration_from_python (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_using_time_from_database (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_using_time_from_python (aggregation.tests.AggregateTestCase)', 'test_aggregation_default_zero (aggregation.tests.AggregateTestCase)', 'test_aggregation_exists_annotation (aggregation.tests.AggregateTestCase)', 'test_aggregation_exists_multivalued_outeref (aggregation.tests.AggregateTestCase)', 'test_aggregation_expressions (aggregation.tests.AggregateTestCase)', 'test_aggregation_filter_exists (aggregation.tests.AggregateTestCase)', 'test_aggregation_nested_subquery_outerref (aggregation.tests.AggregateTestCase)', 'test_aggregation_order_by_not_selected_annotation_values (aggregation.tests.AggregateTestCase)', 'Random() is not included in the GROUP BY when used for ordering.', 'Subquery annotations are excluded from the GROUP BY if they are', 'test_aggregation_subquery_annotation_exists (aggregation.tests.AggregateTestCase)', 'Subquery annotations must be included in the GROUP BY if they use', 'test_aggregation_subquery_annotation_related_field (aggregation.tests.AggregateTestCase)', 'Subquery annotations and external aliases are excluded from the GROUP', 'test_aggregation_subquery_annotation_values_collision (aggregation.tests.AggregateTestCase)', 'test_alias_sql_injection (aggregation.tests.AggregateTestCase)', 'test_annotate_basic (aggregation.tests.AggregateTestCase)', 'test_annotate_defer (aggregation.tests.AggregateTestCase)', 'test_annotate_defer_select_related (aggregation.tests.AggregateTestCase)', 'test_annotate_m2m (aggregation.tests.AggregateTestCase)', 'test_annotate_ordering (aggregation.tests.AggregateTestCase)', 'test_annotate_over_annotate (aggregation.tests.AggregateTestCase)', 'test_annotate_values (aggregation.tests.AggregateTestCase)', 'test_annotate_values_aggregate (aggregation.tests.AggregateTestCase)', 'test_annotate_values_list (aggregation.tests.AggregateTestCase)', 'test_annotated_aggregate_over_annotated_aggregate (aggregation.tests.AggregateTestCase)', 'test_annotation (aggregation.tests.AggregateTestCase)', 'test_annotation_expressions (aggregation.tests.AggregateTestCase)', 'test_arguments_must_be_expressions (aggregation.tests.AggregateTestCase)', 'test_avg_decimal_field (aggregation.tests.AggregateTestCase)', 'test_avg_duration_field (aggregation.tests.AggregateTestCase)', 'test_backwards_m2m_annotate (aggregation.tests.AggregateTestCase)', 'test_coalesced_empty_result_set (aggregation.tests.AggregateTestCase)', 'test_combine_different_types (aggregation.tests.AggregateTestCase)', 'test_complex_aggregations_require_kwarg (aggregation.tests.AggregateTestCase)', 'test_complex_values_aggregation (aggregation.tests.AggregateTestCase)', 'test_count (aggregation.tests.AggregateTestCase)', 'test_count_distinct_expression (aggregation.tests.AggregateTestCase)', 'test_count_star (aggregation.tests.AggregateTestCase)', '.dates() returns a distinct set of dates when applied to a', 'test_decimal_max_digits_has_no_effect (aggregation.tests.AggregateTestCase)', 'test_distinct_on_aggregate (aggregation.tests.AggregateTestCase)', 'test_empty_aggregate (aggregation.tests.AggregateTestCase)', 'test_empty_result_optimization (aggregation.tests.AggregateTestCase)', 'test_even_more_aggregate (aggregation.tests.AggregateTestCase)', 'test_exists_extra_where_with_aggregate (aggregation.tests.AggregateTestCase)', 'test_exists_none_with_aggregate (aggregation.tests.AggregateTestCase)', 'test_expression_on_aggregation (aggregation.tests.AggregateTestCase)', 'test_filter_aggregate (aggregation.tests.AggregateTestCase)', 'Filtering against an aggregate requires the usage of the HAVING clause.', 'test_filtering (aggregation.tests.AggregateTestCase)', 'test_fkey_aggregate (aggregation.tests.AggregateTestCase)', 'Exists annotations are included in the GROUP BY if they are', 'Subquery annotations are included in the GROUP BY if they are', 'An annotation included in values() before an aggregate should be', 'test_more_aggregation (aggregation.tests.AggregateTestCase)', 'test_multi_arg_aggregate (aggregation.tests.AggregateTestCase)', 'test_multiple_aggregates (aggregation.tests.AggregateTestCase)', 'An annotation not included in values() before an aggregate should be', 'test_nonaggregate_aggregation_throws (aggregation.tests.AggregateTestCase)', 'test_nonfield_annotation (aggregation.tests.AggregateTestCase)', 'test_order_of_precedence (aggregation.tests.AggregateTestCase)', 'test_related_aggregate (aggregation.tests.AggregateTestCase)', 'test_reverse_fkey_annotate (aggregation.tests.AggregateTestCase)', 'test_single_aggregate (aggregation.tests.AggregateTestCase)', 'Sum on a distinct() QuerySet should aggregate only the distinct items.', 'test_sum_duration_field (aggregation.tests.AggregateTestCase)', 'Subqueries do not needlessly contain ORDER BY, SELECT FOR UPDATE or', 'Aggregation over sliced queryset works correctly.', "Doing exclude() on a foreign model after annotate() doesn't crash.", 'test_values_aggregation (aggregation.tests.AggregateTestCase)', 'test_values_annotation_with_expression (aggregation.tests.AggregateTestCase)'], 'failure': []}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for django__django-16263: resolved: False
+2026-10-11 22:27:53,387 - INFO - Attempting to stop container sweb.eval.django__django-16263.sbr-cursor_nothink2-1791775663...
+2026-10-11 22:28:08,602 - INFO - Container sweb.eval.django__django-16263.sbr-cursor_nothink2-1791775663 stopped successfully.
+2026-10-11 22:28:08,602 - INFO - Attempting to remove container sweb.eval.django__django-16263.sbr-cursor_nothink2-1791775663...
+2026-10-11 22:28:08,634 - INFO - Container sweb.eval.django__django-16263.sbr-cursor_nothink2-1791775663 removed successfully.

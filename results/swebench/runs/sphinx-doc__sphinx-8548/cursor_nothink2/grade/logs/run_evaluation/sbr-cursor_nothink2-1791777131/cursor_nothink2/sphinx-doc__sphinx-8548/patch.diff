@@ -1,0 +1,89 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..97326ee53 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -286,6 +286,35 @@ class ObjectMember(tuple):
+ ObjectMembers = Union[List[ObjectMember], List[Tuple[str, Any]]]
+ 
+ 
++def find_inherited_attr_docstring(subject: Any, attrname: str) -> Optional[List[str]]:
++    """Find the attribute documentation (``#:``) of *attrname* in the MRO of *subject*.
++
++    The docstring of an attribute is cached by the module analyzer of the module
++    where the attribute was defined, under ``(qualname_of_class, attrname)``.  For an
++    inherited attribute the class that defines it is a base class, so the lookup
++    must walk the MRO instead of using the namespace of *subject* only.
++    """
++    if not inspect.isclass(subject):
++        return None
++
++    for cls in inspect.getmro(subject):
++        try:
++            module = safe_getattr(cls, '__module__')
++            qualname = safe_getattr(cls, '__qualname__')
++            if not module or not qualname:
++                continue
++
++            analyzer = ModuleAnalyzer.for_module(module)
++            analyzer.analyze()
++            attr_docs = analyzer.find_attr_docs()
++            if (qualname, attrname) in attr_docs:
++                return list(attr_docs[(qualname, attrname)])
++        except (AttributeError, PycodeError):
++            pass
++
++    return None
++
++
+ class Documenter:
+     """
+     A Documenter knows how to autodocument a single object type.  When
+@@ -584,6 +613,21 @@ class Documenter:
+         else:
+             return 'docstring of %s' % fullname
+ 
++    def get_inherited_attr_docstring(self) -> Optional[List[str]]:
++        """Return the attribute documentation of the member from the MRO of its parent.
++
++        The attribute comment (``#:``) of an inherited attribute is cached by the
++        analyzer of the base class's module under the base class's qualname, so the
++        lookup must walk the MRO of the parent class.
++        """
++        if not self.objpath:
++            return None
++        return find_inherited_attr_docstring(self.parent, self.objpath[-1])
++
++    def has_inherited_attr_docstring(self, membername: str) -> bool:
++        """Check whether *membername* has attribute documentation in a base class."""
++        return find_inherited_attr_docstring(self.object, membername) is not None
++
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         """Add content from docstrings, attribute documentation and user."""
+@@ -606,6 +650,16 @@ class Documenter:
+ 
+                     for i, line in enumerate(self.process_doc(docstrings)):
+                         self.add_line(line, sourcename, i)
++                else:
++                    # the attribute may be inherited from a base class; look up
++                    # its attribute documentation in the base class's module
++                    docstring = self.get_inherited_attr_docstring()
++                    if docstring is not None:
++                        no_docstring = True
++                        docstrings = [list(docstring)]
++
++                        for i, line in enumerate(self.process_doc(docstrings)):
++                            self.add_line(line, sourcename, i)
+ 
+         # add content from docstrings
+         if not no_docstring:
+@@ -746,7 +800,8 @@ class Documenter:
+                         keep = has_doc or self.options.undoc_members
+                 else:
+                     keep = False
+-            elif (namespace, membername) in attr_docs:
++            elif ((namespace, membername) in attr_docs or
++                  self.has_inherited_attr_docstring(membername)):
+                 if want_all and isprivate:
+                     if self.options.private_members is None:
+                         keep = False

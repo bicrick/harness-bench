@@ -1,0 +1,50 @@
+    ▎              with self.connection.cursor() as cursor:
+    ▎ … truncated (2 more lines) · ctrl+r to review
+
+    Edited flush.py +1 -1
+
+    ▎
+    ▎          if confirm == 'yes':
+    ▎              try:
+    ▎-                 connection.ops.execute_sql_flush(database, sql_list)
+    ▎+                 connection.ops.execute_sql_flush(sql_list)
+    ▎              except Exception as exc:
+    ▎                  raise CommandError(
+    ▎                      "Database %s couldn't be flushed. Possible reasons:\n"
+
+  Let me check for any other overrides or callers (including in non-.py files and the tests/ tree, which I was told not to change but should verify).
+
+    Grepped "execute_sql_flush\(" in /testbed
+    Found 4 matches
+
+  The two remaining hits are in tests, which you asked me not to modify. They will now fail against the new signature, which is expected for this API change. Let me
+  run a quick sanity check on the source change.
+
+  $ cd /testbed && python -m pyflakes django/db/backends/base/operations.py django/core/management/commands/flush.py 2>/dev/null; python -c "import
+    django.core.management.commands.flush, django.db.backends.base.operations; import inspect;
+    print(inspect.signature(django.db.backends.base.operations.BaseDatabaseOperations.execute_sql_flush))" 982ms
+    (self, sql_list)
+
+  The signature is simplified to execute_sql_flush(self, sql_list), and the method now takes the alias from self.connection.alias.
+
+  Changes:
+  • django/db/backends/base/operations.py: dropped the using parameter; transaction.atomic now uses self.connection.alias.
+  • django/core/management/commands/flush.py: updated the call to connection.ops.execute_sql_flush(sql_list).
+
+  The two test files (tests/backends/tests.py and tests/backends/base/test_operations.py) still call the old two-argument form. I left them alone as you asked, so
+  those calls will raise a TypeError until they're updated.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    16.6K / 300K  5.6%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                346 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  437 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        4.0K • 1.3%      Free space                                                         283K • 94.4%
+
+ Esc to close
+

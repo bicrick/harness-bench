@@ -57,3 +57,39 @@ A per-bug strip for the 9 split bugs: one row per harness, each run drawn as a r
 (grey = look, blue = edit, green/red = check passed/failed), ending in a ✓ or ✗. SWE-agent's rows visibly run longer
 with red→blue→green repeats; failing rows tend to be short (one blue, one check, stop). Show Cursor as partial where
 truncated and Claude Code as "turns only". Simpler alternative: one bar per harness of "% of runs that checked their fix" (98 vs 64-78).
+
+## Update (Oct 11, late): full-log reruns of Cursor and Claude Code
+
+Cursor and Claude Code were rerun on all 50 bugs with the same settings, saving every step (`cursor_nothink2`: chats
+kept and untruncated stream-json; `claude_code_nothink2`: full stream-json with every tool call and result). These
+replace their columns in the write-up. Scores: Cursor 36/50 (was 35), Claude Code 34/50 (was 33). The rerun is a
+second sample, so a bug or two moving either way is expected noise.
+
+Split bugs with the reruns (6, down from 9; order CC, Cursor, OpenCode, SWE-agent, mini):
+
+| bug | CC Cu OC SW mi |
+|---|---|
+| astropy-14369 | . X . . . |
+| django-13297 | X X X X . |
+| django-16454 | X . X X . |
+| matplotlib-25960 | . X X X X |
+| sphinx-8638 | . . . X . |
+| sympy-13031 | . X . X X |
+
+32 bugs every harness fixed, 12 none did. SWE-agent fixed 5 of the 6 splits, Cursor 4, OpenCode 3, CC and mini 2.
+sphinx-8638 is still SWE-agent only: both reruns shipped a patch, ran a check, and stopped without revising.
+
+Behavior across all 50, with full logs for every harness (`scripts/why_swe_agent_extract.py`):
+
+| harness | ran code after first edit (all runs) | revises after a failed check | reproduces before editing | mean edit→test cycles | median steps |
+|---|---|---|---|---|---|
+| SWE-agent | 98% | **30%** | 20% | **1.6** | 11 |
+| Cursor (rerun) | 98% | 18% | 28% | 1.4 | 9 |
+| Claude Code (rerun) | 96% | 16% | 22% | 1.4 | 8 |
+| OpenCode | 76% | 15% | 15% | 1.0 | 7 |
+| mini-swe-agent | 64% | 10% | 12% | 0.9 | 7 |
+
+Revised conclusion: with complete logs, "checks its work" no longer separates SWE-agent. Cursor and Claude Code check
+almost as often; the earlier 78% for Cursor was an artifact of truncated logs. What still separates SWE-agent is
+**going back after a failed check** (30% vs 10–18%) and more edit→test cycles. Confidence stays low: the gap is 1–3
+bugs on 6 split bugs.

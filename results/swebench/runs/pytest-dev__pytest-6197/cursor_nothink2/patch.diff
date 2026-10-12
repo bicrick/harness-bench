@@ -1,0 +1,39 @@
+diff --git a/src/_pytest/python.py b/src/_pytest/python.py
+index 306e5f217..f3715a82b 100644
+--- a/src/_pytest/python.py
++++ b/src/_pytest/python.py
+@@ -177,10 +177,15 @@ def pytest_collect_file(path, parent):
+     ext = path.ext
+     if ext == ".py":
+         if not parent.session.isinitpath(path):
+-            if not path_matches_patterns(
+-                path, parent.config.getini("python_files") + ["__init__.py"]
+-            ):
+-                return
++            if not path_matches_patterns(path, parent.config.getini("python_files")):
++                # Only package __init__.py files on the path to an explicit argument
++                # are collected; unrelated __init__.py files found while recursing
++                # must not be imported (#6185).
++                if not (
++                    path.basename == "__init__.py"
++                    and _is_ancestor_of_initialpath(parent.session, path.dirpath())
++                ):
++                    return
+         ihook = parent.session.gethookproxy(path)
+         return ihook.pytest_pycollect_makemodule(path=path, parent=parent)
+ 
+@@ -190,6 +195,14 @@ def path_matches_patterns(path, patterns):
+     return any(path.fnmatch(pattern) for pattern in patterns)
+ 
+ 
++def _is_ancestor_of_initialpath(session, dirpath):
++    """Returns True if dirpath is an ancestor (or equal) of one of the session's initial paths."""
++    for initial_path in session._initialpaths:
++        if initial_path == dirpath or initial_path.relto(dirpath):
++            return True
++    return False
++
++
+ def pytest_pycollect_makemodule(path, parent):
+     if path.basename == "__init__.py":
+         return Package(path, parent)

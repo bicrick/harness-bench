@@ -1,0 +1,50 @@
+
+  The bug is that str(year)[2:] drops the first two characters for years < 1000 (e.g. year 123 gives '3'). The fix is to take the last two digits with zero padding.
+
+    Edited dateformat.py +1 -1
+
+    ▎
+    ▎      def y(self):
+    ▎          "Year, 2 digits; e.g. '99'"
+    ▎-         return str(self.data.year)[2:]
+    ▎+         return '%02d' % (self.data.year % 100)
+    ▎
+    ▎      def Y(self):
+    ▎          "Year, 4 digits; e.g. '1999'"
+
+  Let me verify against the examples from the issue.
+
+  $ cd /testbed && python -c "
+    import datetime 279ms
+    … 6 input + 7 output lines hidden · ctrl+o to expand
+    1000 '00'
+    1 '01'
+
+  The output now matches Python's strftime("%y") and PHP's date("y"). I'll run the existing dateformat tests to check for regressions.
+
+  $ cd /testbed/tests && python runtests.py utils_tests.test_dateformat dates timezones --parallel 1 2>&1 | tail -5 1.3s
+    … 3 output lines hidden · ctrl+o to expand
+    OK (skipped=9)
+    Destroying test database for alias 'default'...
+
+  Fixed in django/utils/dateformat.py.
+
+  The y formatter used str(self.data.year)[2:], which strips the first two characters. For years under 1000 that drops real digits (year 123 became '3'). It now uses
+  '%02d' % (self.data.year % 100), so the output is always the zero-padded last two digits: 123 gives '23', 9 gives '09', and 2024 still gives '24'.
+
+  The existing date, timezone, and dateformat test suites pass (107 tests, 9 skipped). I didn't add or modify any tests.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    14.5K / 300K  4.8%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                348 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  439 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        1.8K • 0.6%      Free space                                                         285K • 95.2%
+
+ Esc to close
+

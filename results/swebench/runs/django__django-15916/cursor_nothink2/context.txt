@@ -1,0 +1,50 @@
+
+  $ cd /testbed/tests && python runtests.py model_forms model_formsets model_formsets_regress model_forms_regress admin_views forms_tests --parallel 1 -v 0 2>&1 | tail
+    -15 30s in /testbed
+
+  $ sleep 60; tail -15 /tmp/sbr/cursorhome.FGZE1m/.cursor/projects/testbed/terminals/824500.txt 1m
+    … 13 output lines hidden · ctrl+o to expand
+    ended_at: 2026-10-12T03:25:19.060Z
+    ---
+
+  The only error is a non-existent module name I passed (model_forms_regress); the other 1647 tests ran with no failures. Let me double-check that run cleanly without
+  that bogus name.
+
+  $ cd /testbed/tests && python runtests.py model_forms model_formsets model_formsets_regress admin_views forms_tests model_inheritance_regress --parallel 1 -v 0 2>&1 |
+    tail -4 34s
+    … 2 output lines hidden · ctrl+o to expand
+    OK (skipped=37, expected failures=1)
+
+  The fix is in place and the relevant suites pass (1678 tests, OK).
+
+  Root cause: In modelform_factory, form_class_attrs always included "formfield_callback": formfield_callback. When no callback was passed, that was None, which
+  overwrote the callback inherited from form.Meta. The metaclass then used that None instead of the Meta.formfield_callback on the parent.
+
+  Changes in django/forms/models.py:
+  • ModelFormMetaclass.__new__: the callback is now resolved in order: an explicit formfield_callback class attribute, then Meta.formfield_callback on the class
+    being created, then the base form's Meta callback. Previously Meta.formfield_callback on the class itself was ignored.
+  • modelform_factory: formfield_callback is only added to the new class's attributes when one is explicitly provided, so the inherited value is no longer clobbered
+    with None.
+
+  The issue's example now produces required fields in both MyForm and FactoryForm. No tests were added or changed.
+
+  Finished Run Django model form and formset test suites
+
+  The background test run (task 824500) finished successfully. It's the first run I already checked: 1647 tests with no failures, and the single error was a bogus
+  module name I had passed (model_forms_regress). The clean rerun, which I'd already completed, passed 1678 tests (37 skipped, 1 expected failure). No follow-up is
+  needed.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    20.7K / 300K  6.9%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                345 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  436 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        8.1K • 2.7%      Free space                                                         279K • 93.1%
+
+ Esc to close
+

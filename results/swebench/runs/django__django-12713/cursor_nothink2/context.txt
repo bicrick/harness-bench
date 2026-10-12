@@ -1,0 +1,50 @@
+    ▎-         autocomplete_fields = self.get_autocomplete_fields(request)
+    ▎-         if db_field.name in autocomplete_fields:
+    ▎-             kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
+    ▎-         elif db_field.name in self.raw_id_fields:
+    ▎-             kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
+    ▎-         elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
+    ▎-             kwargs['widget'] = widgets.FilteredSelectMultiple(
+    ▎-                 db_field.verbose_name,
+    ▎-                 db_field.name in self.filter_vertical
+    ▎ … truncated (15 more lines) · ctrl+r to review
+
+  Now I'll run the existing admin tests for regressions (without modifying tests).
+
+  $ cd /testbed/tests && python runtests.py admin_widgets model_forms admin_views.test_forms 2>&1 | tail -n 5 2.6s
+    … 3 output lines hidden · ctrl+o to expand
+    Destroying test database for alias 'default'...
+    Destroying test database for alias 'default'...
+
+  The tests pass. I'll also confirm the widget override now takes effect.
+
+  $ cd /testbed && cat > /tmp/check_widget.py <<'EOF'
+    import django 381ms
+    … 18 input lines hidden · ctrl+o to expand
+    W
+    W
+
+  Fixed. formfield_for_manytomany() in django/contrib/admin/options.py now respects a widget passed in by the caller.
+
+  Cause: The method unconditionally overwrote kwargs['widget'] when a field was in autocomplete_fields, raw_id_fields, or filter_horizontal/filter_vertical.
+  formfield_for_foreignkey() already guards this with if 'widget' not in kwargs.
+
+  Change: I wrapped the widget-selection branch in the same if 'widget' not in kwargs: guard, matching the foreign key version.
+
+  Verification: The admin_widgets, model_forms, and admin_views.test_forms suites pass. A quick script confirmed that a custom widget passed to the method is used
+  even when the field is in filter_horizontal. I did not add or modify any tests.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    16.4K / 300K  5.5%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                347 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  439 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        3.7K • 1.2%      Free space                                                         283K • 94.5%
+
+ Esc to close
+

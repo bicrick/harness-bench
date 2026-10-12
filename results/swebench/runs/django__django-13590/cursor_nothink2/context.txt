@@ -1,0 +1,50 @@
+    ▎-             return type(value)(
+    ▎+             resolved_values = (
+    ▎                  self.resolve_lookup_value(sub_value, can_reuse, allow_joins)
+    ▎                  for sub_value in value
+    ▎              )
+    ▎+             # Named tuples take their fields as positional arguments rather
+    ▎+             # than a single iterable, so they must be unpacked.
+    ▎+             if hasattr(value, '_fields'):
+    ▎+                 return type(value)(*resolved_values)
+    ▎ … truncated (4 more lines) · ctrl+r to review
+
+  Now I'll verify the fix with a quick reproduction.
+
+  $ cd /testbed && python -c "
+    import django 685ms
+    … 14 input + 1 output lines hidden · ctrl+o to expand
+    [1, 2] (1, 2)
+    /opt/miniconda3/envs/testbed/bin/python: No module named pytest
+
+  The named tuple now resolves correctly, and lists and plain tuples behave as before. Pytest isn't installed, so I'll run the suite with Django's own test runner.
+
+  $ cd /testbed/tests && python runtests.py queries lookup expressions_case 2>&1 | tail -4 2.2s
+    … 2 output lines hidden · ctrl+o to expand
+    Destroying test database for alias 'default'...
+    Destroying test database for alias 'default'...
+
+  Fixed. Passing a named tuple to a range lookup no longer raises TypeError.
+
+  Cause: In resolve_lookup_value (django/db/models/sql/query.py), tuples are rebuilt with type(value)(generator). A named tuple's constructor expects its fields as
+  separate positional arguments, not one iterable, so it failed with the missing-argument error.
+
+  Change: When the value has _fields (a named tuple), the resolved items are unpacked with *. Plain lists and tuples keep the original behavior.
+
+  Verification: A namedtuple('R', ['near', 'far']) now resolves to R(near=1, far=2), and plain list and tuple inputs are unchanged. The queries, lookup, and
+  expressions_case Django test suites pass. I didn't add any tests, per your instructions.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    15.5K / 300K  5.2%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                347 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  438 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        2.8K • 0.9%      Free space                                                         284K • 94.8%
+
+ Esc to close
+

@@ -1,0 +1,50 @@
+    ▎ … truncated (6 more lines) · ctrl+r to review
+
+  The action's _command_parser_kwargs attribute is set after construction, so it's only read at add_parser time, which is fine. I need argparse imported; let me check
+  the imports and then verify the issue's scenario.
+
+  $ cd /testbed && sed -n 1,20p django/core/management/base.py | grep -n import; cat > /tmp/repro.py <<'EOF'
+    import django 582ms
+    … 26 input + 11 output lines hidden · ctrl+o to expand
+    CommandError: Error: the following arguments are required: {create}
+    ok {'verbosity': 1, 'settings': None, 'pythonpath': None, 'traceback': False, 'no_color': False, 'force_color': False, 'skip_checks': True, 'name': 'bob'}
+
+  The programmatic path now raises CommandError for the missing subparser argument instead of a stack trace. Let me confirm the CLI path also shows usage and run the
+  existing management tests.
+
+  $ cd /testbed/tests && python runtests.py admin_scripts user_commands bash_completion 2>&1 | tail -n 15 26s
+    … 13 output lines hidden · ctrl+o to expand
+    Destroying test database for alias 'default'...
+    Destroying test database for alias 'default'...
+
+  All 261 related tests pass. Let me clean up the temporary repro file and check the final diff.
+
+  $ rm -f /tmp/repro.py && cd /testbed && git diff 966ms
+    … 39 output lines hidden · ctrl+o to expand
+             # Catch missing argument for a better error message
+             if self.missing_args_message and not (
+
+  Subparsers created through CommandParser now keep its error-formatting options, so a missing argument in a subcommand raises a proper CommandError (or prints the
+  usage message on the CLI) instead of a stack trace.
+
+  The fix is in django/core/management/base.py:
+  • CommandParser.add_subparsers() defaults the action to a new _CommandSubParsersAction and records missing_args_message and called_from_command_line on it.
+  • _CommandSubParsersAction.add_parser() passes those values into each subparser it creates.
+
+  I reproduced the issue's scenario: a missing name now gives CommandError: Error: the following arguments are required: name. The existing admin_scripts,
+  user_commands and bash_completion suites pass (261 tests). I did not add or change any tests.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    19.3K / 300K  6.5%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                347 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  438 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        6.6K • 2.2%      Free space                                                         280K • 93.5%
+
+ Esc to close
+

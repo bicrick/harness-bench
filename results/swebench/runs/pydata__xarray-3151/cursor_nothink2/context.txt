@@ -1,0 +1,50 @@
+    ValueError: Resulting object does not have monotonic global indexes along dimension y
+
+  Reproduced. Now I'll restrict the monotonicity check to the dimensions that were actually used for concatenation.
+
+    Edited combine.py +4 -2
+
+    ▎                                     data_vars=data_vars, coords=coords,
+    ▎                                     fill_value=fill_value)
+    ▎
+    ▎-         # Check the overall coordinates are monotonically increasing
+    ▎-         for dim in concatenated.dims:
+    ▎+         # Check the overall coordinates are monotonically increasing along
+    ▎+         # the dimensions we concatenated over. Coordinate dimensions that do
+    ▎+         # not vary between datasets are "bystanders" and are ignored.
+    ▎+         for dim in concat_dims:
+    ▎              if dim in concatenated:
+    ▎                  indexes = concatenated.indexes.get(dim)
+    ▎                  if not (indexes.is_monotonic_increasing
+
+  Now I'll rerun the reproduction and the existing combine tests.
+
+  $ cd /testbed && python -c "
+    import xarray as xr, numpy as np 5.9s
+    … 5 input + 14 output lines hidden · ctrl+o to expand
+    -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+    66 passed, 1 xfailed, 40 warnings in 3.93s
+
+  The issue is fixed. combine_by_coords now returns the combined dataset (dims y: 3, x: 7) for the MCVE instead of raising.
+
+  Cause: After concatenating, combine_by_coords checked monotonicity on every dimension of the result. A dimension like y that is identical across all datasets is a
+  "bystander" that the docs say should be ignored, but it was still being checked.
+
+  Fix (xarray/core/combine.py): the post-concatenation monotonicity check now only iterates over concat_dims, the dimensions actually used to order the datasets.
+
+  The existing test_combine.py suite passes (66 passed, 1 xfailed). I didn't add or modify any tests, per your instructions.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    19.2K / 300K  6.4%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.1K • 0.7%      Tool definitions                                                    6.3K • 2.1%
+   Rules                                                                354 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  448 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        6.2K • 2.1%      Free space                                                         280K • 93.6%
+
+ Esc to close
+

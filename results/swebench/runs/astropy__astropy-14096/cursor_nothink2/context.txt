@@ -1,0 +1,50 @@
+    ▎+         # "no attribute '<attr>'" message.
+    ▎+         descriptor = getattr(type(self), attr, None)
+    ▎+         if descriptor is not None and hasattr(descriptor, "__get__"):
+    ▎+             return descriptor.__get__(self, type(self))
+    ▎+
+    ▎          # Fail
+    ▎ … truncated (2 more lines) · ctrl+r to review
+
+  Now I'll verify the fix, including that the normal missing-attribute path still works.
+
+  $ cd /testbed && python -c "
+    import astropy.coordinates as coord 4.8s
+    … 16 input + 4 output lines hidden · ctrl+o to expand
+    !!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+    1 failed, 282 passed in 2.62s
+
+  The fix works: the error now names random_attr. The one test failure is an unrelated network/leap-second warning (the environment's leap-second file is expired).
+  I'll rerun without -x to confirm nothing else regressed.
+
+  $ cd /testbed && python -m pytest astropy/coordinates/tests/test_sky_coord.py -q -p no:warnings 2>&1 | tail -3; git stash -q && python -m pytest
+    astropy/coordinates/tests/test_sky_coord.py -q -p no:warnings 2>&1 | tail -1; git stash pop -q && git status --short 9.7s
+    … 3 output lines hidden · ctrl+o to expand
+    427 passed, 3 skipped, 1 xfailed in 3.62s
+     M astropy/coordinates/sky_coordinate.py
+
+  The fix is in place and the SkyCoord test suite passes (427 passed, same as before the change).
+
+  Root cause: When a property raises AttributeError internally, Python falls back to __getattr__ with the property's name. SkyCoord.__getattr__ then raised a generic
+  "no attribute 'prop'" error, hiding the real cause.
+
+  Fix (astropy/coordinates/sky_coordinate.py, in SkyCoord.__getattr__): before failing, if the requested name is a class-level descriptor (such as a subclass
+  property), the code re-invokes that descriptor. Its real exception (e.g. no attribute 'random_attr') now propagates. Ordinary missing attributes still get the
+  original message.
+
+  I didn't add or modify any tests, per your instructions.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    17.9K / 300K  6.0%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                347 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  439 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        5.2K • 1.7%      Free space                                                         282K • 94.0%
+
+ Esc to close
+

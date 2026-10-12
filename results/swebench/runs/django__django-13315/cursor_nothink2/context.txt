@@ -1,0 +1,50 @@
+
+  The suite ran 1827 tests with one error. That error is a UnicodeEncodeError from filesystem locale handling in a file-upload test, which is unrelated to my change.
+  I'll confirm it also fails without my change.
+
+  $ cd /testbed && git stash && cd tests && python runtests.py model_fields --parallel 1 -v 0 2>&1 | tail -n 4; cd /testbed && git stash pop && git diff --stat 2.1s
+    … 13 output lines hidden · ctrl+o to expand
+     django/forms/models.py | 6 +++++-
+     1 file changed, 5 insertions(+), 1 deletion(-)
+
+  The error came from the model_forms/forms_tests run (a file-upload test with a non-ASCII filename under this environment's ASCII locale), not from model_fields. To
+  be sure it isn't caused by my change, I'll run that specific test module with and without the patch.
+
+  $ cd /testbed/tests && export PYTHONIOENCODING=utf-8 LC_ALL=C.UTF-8 LANG=C.UTF-8 && python runtests.py model_forms model_formsets forms_tests foreign_object lookup
+    queries --parallel 1 -v 0 2>&1 | tail -n 4; cd /testbed && git stash -q && cd tests && python runtests.py model_forms model_formsets forms_tests foreign_object
+    lookup queries --parallel 1 -v 0 2>&1 | tail -n 4; cd /testbed && git stash pop -q && git diff --stat 11s
+    … 8 output lines hidden · ctrl+o to expand
+     django/forms/models.py | 6 +++++-
+     1 file changed, 5 insertions(+), 1 deletion(-)
+
+  With a UTF-8 locale, all 1419 related tests pass with the fix, and the same set passes without it. The earlier error was purely the locale issue.
+
+  Summary
+
+  Root cause: apply_limit_choices_to_to_formfield in django/forms/models.py applies limit_choices_to with queryset.complex_filter(...). When that Q object traverses a
+  multi-valued relation (for example Q(books__title__startswith=...)), the SQL join returns the same related row once per matching child, so the form's choices
+  contain duplicates.
+
+  Fix: I appended .distinct() to the filtered queryset in django/forms/models.py:
+
+  formfield.queryset = formfield.queryset.complex_filter(
+      limit_choices_to,
+  ).distinct()
+
+  A reproduction with two matching books for one author now yields a single choice instead of two. I didn't add or modify any tests, and the only changed file is
+  django/forms/models.py.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    23.7K / 300K  7.9%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.3K • 2.1%
+   Rules                                                                350 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  443 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                       10.8K • 3.6%      Free space                                                         276K • 92.1%
+
+ Esc to close
+

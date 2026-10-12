@@ -1,0 +1,50 @@
+    System check identified no issues (0 silenced).
+
+  There's one error. I'll check whether it's related to my change.
+
+  $ cd /testbed/tests && python runtests.py forms_tests model_forms --parallel 1 2>&1 | grep -A 15 "^ERROR:" | head -40; git -C /testbed stash -q && python runtests.py
+    forms_tests model_forms --parallel 1 2>&1 | tail -3; git -C /testbed stash pop -q 4.3s
+    … 17 output lines hidden · ctrl+o to expand
+    Testing against Django installed in '/testbed/django'
+    System check identified no issues (0 silenced).
+
+  The test_unicode_filename error is a file-storage/filesystem issue in the test, not related to error messages. I'll confirm it also fails without my change.
+
+  $ cd /testbed && git stash -q && cd tests && python runtests.py forms_tests model_forms --parallel 1 2>&1 | grep -E "^(ERROR|FAIL):|^FAILED|^OK"; cd /testbed && git
+    stash pop -q && git status --short 2.1s
+    … 1 output lines hidden · ctrl+o to expand
+    FAILED (errors=1, skipped=1)
+     M django/forms/fields.py
+
+  Fixed. Field.__deepcopy__ in django/forms/fields.py now deep-copies error_messages, so each form instance gets its own dict and modifying one field's messages no
+  longer affects others.
+
+  def __deepcopy__(self, memo):
+      result = copy.copy(self)
+      memo[id(self)] = result
+      result.widget = copy.deepcopy(self.widget, memo)
+      result.validators = self.validators[:]
+      result.error_messages = copy.deepcopy(self.error_messages, memo)
+      return result
+
+  Verification:
+  • A copied field's error_messages changed independently of the original.
+  • The forms_tests and model_forms suites show one error, test_unicode_filename, which also fails on the untouched baseline (a filesystem issue in the test,
+    unrelated to this change).
+
+  I didn't add or modify any tests.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    16.5K / 300K  5.5%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                346 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  438 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        3.9K • 1.3%      Free space                                                         283K • 94.5%
+
+ Esc to close
+

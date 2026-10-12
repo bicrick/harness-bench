@@ -1,0 +1,50 @@
+    ▎+ def _is_version_older(version: str, reqversion: str) -> bool:
+    ▎ … truncated (11 more lines) · ctrl+r to review
+
+  Now let me verify the fix against the issue's scenario and the existing tests.
+
+  $ cd /testbed && python -c "
+    from sphinx.extension import _is_version_older as f 1.4s
+    … 5 input + 7 output lines hidden · ctrl+o to expand
+    -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+    7 warnings in 0.00s
+
+  The comparisons are correct. The pytest run shows "7 warnings" with no test results, so I'll check whether the test file is collected at all.
+
+  $ cd /testbed && ls tests | grep -i ext; python -m pytest tests/test_extension.py -q -p no:warnings 2>&1 | tail -3; python -m pytest tests -q -k "needs_extension or
+    extension" -p no:warnings 2>&1 | tail -3 4.5s
+    … 37 output lines hidden · ctrl+o to expand
+    ...........                                                              [100%]
+    11 passed, 1731 deselected in 3.54s
+
+  The fix is in place in sphinx/extension.py.
+
+  Cause: verify_needs_extensions compared versions with a plain string comparison (reqversion > extension.version), so '0.10.0' < '0.6' lexically and the check
+  wrongly failed for sphinx-gallery 0.10.0 against a 0.6 minimum.
+
+  Change: The comparison now goes through a small helper, _is_version_older, which parses both strings with packaging.version.Version (already a declared dependency
+  and already used in sphinx/ext/doctest.py). It falls back to the old string comparison only if a version string isn't PEP 440-parseable, so existing behavior for
+  unusual version strings is preserved.
+
+  Verification:
+  • 0.10.0 vs requirement 0.6 → accepted (no longer raises).
+  • 0.6 vs requirement 0.10 → still rejected.
+  • 1.0 vs 1.0 → accepted; unparseable versions don't crash.
+  • The existing extension-related tests pass (11 passed).
+
+  I didn't add or modify any tests, as requested.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    22.0K / 300K  7.4%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                345 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  437 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        9.4K • 3.1%      Free space                                                         277K • 92.6%
+
+ Esc to close
+

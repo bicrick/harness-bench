@@ -1,0 +1,63 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..1b6fb936a9 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -550,9 +550,58 @@ class Query(BaseExpression):
+         Perform a COUNT() query using the current filter constraints.
+         """
+         obj = self.clone()
++        obj.strip_unused_annotations()
+         obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+         return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++    def strip_unused_annotations(self):
++        """
++        Remove annotations that are not referenced by the ordering or other
++        annotations, so they don't need to be included in a COUNT() query.
++
++        Filters inline the annotation expression rather than referencing its
++        alias, so they don't keep an annotation alive. Annotations that are
++        referenced by ordering or by other remaining annotations are kept.
++        """
++        # An explicit GROUP BY (from values()) determines the row count, so
++        # leave such queries untouched.
++        if (
++            not self.annotations
++            or self.combinator
++            or isinstance(self.group_by, tuple)
++        ):
++            return
++        referenced = set()
++        for item in self.order_by:
++            if isinstance(item, str):
++                referenced.add(item.removeprefix("-"))
++            elif hasattr(item, "flatten"):
++                for expr in item.flatten():
++                    if isinstance(expr, Ref):
++                        referenced.add(expr.refs)
++        stack = [*self.annotations.values(), self.where]
++        while stack:
++            node = stack.pop()
++            if isinstance(node, Ref):
++                referenced.add(node.refs)
++            if isinstance(node, Node):
++                stack.extend(node.children)
++            elif hasattr(node, "get_source_expressions"):
++                stack.extend(e for e in node.get_source_expressions() if e)
++        for alias, annotation in list(self.annotations.items()):
++            # Aggregates change GROUP BY/row semantics and window functions
++            # can be filtered on via a wrapping subquery, so keep both.
++            if (
++                alias in referenced
++                or getattr(annotation, "contains_aggregate", False)
++                or getattr(annotation, "contains_over_clause", False)
++            ):
++                continue
++            del self.annotations[alias]
++            if self.annotation_select_mask is not None:
++                self.annotation_select_mask.discard(alias)
++        self._annotation_select_cache = None
++
+     def has_filters(self):
+         return self.where
+ 

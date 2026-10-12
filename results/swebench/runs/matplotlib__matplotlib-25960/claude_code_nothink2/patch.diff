@@ -1,0 +1,41 @@
+diff --git a/lib/matplotlib/figure.py b/lib/matplotlib/figure.py
+index dab2bc4a5a..5eea0ba1b8 100644
+--- a/lib/matplotlib/figure.py
++++ b/lib/matplotlib/figure.py
+@@ -2276,10 +2276,32 @@ class SubFigure(FigureBase):
+         gs = self._subplotspec.get_gridspec()
+         wr = np.asarray(gs.get_width_ratios())
+         hr = np.asarray(gs.get_height_ratios())
+-        dx = wr[self._subplotspec.colspan].sum() / wr.sum()
+-        dy = hr[self._subplotspec.rowspan].sum() / hr.sum()
+-        x0 = wr[:self._subplotspec.colspan.start].sum() / wr.sum()
+-        y0 = 1 - hr[:self._subplotspec.rowspan.stop].sum() / hr.sum()
++        nrows, ncols = gs.get_geometry()
++        # Account for the spacing between cells (wspace/hspace), as in
++        # GridSpec.get_grid_positions, but in parent-relative units.
++        subplot_params = gs.get_subplot_params(self._parent)
++        wspace = subplot_params.wspace
++        hspace = subplot_params.hspace
++        cell_w = 1 / (ncols + wspace*(ncols-1))
++        cell_h = 1 / (nrows + hspace*(nrows-1))
++        sep_w = wspace * cell_w
++        sep_h = hspace * cell_h
++        # Each cell's width/height is its share of the cell span plus the
++        # separators between the spanned cells.
++        col_start = self._subplotspec.colspan.start
++        col_stop = self._subplotspec.colspan.stop
++        row_start = self._subplotspec.rowspan.start
++        row_stop = self._subplotspec.rowspan.stop
++        width_unit = cell_w * ncols / wr.sum()
++        height_unit = cell_h * nrows / hr.sum()
++        dx = (wr[col_start:col_stop].sum() * width_unit
++              + sep_w * (col_stop - col_start - 1))
++        dy = (hr[row_start:row_stop].sum() * height_unit
++              + sep_h * (row_stop - row_start - 1))
++        x0 = (wr[:col_start].sum() * width_unit
++              + sep_w * col_start)
++        y0 = 1 - (hr[:row_stop].sum() * height_unit
++                  + sep_h * (row_stop - 1))
+         if self.bbox_relative is None:
+             self.bbox_relative = Bbox.from_bounds(x0, y0, dx, dy)
+         else:

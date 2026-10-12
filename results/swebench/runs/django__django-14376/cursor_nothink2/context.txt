@@ -1,0 +1,50 @@
+    ▎          if settings_dict['NAME']:
+    ▎-             kwargs['db'] = settings_dict['NAME']
+    ▎+             kwargs['database'] = settings_dict['NAME']
+    ▎          if settings_dict['PASSWORD']:
+    ▎-             kwargs['passwd'] = settings_dict['PASSWORD']
+    ▎+             kwargs['password'] = settings_dict['PASSWORD']
+    ▎          if settings_dict['HOST'].startswith('/'):
+    ▎              kwargs['unix_socket'] = settings_dict['HOST']
+    ▎          elif settings_dict['HOST']:
+
+  Let me check whether anything else in the repo relies on the old db/passwd keys, such as the test suite or the client.
+
+    Grepped "...d':|kwargs\[.db.\]|kwargs\[.passwd.\]" in /testbed/django
+    Found 0 matches
+
+  No other references exist. I'll run a quick check that the connection params are built correctly.
+
+  $ cd /testbed && python -c "
+    import django exit 1 • 270ms
+    … 7 input + 11 output lines hidden · ctrl+o to expand
+    django.core.exceptions.ImproperlyConfigured: Error loading MySQLdb module.
+    Did you install mysqlclient?
+
+  The mysqlclient module isn't installed in this environment, so I can't import the backend to exercise it. I'll confirm the diff directly instead.
+
+  $ cd /testbed && git diff 917ms
+    … 14 output lines hidden · ctrl+o to expand
+                 kwargs['unix_socket'] = settings_dict['HOST']
+             elif settings_dict['HOST']:
+
+  The MySQL backend now passes database and password to mysqlclient instead of the deprecated db and passwd. The change is two lines in
+  django/db/backends/mysql/base.py (get_connection_params).
+
+  I couldn't run the backend to verify it because MySQLdb isn't installed in this environment. The change is a straight keyword rename, and mysqlclient 1.3.8+ (the
+  minimum the issue cites) accepts the new names. No tests were added or changed, and nothing else in the repo referenced the old keys.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    16.0K / 300K  5.3%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                347 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  439 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        3.2K • 1.1%      Free space                                                         283K • 94.7%
+
+ Esc to close
+

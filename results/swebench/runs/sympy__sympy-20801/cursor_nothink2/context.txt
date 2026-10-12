@@ -1,0 +1,50 @@
+    ▎+         if not self:
+    ▎+             return not other
+    ▎          if other.is_NumberSymbol:
+    ▎              if other.is_irrational:
+    ▎                  return False
+
+  Now I'll verify both orderings and the related cases.
+
+  $ cd /testbed && python -c "
+    from sympy import * 1.4s
+    … 6 input + 3 output lines hidden · ctrl+o to expand
+    False False False
+    True True
+
+  Both orderings now agree. I'll run the existing core number and logic tests to check for regressions.
+
+  $ cd /testbed && python -m pytest sympy/core/tests/test_numbers.py sympy/logic/tests/test_boolalg.py -q 2>&1 | tail -5 74ms
+    /opt/miniconda3/envs/testbed/bin/python: No module named pytest
+
+  Pytest isn't installed, so I'll use SymPy's built-in test runner.
+
+  $ cd /testbed && python -c "
+    from sympy.testing.runtests import test 10s
+    … 2 input + 6 output lines hidden · ctrl+o to expand
+    == tests finished: 227 passed, 2 skipped, 4 expected to fail, in 9.43 seconds ==
+
+  Fixed. S(0.0) == S.false now returns False, matching S.false == S(0.0) and the S(0) behaviour.
+
+  Cause: In Float.__eq__ (sympy/core/numbers.py), the zero shortcut if not self: return not other ran before the isinstance(other, Boolean) check. For Float(0.0), not
+  other evaluated not S.false to True. Integer/Rational.__eq__ already had the Boolean/non-Number guard ahead of the zero check, which is why S(0) was consistent.
+
+  Fix: I moved the Boolean check above the zero shortcut in Float.__eq__. No tests were added or changed.
+
+  Verification: Both orderings now return False, != returns True, and S(0.0) == S.true / S(0.0) == False are unchanged. The core numbers, relational, and boolalg test
+  suites pass (227 passed, 2 skipped, 4 expected failures, which are pre-existing).
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    20.1K / 300K  6.7%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.1K • 0.7%      Tool definitions                                                    6.3K • 2.1%
+   Rules                                                                351 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  444 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        7.2K • 2.4%      Free space                                                         279K • 93.3%
+
+ Esc to close
+

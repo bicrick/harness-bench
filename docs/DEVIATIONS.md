@@ -108,3 +108,16 @@
 - Symptom: with 3 shared flock slots and LOCK_NB race, `mini_swe_agent_nothink` + `swe_agent_nothink` each ran two shards and starved `aider_nothink` (~3/50, waiting ~70 min) and `claude_code_nothink` (~6/50).
 - Code (`sbr/run.py` `_acquire_slot`): FIFO ticket queue under `~/sbr-slots/waiters/` + `ticket_seq`. Waiters take a monotonic ticket; only the oldest living waiter may LOCK_NB a free slot. Dead-PID waiter files are pruned. Heartbeat prints ticket + how many are ahead. Conditions unchanged: SBR_SLOTS=3, 2 CPU / 4 GB, thinking off via `*_nothink` proxy normalization, `sg docker`.
 - Runner rebalance (no in-flight pair killed): stopped `nt_mini_rev` (was waiting, held no slot). Started `nt_aider_rev` and `nt_claude_code_rev` on the reverse instance list (existing `~/sbr-claims` flock prevents double-runs). Restarted waiting python for `nt_aider`, `nt_mini_swe_agent`, `nt_opencode` so they load FIFO code (`launch.sh` relaunches). Left the three slot holders (`swe_agent`, `swe_agent_rev`, `claude_code`) alone; `~/sbr-nt-fifo-reload.sh` (tmux `nt_fifo_reload`) kills each of those PIDs the instant it holds no slot so `launch.sh` reloads FIFO — never while holding.
+
+## Full-log reruns (2026-10-11, 10:15 PM to 11:25 PM CT)
+
+- `cursor_nothink2` and `claude_code_nothink2` rerun all 50 bugs with the same settings as `*_nothink` (Haiku 5.5,
+  thinking off, every command approved, $0.50 per bug, 2 CPU / 4 GB, 3 at a time). Only logging changed: Cursor keeps
+  each run's chat store (not committed) and untruncated stream-json; Claude Code saves full stream-json transcripts.
+  The write-up uses these two runs for Cursor and Claude Code. Spend for the Claude Code rerun about $0.33 through the
+  proxy; Cursor's is estimated from its own logs ($0.33 at the Haiku 5.5 lower tier).
+- Cursor's opening context is now measured per run from each saved chat (`scripts/cursor2_finalize.py`, median
+  12.9k tokens) instead of one matching test run (13.4k).
+- Wall times: the reruns had fewer very slow runs than the main batch, so their minutes per fix (2.6 and 2.1) are not
+  directly comparable to the other three harnesses; medians barely moved.
+- `scripts/post_grid.py` now writes the write-up's grid data from these runs.

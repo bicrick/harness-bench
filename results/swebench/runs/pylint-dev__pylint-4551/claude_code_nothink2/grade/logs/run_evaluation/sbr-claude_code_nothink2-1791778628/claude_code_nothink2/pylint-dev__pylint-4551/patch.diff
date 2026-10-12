@@ -1,0 +1,51 @@
+diff --git a/pylint/pyreverse/inspector.py b/pylint/pyreverse/inspector.py
+index 8fa12202..d229081b 100644
+--- a/pylint/pyreverse/inspector.py
++++ b/pylint/pyreverse/inspector.py
+@@ -231,11 +231,46 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+         """
+         try:
+             values = set(node.infer())
++            annotated = _annotated_values(node)
++            if annotated:
++                # e.g. `def __init__(self, a: str = None): self.a = a`
++                # prefer the annotation over an inferred `None` default
++                values = {v for v in values if not _is_none(v)} | annotated
+             current = set(parent.instance_attrs_type[node.attrname])
+             parent.instance_attrs_type[node.attrname] = list(current | values)
+         except astroid.InferenceError:
+             pass
+ 
++
++def _is_none(value):
++    """return True if the inferred value is the None constant"""
++    return isinstance(value, astroid.Const) and value.value is None
++
++
++def _annotated_values(assignattr):
++    """return the inferred annotation types of an argument assigned to an attribute
++
++    Only handles the case where the assigned value is a plain name bound to an
++    annotated argument of the enclosing function.
++    """
++    value = assignattr.parent.value
++    if not isinstance(value, astroid.Name):
++        return set()
++    func = assignattr.frame()
++    if not isinstance(func, astroid.FunctionDef):
++        return set()
++    args = func.args
++    names = [arg.name for arg in args.args or []]
++    if value.name not in names:
++        return set()
++    annotation = args.annotations[names.index(value.name)]
++    if annotation is None:
++        return set()
++    try:
++        return set(annotation.infer())
++    except astroid.InferenceError:
++        return set()
++
+     def visit_import(self, node):
+         """visit an astroid.Import node
+ 

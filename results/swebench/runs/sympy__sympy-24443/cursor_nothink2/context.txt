@@ -1,0 +1,50 @@
+  $ cd /testbed && python -c "
+    from sympy import test 7.1s
+    … 4 input + 16 output lines hidden · ctrl+o to expand
+    ================== tests finished: 1 passed, in 0.06 seconds ===================
+
+  All combinatorics tests pass (the 2 expected failures are pre-existing xfails), and the module doctests pass.
+
+  Finally, let me double-check the exact issue reproduction and confirm the diff is contained to the one source file.
+
+  $ cd /testbed && python -c "
+    from sympy.combinatorics import * 937ms
+    … 5 input + 2 output lines hidden · ctrl+o to expand
+     sympy/combinatorics/homomorphisms.py | 60 ++++++++++++++++++------------------
+     1 file changed, 30 insertions(+), 30 deletions(-)
+
+  The issue is fixed. homomorphism(D3, D3, D3.generators, D3.generators) now succeeds, and the only file changed is sympy/combinatorics/homomorphisms.py.
+
+  Root cause: In _check_homomorphism, the PermutationGroup branch looked up each relator letter r[i] in gens (the presentation's free generators) and then mapped it
+  with gens.index(...). When a letter was an inverse generator, such as x_1**-1, that membership test failed and the lookup went wrong, so valid endomorphisms were
+  rejected.
+
+  Fix: I simplified the check instead of patching that one branch:
+  • For permutation groups, images is re-keyed once by the presentation's free generators, pairing them with domain.generators in order. This removes the fragile in
+    gens / gens.index logic.
+  • A small _syllables helper walks a relator's letters and powers. The evaluator then looks up each syllable's generator or its inverse, the same way for all
+    domain types.
+
+  Verification:
+  • D3 -> D3 and D4 -> D4 identity maps are accepted and are isomorphisms.
+  • A genuinely invalid map is still rejected with the same ValueError.
+  • D3 -> S3 is correctly detected as an isomorphism.
+  • The combinatorics test suites pass (96 passed; the 2 expected failures were already marked xfail), and the module doctests pass.
+
+  I didn't add or change any tests, per your instructions. On the _image simplification suggested in the issue: I kept the change focused on the bug rather than doing
+  a full rewrite, since the surrounding FpGroup path depends on the existing behavior.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                   34.8K / 300K  11.6%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                345 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  436 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                       22.2K • 7.4%      Free space                                                         265K • 88.4%
+
+ Esc to close
+

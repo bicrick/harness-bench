@@ -1,0 +1,50 @@
+  Now I'll re-run the reproduction and check the other behaviours from the issue.
+
+  $ cd /testbed && python -c "
+    from sympy import * 3.9s
+    … 8 input + 3 output lines hidden · ctrl+o to expand
+    (6, Poly(3*x + 2, x, domain='QQ'))
+    /opt/miniconda3/envs/testbed/bin/python: No module named pytest
+
+  The fix works: the rep is now DMP([], EX, None), is_zero is consistent, and terms_gcd and primitive no longer fail. pytest isn't installed, so I'll run the polys
+  tests with sympy's own test runner.
+
+  $ cd /testbed && python -c "
+    from sympy import test 35s
+    … 2 input + 13 output lines hidden · ctrl+o to expand
+     tests finished: 944 passed, 5 skipped, 3 expected to fail,
+    1 expected to fail but passed, in 33.76 seconds
+
+  The fix is in place and the polys test suite passes (944 passed, no failures).
+
+  Root cause: dup_clear_denoms and dmp_clear_denoms in sympy/polys/densetools.py multiply every coefficient by the common denominator via
+  dup_mul_ground/dmp_mul_ground. If a coefficient simplifies to zero in the domain (here an EX expression that evaluates to 0), the result keeps that zero as a
+  leading term. That produces the unstripped DMP([EX(0)], EX, None), and downstream methods that assume a normalized representation then misbehave.
+
+  Fix: Strip the result after the multiplication:
+  • dup_clear_denoms: f = dup_strip(dup_mul_ground(f, common, K0))
+  • dmp_clear_denoms: f = dmp_strip(dmp_mul_ground(f, common, u, K0), u)
+
+  Verification:
+  • bad_poly.rep is now DMP([], EX, None), matching Poly(0, x, domain="EX").rep.
+  • bad_poly.is_zero is True, consistent with as_expr() == 0.
+  • bad_poly.terms_gcd() returns ((0,), Poly(0, x, domain='EX')) instead of raising IndexError.
+  • bad_poly.primitive() returns (0, Poly(0, x, domain='EX')) instead of hitting a ZeroDivisionError.
+  • Normal clear_denoms results are unchanged (e.g. (6, Poly(3*x + 2, x, domain='QQ'))).
+
+  No tests or docs were added or modified.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    24.2K / 300K  8.1%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.1K • 0.7%      Tool definitions                                                    6.4K • 2.2%
+   Rules                                                                359 • 0.1%      Skills                                                              2.1K • 0.7%
+   MCP                                                                  455 • 0.2%      Subagents                                                           1.6K • 0.5%
+   Conversation                                                       11.0K • 3.7%      Free space                                                         275K • 91.9%
+
+ Esc to close
+

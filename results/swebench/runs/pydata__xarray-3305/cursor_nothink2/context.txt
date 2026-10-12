@@ -1,0 +1,50 @@
+    ▎                          )
+    ▎
+    ▎              else:
+
+  Let me confirm _get_keep_attrs is imported in dataset.py, then check the groupby caller of Variable.quantile and run the reproduction.
+
+    Grepped "_get_keep_attrs" in /testbed/xarray/core/dataset.py
+    Found 6 matches
+
+  $ cd /testbed && python -c "
+    import xarray as xr 1.9s
+    … 10 input + 6 output lines hidden · ctrl+o to expand
+    dataset         : OrderedDict([('title', 't')]) OrderedDict([('units', 'K')])
+    vector q        : OrderedDict([('units', 'K')])
+
+  The fix works for every case. Last, I'll check the groupby path, which also calls Variable.quantile, and run the existing quantile tests to make sure nothing
+  regressed.
+
+  $ cd /testbed && python -m pytest xarray/tests/test_dataarray.py xarray/tests/test_dataset.py xarray/tests/test_variable.py xarray/tests/test_groupby.py -k quantile
+    -q 2>&1 | tail -15 4.2s
+    … 13 output lines hidden · ctrl+o to expand
+    -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+    5 passed, 1801 deselected, 153 warnings in 3.59s
+
+  DataArray.quantile now honors keep_attrs. The reproduction from the issue returns OrderedDict([('units', 'K')]) instead of an empty dict, and the existing quantile
+  tests pass.
+
+  Root cause: Variable.quantile had no keep_attrs parameter and always built its result with no attrs. DataArray.quantile delegates to Dataset.quantile, which
+  accepted keep_attrs but only applied it to the dataset-level attrs. The per-variable attrs (where units lives for a DataArray) were dropped.
+
+  Changes:
+  • xarray/core/variable.py: Variable.quantile takes keep_attrs (defaulting to the keep_attrs option, as reduce does) and passes the attrs through to the result.
+  • xarray/core/dataset.py: Dataset.quantile resolves keep_attrs once and forwards it to each variable's quantile call.
+
+  I verified keep_attrs=True, False, the default, the global set_options(keep_attrs=True), vector q, and Dataset-level attrs. I did not add or modify any tests.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    24.4K / 300K  8.2%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                350 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  442 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                       11.6K • 3.9%      Free space                                                         275K • 91.8%
+
+ Esc to close
+

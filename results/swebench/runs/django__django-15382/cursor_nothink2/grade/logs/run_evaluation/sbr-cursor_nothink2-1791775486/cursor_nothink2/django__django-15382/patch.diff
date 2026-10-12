@@ -1,0 +1,41 @@
+diff --git a/django/db/models/expressions.py b/django/db/models/expressions.py
+index 81f8f79c71..3e502ed5c5 100644
+--- a/django/db/models/expressions.py
++++ b/django/db/models/expressions.py
+@@ -1209,15 +1209,29 @@ class Exists(Subquery):
+         clone.negated = not self.negated
+         return clone
+ 
++    @property
++    def empty_result_set_value(self):
++        # An EXISTS() over an empty queryset is always False, so its negation
++        # is always True.
++        return self.negated
++
+     def as_sql(self, compiler, connection, template=None, **extra_context):
+         query = self.query.exists(using=connection.alias)
+-        sql, params = super().as_sql(
+-            compiler,
+-            connection,
+-            template=template,
+-            query=query,
+-            **extra_context,
+-        )
++        try:
++            sql, params = super().as_sql(
++                compiler,
++                connection,
++                template=template,
++                query=query,
++                **extra_context,
++            )
++        except EmptyResultSet:
++            if self.empty_result_set_value is NotImplemented:
++                raise
++            # Surface the always-False/always-True value as a constant instead
++            # of propagating EmptyResultSet, which would wrongly drop
++            # sibling conditions from the WHERE clause.
++            return compiler.compile(Value(self.empty_result_set_value))
+         if self.negated:
+             sql = 'NOT {}'.format(sql)
+         return sql, params

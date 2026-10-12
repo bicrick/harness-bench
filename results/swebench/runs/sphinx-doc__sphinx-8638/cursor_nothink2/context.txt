@@ -1,0 +1,50 @@
+    SAME
+
+  The fix is in place, and the 79 failures are identical before and after my change, so they're pre-existing and unrelated (they come from environment warnings, such
+  as the meta node re-registration).
+
+  Summary
+
+  Root cause: In PythonDomain.find_obj (sphinx/domains/python.py), the non-refspecific lookup checked the module-scope name modname.name before the class-scope name
+  modname.classname.name. So inside class Foo, a reference to limit resolved to a same-named module-level global (pkg.a.limit) instead of the class's own attribute
+  (pkg.a.Foo.limit). The same ordering problem is what made unrelated limit attributes cross-link.
+
+  Fix: I moved the fully-qualified class-scope check ahead of the module-scope check, so the innermost enclosing scope wins, matching Python's own name resolution:
+
+  elif classname and classname + '.' + name in self.objects:
+      newname = classname + '.' + name
+  elif modname and classname and \
+          modname + '.' + classname + '.' + name in self.objects:
+      # the class scope must take precedence over the module scope,
+      # otherwise a same-named module-level object would be linked
+      newname = modname + '.' + classname + '.' + name
+  elif modname and modname + '.' + name in self.objects:
+      newname = modname + '.' + name
+
+  Verification: I built a minimal project with a global limit, a Foo.limit attribute, and a docstring :attr:limit inside Foo. Before the fix it linked to
+  #pkg.a.limit; after, it links to #pkg.a.Foo.limit. tests/test_domain_py.py passes (34/34). I did not add or modify any tests.
+
+  One note: the issue also mentions the fuzzy .name search (used by :any:/refspecific references) matching across unrelated classes. I left that path unchanged, since
+  it intentionally matches any object ending in .name when no exact scope match exists. Changing it would be a behavior change beyond this fix.
+
+  Finished Compare test failures before and after the fix
+
+  The background comparison finished. The before and after failure lists are identical (79 each), so the fix adds no new test failures. Those 79 failures predate my
+  change and come from environment warnings unrelated to the Python domain.
+
+  No follow-up is needed. The only modified file is sphinx/domains/python.py, and the stash was popped cleanly.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    26.3K / 300K  8.8%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                348 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  440 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                       13.6K • 4.6%      Free space                                                         273K • 91.2%
+
+ Esc to close
+

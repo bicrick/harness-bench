@@ -11,30 +11,39 @@ Write-up: **https://bicrick.com/projects/harness-bench**
 
 ## Results
 
-50 bugs from SWE-bench Verified, graded by the official SWE-bench evaluator. Same-settings run.
+50 bugs from SWE-bench Verified, graded by the official SWE-bench evaluator. Same-settings run (thinking off
+everywhere). Cursor and Claude Code numbers come from their full-log reruns (`cursor_nothink2`, `claude_code_nothink2`,
+Oct 11), which saved every step so their behavior could be measured; their first same-settings runs
+(`cursor_nothink` 35/50, `claude_code_nothink` 33/50) stay in `results/` for comparison.
 
 | | Claude Code | Cursor | OpenCode | SWE-agent | mini-swe-agent |
 |---|---|---|---|---|---|
-| Bugs fixed | 33/50 (66%) | 35/50 (70%) | 35/50 (70%) | 37/50 (74%) | 34/50 (68%) |
-| 95% range | 52–78% | 56–81% | 56–81% | 60–84% | 54–79% |
-| Tokens per fix | 471k | 393k | 230k | 251k | 105k |
+| Bugs fixed | 34/50 (68%) | 36/50 (72%) | 35/50 (70%) | 37/50 (74%) | 34/50 (68%) |
+| 95% range | 54–79% | 58–83% | 56–81% | 60–84% | 54–79% |
+| Tokens per fix | 492k | 379k | 230k | 251k | 105k |
 | Cost per fix | $0.010 | $0.009\* | $0.006 | $0.008 | $0.004 |
-| Minutes per fix | 4.0 | 4.9 | 4.6 | 9.1 | 3.9 |
+| Minutes per fix | 2.1† | 2.6† | 4.6 | 9.1 | 3.9 |
 
 \* Cursor bills through its own servers, so its traffic never passes our logging proxy. Its cost is estimated
 from its own usage logs.
 
+† The reruns had fewer very slow runs (none over 10 minutes for Cursor, one for Claude Code, versus 4 to 13 per
+harness in the main batch). Median run times barely moved (Cursor 69 s to 68 s, Claude Code 61 s to 54 s), so the
+drop in minutes per fix is mostly a quieter machine, not a faster harness.
+
 ## Key findings
 
-- **Accuracy is a tie.** 66–74% with heavily overlapping 95% ranges. At 50 bugs, no harness is clearly more accurate.
-- **Token use is not.** Tokens per fix differ 4.5x, from 105k (mini-swe-agent) to 471k (Claude Code), for the same
+- **Accuracy is a tie.** 68–74% with heavily overlapping 95% ranges. At 50 bugs, no harness is clearly more accurate.
+- **Token use is not.** Tokens per fix differ 4.7x, from 105k (mini-swe-agent) to 492k (Claude Code), for the same
   accuracy. Most of the gap is how much each harness puts in the window before the model reads any code: about 2k
   tokens and one to three tools for mini-swe-agent and SWE-agent, 11k for OpenCode, 13k for Cursor, 24k and 20 tools
   for Claude Code. That opening is resent with every request.
-- **SWE-agent edges ahead by checking its work.** On the 9 bugs where the harnesses split, SWE-agent fixed 8. Its
-  transcripts show it running code after editing in 98% of bugs (64–78% for the others) and revising after a failed
-  check about twice as often. The edge is 2–4 bugs, so this is *consistent with* checking being the reason, not
-  proof. See [docs/WHY_SWE_AGENT.md](docs/WHY_SWE_AGENT.md).
+- **SWE-agent edges ahead, and it isn't just checking its work.** On the 6 bugs where the harnesses split, SWE-agent
+  fixed 5 (Cursor 4, OpenCode 3, Claude Code and mini-swe-agent 2). With full logs, Cursor (98%) and Claude Code (96%)
+  run code after editing about as often as SWE-agent (98%); OpenCode (76%) and mini-swe-agent (64%) less. What still
+  stands out is what happens after a failed check: SWE-agent revises in 30% of runs, the others in 10–18%. The edge
+  is 1–3 bugs, so this is *consistent with* that being the reason, not proof. See
+  [docs/WHY_SWE_AGENT.md](docs/WHY_SWE_AGENT.md).
 
 ## Setup
 

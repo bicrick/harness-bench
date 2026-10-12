@@ -1,0 +1,50 @@
+  code via git stash.
+
+  $ cd /testbed && python -m pytest testing -q -p no:cacheprovider --ignore=testing/test_junitxml.py --ignore=testing/python/metafunc.py 2>&1 | grep -E "^(FAILED|ERROR)
+    " | sort > /tmp/after.txt; git stash -q && python -m pytest testing -q -p no:cacheprovider --ignore=testing/test_junitxml.py --ignore=testing/python/metafunc.py
+    2>&1 | grep -E "^(FAILED|ERROR) " | sort > /tmp/before.txt; git stash pop -q && echo "before: $(wc -l < /tmp/before.txt)  after: $(wc -l < /tmp/after.txt)" && diff
+    /tmp/before.txt /tmp/after.txt && echo "IDENTICAL failure sets" 5m 10s
+    before: 29  after: 29
+    IDENTICAL failure sets
+
+  The failure set is identical before and after my change (29 lines, same set), so the 23 failures are pre-existing environment issues (missing pygments/terminal
+  themes, cache/tmp setup, etc.) and not regressions. Let me confirm the stash restored my edits and do a final check of the code.
+
+  $ cd /testbed && git status --short && git diff && cd /tmp/repro && python -c "
+    import sys; sys.path.insert(0,'.') 700ms
+    … 3 input + 60 output lines hidden · ctrl+o to expand
+     # Typing for builtin pytest marks. This is cheating; it gives builtin marks
+    ['foo', 'bar']
+
+  Fixed. Marks from multiple base classes are now merged, so TestDings(Foo, Bar) gets both foo and bar.
+
+  The cause: Class reads its marks via getattr(cls, "pytestmark"). Since pytestmark is a plain class attribute, MRO lookup returns only the first class's list, so
+  Bar's bar marker was dropped.
+
+  The change (only src/_pytest/mark/structures.py):
+  • get_unpacked_marks now, for classes, starts with the class's own marks (honoring metaclass properties, as the issue's workaround did) and then adds each base's
+    own pytestmark from its __dict__ along the MRO. Duplicates are removed by identity.
+  • store_mark now writes only the object's own marks. This stops a subclass from copying inherited marks into its own pytestmark when decorated.
+
+  Verification:
+  • The issue's repro now yields ['foo', 'bar'] (previously ['foo']).
+  • Mark, collection, and mark-expression tests pass (333 passed).
+  • I excluded test_junitxml.py and python/metafunc.py because they need xmlschema and hypothesis, which aren't installed. Across the rest of the suite, the set of
+    failures is identical before and after my change, so none are regressions. They come from the environment (e.g. terminal theme/pygments and tmp-dir issues).
+
+  I did not add or modify any tests, as requested, and did not add a changelog entry or AUTHORS line.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    28.4K / 300K  9.5%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.1K • 2.1%
+   Rules                                                                344 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  435 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                       15.8K • 5.3%      Free space                                                         271K • 90.5%
+
+ Esc to close
+

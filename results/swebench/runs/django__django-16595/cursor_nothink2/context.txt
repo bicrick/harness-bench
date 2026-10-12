@@ -1,0 +1,50 @@
+    ▎+         ):
+    ▎+             return [operation]
+    ▎          elif (
+    ▎              isinstance(operation, RenameField)
+    ▎              and self.is_same_field_operation(operation)
+
+  Now I'll verify the fix with the issue's example.
+
+  $ cd /testbed && python -c "
+    import django 911ms
+    … 15 input + 1 output lines hidden · ctrl+o to expand
+    [<AddField  model_name='book', name='title', field=<django.db.models.fields.CharField>>]
+    /opt/miniconda3/envs/testbed/bin/python: No module named pytest
+
+  The optimizer now collapses the chain of AlterFields to one. pytest isn't installed, so I'll run the existing migration tests with Django's own runner.
+
+  $ cd /testbed/tests && python runtests.py migrations migrations2 --parallel=1 -q 2>&1 | tail -5 513ms
+    … 3 output lines hidden · ctrl+o to expand
+                       [module ...]
+    runtests.py: error: unrecognized arguments: -q
+
+  $ cd /testbed/tests && python runtests.py migrations migrations2 --parallel=1 2>&1 | tail -5 11s
+    … 3 output lines hidden · ctrl+o to expand
+    Destroying test database for alias 'default'...
+    Destroying test database for alias 'other'...
+
+  The optimizer now reduces a chain of AlterField operations, so the issue's example collapses to a single AlterField when the AddField is separated out.
+
+  The fix is in AlterField.reduce in django/db/migrations/operations/fields.py. I added a branch that returns the later AlterField when it targets the same field. The
+  later operation fully determines the final field state, so the earlier one can be dropped.
+
+  Verification:
+  • The issue's optimize(operations[1:], "books") now returns one AlterField instead of three.
+  • The full optimize(operations, "books") still returns just the AddField.
+  • The migrations and migrations2 test suites pass (712 tests, 2 skipped). I didn't add or change any tests.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                    18.7K / 300K  6.2%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                346 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  438 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                        6.0K • 2.0%      Free space                                                         281K • 93.8%
+
+ Esc to close
+

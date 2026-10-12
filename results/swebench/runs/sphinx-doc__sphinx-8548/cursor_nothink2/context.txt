@@ -1,0 +1,50 @@
+    -15 4.3s
+    … 14 output lines hidden · ctrl+o to expand
+    !!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+    1 failed, 64 passed, 42 warnings in 3.41s
+
+  That failure is a pre-existing environment warning ("node class 'meta' is already registered"), unrelated to my change. Let me confirm by checking it on a clean
+  stash, then run the full autodoc suite without -x.
+
+  $ cd /testbed && python -m pytest tests/test_ext_autodoc*.py -q 2>&1 | tail -6; echo ---BASELINE---; git stash -q && python -m pytest tests/test_ext_autodoc*.py -q
+    2>&1 | tail -6; git stash pop -q && git status --short 9.3s
+    … 12 output lines hidden · ctrl+o to expand
+    1 failed, 131 passed, 169 warnings in 3.98s
+     M sphinx/ext/autodoc/__init__.py
+
+  The same single test fails on the untouched baseline, so it's a pre-existing environment issue. The other 131 autodoc tests pass with my change. Let me clean up the
+  repro directory and do a final review of the diff.
+
+  $ rm -rf /tmp/repro; cd /testbed && git diff 56ms
+    … 87 output lines hidden · ctrl+o to expand
+                         if self.options.private_members is None:
+                             keep = False
+
+  I've fixed the issue: :inherited-members: now documents inherited attributes with their #: docstrings. The change is in sphinx/ext/autodoc/__init__.py.
+
+  Root cause: Attribute docs are cached per module analyzer under (class_qualname, attrname). Autodoc only looked up (namespace, attrname) for the class being
+  documented, so an attribute defined on a base class was never found, and the member was dropped from the output.
+
+  Fix:
+  • A new module-level helper, find_inherited_attr_docstring, walks the class MRO and checks each base's module analyzer for the attribute's docstring.
+  • filter_members uses it so inherited documented attributes are kept.
+  • add_content falls back to it when the direct lookup misses, so the docstring is rendered.
+
+  Verification: I reproduced the issue with a base class in one module and a subclass in another. Before the fix, attr was missing; after it, the output includes attr
+  = 1 with "base attribute doc". The autodoc test suite gives 131 passed. The one failure, test_autodoc, also fails on the untouched baseline due to an environment
+  warning ("node class 'meta' is already registered"), so it's unrelated. I did not add or modify any tests.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Context • Claude Haiku 5.5 300K High No Thinking                                                                                                   37.5K / 300K  12.5%
+ Current context usage by category.
+
+
+ 0                                       75K                                      150K                                     225K                                    300K
+
+   System prompt                                                       2.0K • 0.7%      Tool definitions                                                    6.2K • 2.1%
+   Rules                                                                348 • 0.1%      Skills                                                              2.0K • 0.7%
+   MCP                                                                  439 • 0.1%      Subagents                                                           1.5K • 0.5%
+   Conversation                                                       24.7K • 8.3%      Free space                                                         262K • 87.5%
+
+ Esc to close
+
