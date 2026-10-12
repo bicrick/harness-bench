@@ -1,0 +1,58 @@
+diff --git a/pylint/pyreverse/inspector.py b/pylint/pyreverse/inspector.py
+index 8fa12202..8a363241 100644
+--- a/pylint/pyreverse/inspector.py
++++ b/pylint/pyreverse/inspector.py
+@@ -224,13 +224,51 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+             pass
+ 
+     @staticmethod
+-    def handle_assignattr_type(node, parent):
++    def _annotation_types(annotation):
++        """return the inferred types of a type annotation node, or an empty list"""
++        if annotation is None:
++            return []
++        try:
++            return list(annotation.infer())
++        except astroid.InferenceError:
++            return []
++
++    @classmethod
++    def _type_from_annotations(cls, node):
++        """return the type given by a python type hint for an instance attribute
++
++        Supports both annotated assignments (``self.a: T = ...``) and
++        assignments of an annotated function argument (``self.a = a`` where
++        ``a: T`` is a parameter of the enclosing method). Return an empty list
++        when no usable annotation is found.
++        """
++        parent = node.parent
++        if isinstance(parent, astroid.AnnAssign):
++            return cls._annotation_types(parent.annotation)
++        if isinstance(parent, astroid.Assign) and isinstance(
++            parent.value, astroid.Name
++        ):
++            func = parent.frame()
++            if isinstance(func, astroid.FunctionDef):
++                args = func.args
++                names = [arg.name for arg in args.args or []]
++                if parent.value.name in names:
++                    index = names.index(parent.value.name)
++                    annotations = args.annotations or []
++                    if index < len(annotations):
++                        return cls._annotation_types(annotations[index])
++        return []
++
++    @classmethod
++    def handle_assignattr_type(cls, node, parent):
+         """handle an astroid.assignattr node
+ 
+         handle instance_attrs_type
+         """
+         try:
+-            values = set(node.infer())
++            values = set(cls._type_from_annotations(node))
++            if not values:
++                values = set(node.infer())
+             current = set(parent.instance_attrs_type[node.attrname])
+             parent.instance_attrs_type[node.attrname] = list(current | values)
+         except astroid.InferenceError:

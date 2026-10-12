@@ -1,0 +1,74 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..f18e80a29 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -584,6 +584,20 @@ class Documenter:
+         else:
+             return 'docstring of %s' % fullname
+ 
++    def _find_inherited_attr_doc(self, attr_docs: Dict[Tuple[str, str], List[str]]
++                                 ) -> Optional[List[str]]:
++        """Find attribute docs of ``self.objpath[-1]`` defined in a base class."""
++        if not self.parent or not self.objpath or not inspect.isclass(self.parent):
++            return None
++        for cls in inspect.getmro(self.parent)[1:]:
++            qualname = safe_getattr(cls, '__qualname__', None)
++            if not qualname:
++                continue
++            key = (qualname, self.objpath[-1])
++            if key in attr_docs:
++                return attr_docs[key]
++        return None
++
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         """Add content from docstrings, attribute documentation and user."""
+@@ -598,12 +612,19 @@ class Documenter:
+             attr_docs = self.analyzer.find_attr_docs()
+             if self.objpath:
+                 key = ('.'.join(self.objpath[:-1]), self.objpath[-1])
++                docstrings = None  # type: Optional[List[List[str]]]
+                 if key in attr_docs:
+-                    no_docstring = True
+                     # make a copy of docstring for attributes to avoid cache
+                     # the change of autodoc-process-docstring event.
+                     docstrings = [list(attr_docs[key])]
++                else:
++                    # the attribute may be inherited from a base class
++                    inherited = self._find_inherited_attr_doc(attr_docs)
++                    if inherited is not None:
++                        docstrings = [list(inherited)]
+ 
++                if docstrings is not None:
++                    no_docstring = True
+                     for i, line in enumerate(self.process_doc(docstrings)):
+                         self.add_line(line, sourcename, i)
+ 
+@@ -651,6 +672,17 @@ class Documenter:
+             return False, [(m.name, m.value) for m in members.values()
+                            if m.directly_defined]
+ 
++    def _is_inherited_attr_doc(self, membername: str,
++                               attr_docs: Dict[Tuple[str, str], List[str]]) -> bool:
++        """Check whether *membername* is an attribute documented in a base class."""
++        if not inspect.isclass(self.object):
++            return False
++        for cls in inspect.getmro(self.object)[1:]:
++            qualname = safe_getattr(cls, '__qualname__', None)
++            if qualname and (qualname, membername) in attr_docs:
++                return True
++        return False
++
+     def filter_members(self, members: ObjectMembers, want_all: bool
+                        ) -> List[Tuple[str, Any, bool]]:
+         """Filter the given member list.
+@@ -746,7 +778,8 @@ class Documenter:
+                         keep = has_doc or self.options.undoc_members
+                 else:
+                     keep = False
+-            elif (namespace, membername) in attr_docs:
++            elif (namespace, membername) in attr_docs or \
++                    self._is_inherited_attr_doc(membername, attr_docs):
+                 if want_all and isprivate:
+                     if self.options.private_members is None:
+                         keep = False

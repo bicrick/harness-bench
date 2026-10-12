@@ -1,0 +1,14 @@
+I'll look at how `get_backend` is implemented.
+The problem is in `rcParams.__getitem__` for the backend key, which resolves the sentinel by calling `plt.switch_backend`. Let me look at that code.
+The root cause: `get_backend()` reads `rcParams['backend']`, which triggers `switch_backend(sentinel)`, which calls `close("all")` and wipes `Gcf`. Note that `switch_backend` is called even when the backend is already resolved (the sentinel check in `__getitem__` only fires while still the sentinel, so the first-time resolution is the only trigger). The `rc_context` case matters because `rc_context` exit restores the rcParams, putting the sentinel back into the dict, so the next `rcParams['backend']` read re-resolves and closes all figures.
+
+The cleanest fix is to have `get_backend()` resolve the backend without closing figures, i.e., only trigger resolution when the backend is not yet selected. I'll make `get_backend` use the fallback-free path and only resolve when the pyplot backend module hasn't been loaded yet.
+Wait — `_get_backend_or_none` returns `None` for the sentinel, but it also could be `None` legitimately? No: the backend key is never `None` in practice. However, `_get_backend_mod()` itself calls `switch_backend` only if `_backend_mod is None`, which is the same situation that would have closed figures in the first place, so for an already-selected backend nothing is closed. Let me verify the reproduction now.
+The reproduction now passes. Let me check which 3 failures are pre-existing.
+Fixed. `get_backend()` no longer clears figures from `Gcf` when the first figure was created under `rc_context`.
+
+**Cause:** `get_backend()` returned `rcParams['backend']`. After an `rc_context` exits, the backend key can hold the auto-resolution sentinel again. Reading it then called `plt.switch_backend(sentinel)`, which runs `close("all")` and wipes `Gcf`.
+
+**Fix** (`lib/matplotlib/__init__.py`): `get_backend()` now checks the raw backend value with `_get_backend_or_none()`. If it's still unresolved, it resolves it via `pyplot._get_backend_mod()` and then reads the concrete name. Already-selected backends are returned without touching pyplot, so figures are kept.
+
+**Verification:** The issue's scenario (figure created under `rc_context`, then `get_backend()`) now keeps the figure in `Gcf`. The 3 failures in `test_rcparams.py` and `test_pyplot.py` also occur without my change (warning-related and IPython subprocess tests), so they're pre-existing.

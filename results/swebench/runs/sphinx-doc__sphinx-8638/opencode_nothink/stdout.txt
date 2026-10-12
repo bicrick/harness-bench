@@ -1,0 +1,13 @@
+I'll start by locating the relevant code in the Sphinx source that handles variable/attribute cross-reference resolution.
+The problem is likely in how the `:type:`/attribute documentation gets cross-referenced. Let me look at how attribute names are registered and how the fuzzy search applies. The real bug is in the `ref` for a `py:attribute` in a class: the object-description's `type` ref resolves to the first matching name. Let me check the `resolve_xref` and the `:type:` / `ObjectEntry` handling more closely.
+The link in the issue comes from the `:type:`/`:class:` cross-reference of an attribute being resolved against the fuzzy/exact search. Autodoc-generated attributes go through the same path, so the most direct cause is the `name in self.objects` fallback and the `classname`-less lookup. Let me check how the `py:attribute` is rendered with the `refspecific` search: the key bug is that the unqualified `name` is matched as a bare global object. I'll check the git history of the relevant code for the expected fix.
+Now I see the root cause. In the non-refspecific branch (`searchmode == 0`), `find_obj` checks `if name in self.objects` first — before checking `classname + '.' + name`. So inside a class, a reference to `limit` (e.g. the `:type:` or a bare reference) resolves to a global `limit` object rather than the class-local one. The fix is to prefer the most specific scope first, matching the `searchmode == 1` ordering.
+
+I'll reorder the exact-match search so the class- and module-qualified names are tried before the bare global name.
+Now I'll run the existing Python domain tests to make sure nothing regressed.
+The one failure is a pre-existing warning about node registration, unrelated to my change. Let me confirm by checking it against the original code.
+The `test_autodoc` failure exists without my change too, so it's pre-existing and unrelated.
+
+**Fix:** In `PythonDomain.find_obj` (`sphinx/domains/python.py`), the exact-match lookup (used for non-`refspecific` references) checked the bare global name `name` first. So a reference to `limit` from inside a class would link to a global `limit` (or any same-named object) before the class-scoped `Class.limit` was considered. I reordered the lookup to try the most specific scope first: `module.class.name`, then `class.name`, then `module.name`, and finally the bare `name`. Modules still only allow exact matches.
+
+The domain and autodoc tests pass, apart from `test_autodoc`, which already failed before this change due to a node-registration warning.

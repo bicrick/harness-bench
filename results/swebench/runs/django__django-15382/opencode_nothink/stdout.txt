@@ -1,0 +1,17 @@
+I'll look at how Exists handles empty querysets in the WHERE compiler.
+The issue is that `NOT EXISTS(empty)` should be always true, but the code raises EmptyResultSet for the whole node. Let me look at the WHERE compiler around lines 75-110.
+The logic looks right in principle. The problem is likely in `Exists.as_sql` for an empty queryset: `query.exists()` on a `none()` query raises EmptyResultSet during compile, which propagates up. Negated, it should become "always true". Let me reproduce.
+Reproduced. The child `Exists` raises EmptyResultSet, which decrements `empty_needed`. For the AND root node (not negated), `empty_needed` becomes 0 and it raises — but the `name='test'` child is still fine. The issue is the `Exists` child's negation: `NOT EXISTS(empty)` should be a full node, so the `Exists` should return `''` rather than raising. The fix belongs in `Exists`-level handling: when the subquery is empty and negated, return a "match everything" result.
+
+Let me check how the compiler handles an `Exists` raising EmptyResultSet and fix it in `Exists.as_sql`.
+`EmptyResultSet` is already imported. Now let me verify the fix.
+The negated case now produces the correct SQL (`WHERE name = 'test'`), and the non-negated case correctly raises EmptyResultSet (no rows match), which is the expected behavior.
+
+Let me run the existing expression and queries tests to check for regressions.
+The fix is in place and the related test suites pass.
+
+**Cause:** In `Exists.as_sql` (`django/db/models/expressions.py`), an `Exists` over an empty queryset raises `EmptyResultSet`. Inside a `WHERE` node, that makes the whole node empty. For a negated `Exists`, the correct meaning is "always true", so it should contribute nothing to the WHERE clause instead of killing the block.
+
+**Fix:** `Exists.as_sql` now catches `EmptyResultSet` when `negated` is set and returns `('', [])`, which the WHERE compiler treats as a full match. The non-negated case still re-raises, so `filter(Exists(empty))` correctly matches nothing.
+
+**Result:** `MyModel.objects.filter(~Exists(MyModel.objects.none()), name='test')` now compiles to `WHERE "auth_m"."name" = test`. The `expressions`, `queries`, `expressions_case`, and `annotations` test suites pass (762 tests, OK).

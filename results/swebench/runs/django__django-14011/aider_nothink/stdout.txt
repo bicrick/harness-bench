@@ -1,0 +1,93 @@
+Detected dumb terminal, disabling fancy input and pretty output.
+
+Update git name with: git config user.name "Your Name"
+Update git email with: git config user.email "you@example.com"
+Aider v0.86.2
+Model: anthropic/claude-haiku-5-5 with diff edit format, prompt cache
+Git repo: .git with 6,453 files
+Warning: For large repos, consider using --subtree-only and .aiderignore
+See: https://aider.chat/docs/faq.html#can-i-use-aider-in-a-large-mono-repo
+Repo-map: using 4096 tokens, files refresh
+
+
+https://aider.chat/HISTORY.html#release-notes
+
+Initial repo scan can be slow in larger repos, but only happens once.
+The fix belongs in `django/test/testcases.py`: `LiveServerThread` should close 
+database connections when each request thread finishes. I'm asking you to add 
+that file to the chat first, since I can't propose edits to it until it's there.
+The file is not yet in the chat, so I'm stopping here.
+
+Based on the issue, `django/test/testcases.py` is the file that needs to change 
+(the `LiveServerThread` / `ThreadedWSGIServer` handling for 
+`LiveServerTestCase`). Please add it to the chat and I'll propose the 
+SEARCH/REPLACE edits.
+
+Tokens: 30k sent, 14k cache write, 191 received. Cost: $0.0020 message, $0.0020 
+session.
+
+django/test/testcases.py
+The fix: in `LiveServerThread.run()`, the `finally` block only closes 
+connections for the server thread itself. Each request is handled in a new 
+thread spawned by `ThreadedWSGIServer`, and those threads never close their DB 
+connections. I'll add a `ThreadedWSGIServer` subclass whose 
+`process_request_thread` closes the thread's connections when the request 
+finishes, and use it as `LiveServerThread.server_class`.
+
+django/test/testcases.py
+```python
+<<<<<<< SEARCH
+class LiveServerThread(threading.Thread):
+    """Thread for running a live http server while the tests are running."""
+
+    server_class = ThreadedWSGIServer
+=======
+class LiveServerThreadedWSGIServer(ThreadedWSGIServer):
+    """
+    A ThreadedWSGIServer that closes the database connections used by each
+    request thread once the request has been handled, so that connections
+    don't outlive the test and block database teardown.
+    """
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            connections.close_all()
+
+
+class LiveServerThread(threading.Thread):
+    """Thread for running a live http server while the tests are running."""
+
+    server_class = LiveServerThreadedWSGIServer
+>>>>>>> REPLACE
+```
+
+You can verify with the existing live server test suite:
+
+```bash
+python tests/runtests.py servers
+```
+
+Tokens: 60k sent, 28k cache write, 2.4k cache hit, 479 received.
+Cost: $0.0039 message, $0.0060 session.
+
+tests/runtests.py
+No other files are needed. The fix is fully contained in 
+`django/test/testcases.py`, which is already in the chat. `tests/runtests.py` 
+doesn't need changes.
+
+The previous edit is the only change required. Please apply it to 
+`django/test/testcases.py`: it adds a `LiveServerThreadedWSGIServer` subclass 
+whose `process_request_thread` calls `connections.close_all()` after each 
+request thread finishes, and sets `LiveServerThread.server_class` to it.
+
+Once applied, you can verify with:
+
+```bash
+python tests/runtests.py servers
+```
+
+Tokens: 78k sent, 37k cache write, 2.4k cache hit, 189 received.
+Cost: $0.0050 message, $0.01 session.
+
+python tests/runtests.py servers

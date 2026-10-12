@@ -1,0 +1,13 @@
+I'll look at the CommandParser implementation.
+The standard approach is to have `CommandParser.add_subparsers` pass a `parser_class` that carries these kwargs forward. I'll override `add_subparsers` to set a default `parser_class` that injects the parent's `called_from_command_line` and `missing_args_message`.
+I need to confirm `partial` is imported, and check how argparse uses `parser_class` (it calls it with `**kwargs` and reads `prog`, so `partial` works).
+`partial` isn't imported yet; I'll add it.
+Now let me verify with the reproduction from the issue.
+The subparser now produces the proper usage message instead of a traceback. The `SystemExit` here is expected for command-line invocation (`called_from_command_line=True`). Let me run the existing test suite with Django's runner.
+Fixed in `django/core/management/base.py`.
+
+**Change:** `CommandParser` now overrides `add_subparsers()` so that the `parser_class` used to build subparsers is a `functools.partial` that forwards `called_from_command_line` and `missing_args_message` from the parent parser. Subparsers created via `add_parser()` therefore raise usage errors (or `CommandError` when called programmatically) like the top-level parser does.
+
+**Verification:**
+- The issue's example, `manage.py cheeses create` with a missing `name`, now prints `usage: manage.py cheeses create [-h] name` plus `error: the following arguments are required: name`, instead of a traceback.
+- `user_commands` and `admin_scripts` test suites pass (254 tests). No tests were added or modified.

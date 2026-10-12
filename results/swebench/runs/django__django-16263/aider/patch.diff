@@ -1,0 +1,104 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..244e722399 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -73,6 +73,17 @@ def get_children_from_q(q):
+             yield child
+ 
+ 
++def iter_expression_tree(nodes):
++    """Yield every node of the given expressions/WHERE nodes, depth-first."""
++    for node in nodes:
++        if isinstance(node, Node):
++            yield from iter_expression_tree(node.children)
++        else:
++            yield node
++            if hasattr(node, "get_source_expressions"):
++                yield from iter_expression_tree(node.get_source_expressions())
++
++
+ JoinInfo = namedtuple(
+     "JoinInfo",
+     ("final_field", "targets", "opts", "joins", "path", "transform_function"),
+@@ -550,9 +561,81 @@ class Query(BaseExpression):
+         Perform a COUNT() query using the current filter constraints.
+         """
+         obj = self.clone()
++        obj._strip_unused_annotations()
+         obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+         return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++    def _strip_unused_annotations(self):
++        """
++        Remove annotations that are not referenced by the WHERE clause, the
++        ORDER BY clause, or other referenced annotations. Their joins are
++        released too, so they don't multiply the rows being counted.
++
++        This is skipped for queries where annotations can affect the rows
++        returned (GROUP BY tuples, slicing, DISTINCT, combinators).
++        """
++        if (
++            not self.annotations
++            or isinstance(self.group_by, tuple)
++            or self.is_sliced
++            or self.distinct
++            or self.distinct_fields
++            or self.combinator
++        ):
++            return
++
++        def is_used_name(name):
++            return name in used_names
++
++        used_names, used_ids = set(), set()
++        processed = set()
++        pending = [self.where, *self.order_by]
++        while pending:
++            for node in iter_expression_tree(pending):
++                if isinstance(node, Query):
++                    # References from subqueries can't be tracked reliably.
++                    return
++                if isinstance(node, str):
++                    used_names.add(node[1:] if node.startswith("-") else node)
++                    continue
++                used_ids.add(id(node))
++                if isinstance(node, Ref):
++                    used_names.add(node.refs)
++            pending = []
++            for alias, annotation in self.annotations.items():
++                if alias in processed:
++                    continue
++                if is_used_name(alias) or id(annotation) in used_ids:
++                    processed.add(alias)
++                    pending.append(annotation)
++
++        unused = [
++            alias
++            for alias, annotation in self.annotations.items()
++            if not is_used_name(alias) and id(annotation) not in used_ids
++        ]
++        if not unused:
++            return
++        for alias in unused:
++            annotation = self.annotations.pop(alias)
++            for col in self._gen_cols([annotation]):
++                self._unref_join_chain(col.alias)
++        if self.annotation_select_mask is not None:
++            self.set_annotation_mask(self.annotation_select_mask.difference(unused))
++        if self.group_by is True and not any(
++            getattr(annotation, "contains_aggregate", False)
++            for annotation in self.annotations.values()
++        ):
++            self.group_by = None
++
++    def _unref_join_chain(self, alias):
++        """Release a reference on alias and on all of its parent joins."""
++        while alias is not None:
++            if alias != self.base_table:
++                self.unref_alias(alias)
++            join = self.alias_map.get(alias)
++            alias = getattr(join, "parent_alias", None)
++
+     def has_filters(self):
+         return self.where
+ 

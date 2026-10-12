@@ -1,0 +1,20 @@
+Now I'll implement the stripping in `get_count`, keeping aggregate annotations whenever removing them could change row multiplicity (joins from filters, explicit GROUP BY from `values()`, or HAVING-style references).
+Let me verify a few assumptions (BaseTable `parent_alias`, `Ref` import) and tidy the loop.
+Now let me run the relevant existing test suites to check for regressions.
+Existing suites pass. Now I'll check the generated SQL for the issue's case and some cases that must keep their semantics, using a scratch script outside the repo.
+All results are correct: the issue case returns the same SQL as `Book.objects.count()`, and filter/annotation/GROUP BY cases keep their semantics. Let me check the final diff and lint.
+`count()` now drops annotations that nothing uses, so `Book.objects.annotate(Count('chapters')).count()` compiles to `SELECT COUNT(*) FROM book`, the same as `Book.objects.count()`.
+
+The change is in `Query.get_count()` in `django/db/models/sql/query.py`, which calls a new helper, `_strip_unused_annotations_for_count()`. The helper:
+
+- **Keeps** any annotation referenced by the WHERE clause or by another kept annotation.
+- **Removes** unreferenced non-aggregate annotations, and releases any joins only they used.
+- **Removes** unreferenced aggregate annotations only when that cannot change the row count: no `values()`-style GROUP BY, no sliced/distinct/combined query, no aggregate in WHERE, and no join beyond the base table is needed. Otherwise they are kept, so the existing GROUP BY behaviour is preserved.
+
+Verification:
+- The existing `aggregation`, `annotations`, `queries`, `expressions`, `aggregation_regress`, `lookup`, `model_inheritance_regress` and `null_queries` suites pass (1039 tests, no failures).
+- A scratch script (since deleted) checked the SQL and results for the issue case, a filter on a multi-valued relation plus annotation (still counts distinct books), filtering on an annotation, ordering by an annotation, and `values()` + annotate. All returned the expected counts.
+
+One behaviour change to be aware of: an unreferenced non-aggregate annotation over a multi-valued join, such as `Book.objects.annotate(t=F('chapters__title')).count()`, now counts books rather than joined chapter rows. This follows the issue's intent, since the annotation no longer affects `count()`, but it is a change in result for that pattern.
+
+I did not add or modify any tests. flake8 is not installed in this environment, so lint was not run.

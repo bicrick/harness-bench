@@ -1,0 +1,16 @@
+The root cause: each combined subquery keeps its own `ORDER BY` (e.g. `ORDER BY "order"`). When the outer query is re-selected with `values_list('pk')`, that subquery's select list changes, so its ORDER BY refers to a column that's no longer selected. Ordering on an unsliced compound member has no effect in SQL anyway, so I'll drop it for those members.
+I referenced a helper that doesn't exist there. Simplifying to always clone before clearing ordering, so the shared subquery object is never mutated:
+Now verifying with the forced-feature repro, then running the existing union/compound tests:
+The SQL is now clean (no stray ORDER BY). The `OperationalError` in repro3 is only because I forced a feature flag that SQLite can't actually honor, so that's an artifact of the test harness, not the fix. Checking the test summary:
+I fixed the bug in `django/db/models/sql/compiler.py`, in `get_combinator_sql`.
+
+**Cause:** Each member of a union keeps its own `ORDER BY`. In the reported case, the second member had `ORDER BY "order"`. When the outer queryset is re-selected with `.order_by().values_list('pk')`, the member's select list changes to just `id`, so its ORDER BY points at a column that is no longer selected. On PostgreSQL that is the `ORDER BY (4) is not in select list` error. Ordering on an unsliced compound member has no effect in SQL anyway.
+
+**Fix:** When the backend supports ordering in compound statements and a member has no LIMIT/OFFSET, the compiler now clones that member's query and clears its ordering before compiling it. The original subquery is not mutated. Backends that reject ordering in subqueries still hit their existing error check, so that behavior is unchanged.
+
+**Verification:**
+- The `queries` test suite passes (364 tests), along with `queries.test_qs_combinators`, `model_forms` and `aggregation.test_filter_argument`.
+- The generated SQL for the reported pattern no longer contains the stray `ORDER BY`.
+- I could not run the exact reported failure end-to-end because SQLite (the only backend here) rejects ordering in compound members outright. I checked the SQL generation with the feature flag forced, not against PostgreSQL.
+
+I did not add or modify any tests.

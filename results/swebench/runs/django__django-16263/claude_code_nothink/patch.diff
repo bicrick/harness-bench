@@ -1,0 +1,61 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..851f803fef 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -550,9 +550,56 @@ class Query(BaseExpression):
+         Perform a COUNT() query using the current filter constraints.
+         """
+         obj = self.clone()
++        obj.strip_unused_annotations()
+         obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+         return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++    def strip_unused_annotations(self):
++        """
++        Remove annotations that cannot affect the row count of the query, i.e.
++        those not referenced by filters, ordering, or other kept annotations.
++        Annotations are kept whenever removing them could change the result
++        (e.g. when the query is distinct, sliced, combined, or grouped).
++        """
++        if (
++            self.distinct
++            or self.is_sliced
++            or self.combinator
++            or isinstance(self.group_by, tuple)
++        ):
++            return
++        referenced = set()
++        for expr in chain(self.where.children, self.order_by):
++            if hasattr(expr, "flatten"):
++                for node in expr.flatten():
++                    if isinstance(node, Ref):
++                        referenced.add(node.refs)
++        # Annotations referenced by other referenced annotations are needed too.
++        pending = list(referenced)
++        while pending:
++            name = pending.pop()
++            annotation = self.annotations.get(name)
++            if annotation is None:
++                continue
++            for node in annotation.flatten():
++                if isinstance(node, Ref) and node.refs not in referenced:
++                    referenced.add(node.refs)
++                    pending.append(node.refs)
++        for alias in list(self.annotations):
++            annotation = self.annotations[alias]
++            # Aggregates can change the row count through joins and GROUP BY,
++            # so they are kept unless nothing references them.
++            if (
++                alias in referenced
++                or getattr(annotation, "is_summary", False)
++                or getattr(annotation, "contains_aggregate", True)
++            ):
++                continue
++            del self.annotations[alias]
++            if self.annotation_select_mask is not None:
++                self.annotation_select_mask.discard(alias)
++        self._annotation_select_cache = None
++
+     def has_filters(self):
+         return self.where
+ 

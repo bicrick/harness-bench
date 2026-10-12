@@ -1,0 +1,105 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..92a8a345d7 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -25,6 +25,7 @@ from django.db.models.expressions import (
+     Exists,
+     F,
+     OuterRef,
++    RawSQL,
+     Ref,
+     ResolvedOuterRef,
+     Value,
+@@ -435,12 +436,92 @@ class Query(BaseExpression):
+         annotation.set_source_expressions(new_exprs)
+         return annotation, col_cnt
+ 
++    def _strip_unused_annotations(self, added_aggregate_names):
++        """
++        Remove annotations that aren't referenced by the WHERE clause, other
++        annotations, ordering, grouping or the aggregates being computed, along
++        with the joins that only they require. Such annotations can't affect the
++        result of an aggregation other than by multiplying rows, so dropping
++        them avoids needless joins and GROUP BY clauses.
++        """
++        if not self.annotations:
++            return
++        if self.combinator or self.distinct_fields or self.extra:
++            return
++        used_names = set(added_aggregate_names)
++        used_aliases = set()
++        # Entries are (expression, is_kept_root). Aggregates and window
++        # functions are only safe to drop when they are referenced by name
++        # (kept roots) rather than embedded in another expression.
++        pending = [(self.where, False)]
++        pending.extend((expr, False) for expr in self.select)
++        if isinstance(self.group_by, tuple):
++            pending.extend((expr, False) for expr in self.group_by)
++        for item in self.order_by:
++            if isinstance(item, str):
++                used_names.add(item[1:] if item.startswith("-") else item)
++            else:
++                pending.append((item, False))
++        pending.extend(
++            (self.annotations[name], True)
++            for name in used_names
++            if name in self.annotations
++        )
++        while pending:
++            expr, is_kept_root = pending.pop()
++            if isinstance(expr, WhereNode):
++                pending.extend((child, False) for child in expr.children)
++                continue
++            if isinstance(expr, (ExtraWhere, RawSQL)):
++                # Raw SQL may reference any table alias; leave the query alone.
++                return
++            if isinstance(expr, Ref):
++                if expr.refs in self.annotations and expr.refs not in used_names:
++                    used_names.add(expr.refs)
++                    pending.append((self.annotations[expr.refs], True))
++                continue
++            if not is_kept_root and (
++                getattr(expr, "contains_aggregate", False)
++                or getattr(expr, "contains_over_clause", False)
++            ):
++                # An aggregate or window function embedded in another
++                # expression can't be stripped without changing the query.
++                return
++            if isinstance(expr, Col):
++                used_aliases.add(expr.alias)
++            elif hasattr(expr, "get_source_expressions"):
++                pending.extend(
++                    (source, False)
++                    for source in expr.get_source_expressions()
++                    if source is not None
++                )
++            if callable(getattr(expr, "get_external_cols", None)):
++                used_aliases.update(col.alias for col in expr.get_external_cols())
++        unused_names = [name for name in self.annotations if name not in used_names]
++        if not unused_names:
++            return
++        # Keep the joins used by the remaining expressions along with their
++        # parent joins, and drop the others.
++        needed_aliases = set()
++        for alias in used_aliases:
++            while alias is not None and alias not in needed_aliases:
++                needed_aliases.add(alias)
++                alias = self.alias_map[alias].parent_alias
++        for alias, join in self.alias_map.items():
++            if isinstance(join, Join) and alias not in needed_aliases:
++                self.alias_refcount[alias] = 0
++        for name in unused_names:
++            del self.annotations[name]
++        mask = self.annotation_select_mask
++        self.set_annotation_mask(None if mask is None else mask.difference(unused_names))
++
+     def get_aggregation(self, using, added_aggregate_names):
+         """
+         Return the dictionary with the values of the existing aggregations.
+         """
+         if not self.annotation_select:
+             return {}
++        self._strip_unused_annotations(added_aggregate_names)
+         existing_annotations = [
+             annotation
+             for alias, annotation in self.annotations.items()

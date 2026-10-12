@@ -1,0 +1,16 @@
+The root cause is `get_unpacked_marks` reading only `getattr(obj, "pytestmark")`, which for classes resolves via MRO to a single class's list. I'll make it collect marks from every class in the MRO, and have `store_mark` keep using only the object's own marks.
+Imports are already present. Now I'll check where marks are read for items, since the test's marks come from the class via its node chain.
+The class node now collects marks across the MRO. Let me verify with the issue's scenario and run the existing mark tests.
+Fixed in `src/_pytest/mark/structures.py`.
+
+**Cause:** `get_unpacked_marks` read `getattr(obj, "pytestmark")`. For a class, that resolves through the MRO to a single class's list, so `TestDings(Foo, Bar)` only saw `foo` (or `bar`).
+
+**Change:**
+- `get_unpacked_marks(obj, *, consider_mro=True)` now, for a class, collects `pytestmark` from `__dict__` of every class in the MRO (base classes first). Non-class objects behave as before.
+- `store_mark` calls it with `consider_mro=False`, so decorating a class still only appends to that class's own list. Inherited marks are not copied down, so they aren't duplicated.
+
+**Verification:**
+- The issue's scenario (`Foo` with `foo`, `Bar` with `bar`, `TestD(Foo, Bar)`) now selects with `-m "foo and bar"`.
+- `testing/test_mark.py`, `testing/test_mark_expression.py`, and `testing/test_collection.py` pass (255 passed, 1 skipped, 2 xfailed).
+
+I did not add a changelog entry or AUTHORS line, since the issue number wasn't provided and I didn't want to guess it.

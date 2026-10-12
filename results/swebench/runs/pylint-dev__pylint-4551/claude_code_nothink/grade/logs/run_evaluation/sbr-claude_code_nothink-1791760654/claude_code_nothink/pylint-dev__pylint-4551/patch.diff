@@ -1,0 +1,40 @@
+diff --git a/pylint/pyreverse/inspector.py b/pylint/pyreverse/inspector.py
+index 8fa12202..1d0f014e 100644
+--- a/pylint/pyreverse/inspector.py
++++ b/pylint/pyreverse/inspector.py
+@@ -28,6 +28,26 @@ def _iface_hdlr(_):
+     return True
+ 
+ 
++def _infer_with_annotation(node):
++    """Infer the values of an assignment target, preferring PEP 484 annotations.
++
++    If the assigned value is a name bound to an annotated function argument,
++    the annotation is used instead of the inferred value (which, for a default
++    value of None, would otherwise lose the real type).
++    """
++    value = node.parent.value if isinstance(node, astroid.AssignAttr) else node
++    if isinstance(value, astroid.Name):
++        frame = value.frame()
++        if isinstance(frame, astroid.FunctionDef):
++            names = [arg.name for arg in frame.args.args or []]
++            annotations = frame.args.annotations or []
++            if value.name in names and names.index(value.name) < len(annotations):
++                annotation = annotations[names.index(value.name)]
++                if annotation is not None:
++                    return set(annotation.infer())
++    return set(node.infer())
++
++
+ def _astroid_wrapper(func, modname):
+     print("parsing %s..." % modname)
+     try:
+@@ -230,7 +250,7 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+         handle instance_attrs_type
+         """
+         try:
+-            values = set(node.infer())
++            values = set(_infer_with_annotation(node))
+             current = set(parent.instance_attrs_type[node.attrname])
+             parent.instance_attrs_type[node.attrname] = list(current | values)
+         except astroid.InferenceError:

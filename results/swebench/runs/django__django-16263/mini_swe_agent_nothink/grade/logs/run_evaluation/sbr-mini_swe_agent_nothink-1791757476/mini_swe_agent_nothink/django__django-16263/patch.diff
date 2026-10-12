@@ -1,0 +1,74 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..8e9ec91e2c 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -550,9 +550,69 @@ class Query(BaseExpression):
+         Perform a COUNT() query using the current filter constraints.
+         """
+         obj = self.clone()
++        obj.strip_unused_annotations()
+         obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+         return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++    def strip_unused_annotations(self):
++        """
++        Remove annotations that cannot affect the result of a COUNT query.
++
++        Only simple queries are handled: annotations are removed when they
++        are not referenced by the WHERE clause, the ordering or another kept
++        annotation, and when no aggregate would be left grouping the query.
++        """
++        from django.db.models.expressions import Ref
++
++        if (
++            not self.annotations
++            or self.distinct
++            or self.is_sliced
++            or self.combinator
++            or isinstance(self.group_by, tuple)
++        ):
++            return
++        # Non-aggregate annotations may still need to be part of the GROUP
++        # BY (e.g. subqueries over multivalued relations). Keep such queries
++        # untouched rather than risk changing the number of rows.
++        if self.group_by is True and any(
++            not getattr(annotation, "contains_aggregate", False)
++            for annotation in self.annotations.values()
++        ):
++            return
++        # Filters on aggregates (HAVING-style) can't be reliably mapped back
++        # to annotation names here, so leave such queries untouched.
++        if self.where.contains_aggregate or self.where.contains_over_clause:
++            return
++        referenced = set()
++        for item in self.order_by:
++            if isinstance(item, str):
++                name = item.lstrip("-")
++                if name in self.annotations:
++                    referenced.add(name)
++            else:
++                return
++        where_text = str(self.where)
++        for alias in self.annotations:
++            if alias in where_text:
++                referenced.add(alias)
++        for annotation in self.annotations.values():
++            for node in annotation.flatten():
++                if isinstance(node, Ref):
++                    referenced.add(node.refs)
++        for alias in list(self.annotations):
++            if alias not in referenced:
++                del self.annotations[alias]
++                if self.annotation_select_mask is not None:
++                    self.annotation_select_mask.discard(alias)
++        # Implicit GROUP BY (set by aggregate annotations) is only needed
++        # while an aggregate annotation remains.
++        if self.group_by is True and not any(
++            getattr(annotation, "contains_aggregate", False)
++            for annotation in self.annotations.values()
++        ):
++            self.group_by = None
++
+     def has_filters(self):
+         return self.where
+ 

@@ -1,0 +1,145 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "__deepcopy__" -A12 django/forms/fields.py | head -40
+198:    def __deepcopy__(self, memo):
+199-        result = copy.copy(self)
+200-        memo[id(self)] = result
+201-        result.widget = copy.deepcopy(self.widget, memo)
+202-        result.validators = self.validators[:]
+203-        return result
+204-
+205-
+206-class CharField(Field):
+207-    def __init__(self, *, max_length=None, min_length=None, strip=True, empty_value='', **kwargs):
+208-        self.max_length = max_length
+209-        self.min_length = min_length
+210-        self.strip = strip
+--
+767:    def __deepcopy__(self, memo):
+768:        result = super().__deepcopy__(memo)
+769-        result._choices = copy.deepcopy(self._choices, memo)
+770-        return result
+771-
+772-    def _get_choices(self):
+773-        return self._choices
+774-
+775-    def _set_choices(self, value):
+776-        # Setting choices also sets the choices on the widget.
+777-        # choices can be any iterable, but we call list() on it because
+778-        # it will be consumed more than once.
+779-        if callable(value):
+780-            value = CallableChoiceIterator(value)
+--
+985:    def __deepcopy__(self, memo):
+986:        result = super().__deepcopy__(memo)
+987:        result.fields = tuple(x.__deepcopy__(memo) for x in self.fields)
+988-        return result
+989-
+990-    def validate(self, value):
+991-        pass
+992-
+993-    def clean(self, value):
+994-        """
+995-        Validate every value in the given list. A value is validated against
+[0m
+[0m← [0mEdit django/forms/fields.py
+Index: /testbed/django/forms/fields.py
+===================================================================
+--- /testbed/django/forms/fields.py
++++ /testbed/django/forms/fields.py
+@@ -199,8 +199,9 @@
+         result = copy.copy(self)
+         memo[id(self)] = result
+         result.widget = copy.deepcopy(self.widget, memo)
+         result.validators = self.validators[:]
++        result.error_messages = self.error_messages.copy()
+         return result
+ 
+ 
+ class CharField(Field):
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+import django
+from django.conf import settings
+settings.configure()
+from django import forms
+a=forms.CharField(); b=copy=__import__('copy').deepcopy(a)
+b.error_messages['required']='X'
+print(a.error_messages['required'], b.error_messages['required'])
+" && python -m pytest tests/forms_tests -q -x 2>&1 | tail -3
+Traceback (most recent call last):
+  File "/testbed/django/utils/translation/trans_real.py", line 136, in _add_installed_apps_translations
+    app_configs = reversed(list(apps.get_app_configs()))
+  File "/testbed/django/apps/registry.py", line 144, in get_app_configs
+    self.check_apps_ready()
+  File "/testbed/django/apps/registry.py", line 135, in check_apps_ready
+    raise AppRegistryNotReady("Apps aren't loaded yet.")
+django.core.exceptions.AppRegistryNotReady: Apps aren't loaded yet.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<string>", line 8, in <module>
+  File "/testbed/django/utils/functional.py", line 124, in __text_cast
+    return func(*self.__args, **self.__kw)
+  File "/testbed/django/utils/translation/__init__.py", line 92, in gettext
+    return _trans.gettext(message)
+  File "/testbed/django/utils/translation/trans_real.py", line 285, in gettext
+    _default = _default or translation(settings.LANGUAGE_CODE)
+  File "/testbed/django/utils/translation/trans_real.py", line 198, in translation
+    _translations[language] = DjangoTranslation(language)
+  File "/testbed/django/utils/translation/trans_real.py", line 97, in __init__
+    self._add_installed_apps_translations()
+  File "/testbed/django/utils/translation/trans_real.py", line 139, in _add_installed_apps_translations
+    "The translation infrastructure cannot be initialized before the "
+django.core.exceptions.AppRegistryNotReady: The translation infrastructure cannot be initialized before the apps registry is ready. Check that you don't make non-lazy gettext calls at import time.
+[0m
+[0m$ [0mcd /testbed && python -c "
+import copy
+from django.conf import settings
+settings.configure()
+import django; django.setup()
+from django import forms
+a=forms.CharField(); b=copy.deepcopy(a)
+b.error_messages['required']='X'
+print(repr(a.error_messages['required']), repr(b.error_messages['required']))
+" && python -m pytest tests/forms_tests -q 2>&1 | tail -3
+'This field is required.' 'X'
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed && python tests/runtests.py forms_tests model_forms 2>&1 | tail -3
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+[0m
+[0m$ [0mcd /testbed && python tests/runtests.py forms_tests model_forms 2>&1 | grep -E "^(Ran|OK|FAILED)"
+Ran 811 tests in 0.545s
+FAILED (errors=1, skipped=1)
+[0m
+[0m$ [0mcd /testbed && python tests/runtests.py forms_tests model_forms 2>&1 | grep -B3 -A15 "^ERROR:" | head -40; git stash -q && python tests/runtests.py forms_tests model_forms 2>&1 | grep -E "^(Ran|OK|FAILED)"; git stash pop -q && git diff --stat
+Cloning test database for alias 'default'...
+.........E.........................................................................................................................................................................................................................................................................................................................................................................................................s.......................................................................................................................................................................................................................................................................................................................................................................................................................
+======================================================================
+ERROR: test_unicode_filename (forms_tests.tests.tests.FormsModelTestCase)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/miniconda3/envs/testbed/lib/python3.6/unittest/case.py", line 59, in testPartExecutor
+    yield
+  File "/opt/miniconda3/envs/testbed/lib/python3.6/unittest/case.py", line 605, in run
+    testMethod()
+  File "/testbed/tests/forms_tests/tests/tests.py", line 158, in test_unicode_filename
+    m = FileModel.objects.create(file=f.cleaned_data['file1'])
+  File "/testbed/django/db/models/manager.py", line 82, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+  File "/testbed/django/db/models/query.py", line 430, in create
+    obj.save(force_insert=True, using=self.db)
+  File "/testbed/django/db/models/base.py", line 746, in save
+    force_update=force_update, update_fields=update_fields)
+  File "/testbed/django/db/models/base.py", line 784, in save_base
+Ran 811 tests in 0.527s
+FAILED (errors=1, skipped=1)
+ django/forms/fields.py | 1 +
+ 1 file changed, 1 insertion(+)
+[0m

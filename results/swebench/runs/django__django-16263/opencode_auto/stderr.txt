@@ -1,0 +1,594 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "def get_count" -A 25 django/db/models/sql/query.py && grep -n "def get_aggregation" django/db/models/sql/query.py && git log --oneline -1
+548:    def get_count(self, using):
+549-        """
+550-        Perform a COUNT() query using the current filter constraints.
+551-        """
+552-        obj = self.clone()
+553-        obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+554-        return obj.get_aggregation(using, ["__count"])["__count"]
+555-
+556-    def has_filters(self):
+557-        return self.where
+558-
+559-    def exists(self, limit=True):
+560-        q = self.clone()
+561-        if not (q.distinct and q.is_sliced):
+562-            if q.group_by is True:
+563-                q.add_fields(
+564-                    (f.attname for f in self.model._meta.concrete_fields), False
+565-                )
+566-                # Disable GROUP BY aliases to avoid orphaning references to the
+567-                # SELECT clause which is about to be cleared.
+568-                q.set_group_by(allow_aliases=False)
+569-            q.clear_select_clause()
+570-        if q.combined_queries and q.combinator == "union":
+571-            q.combined_queries = tuple(
+572-                combined_query.exists(limit=False)
+573-                for combined_query in q.combined_queries
+438:    def get_aggregation(self, using, added_aggregate_names):
+d4645f1248 SWE-bench
+[0m
+[0m$ [0mcd /testbed && sed -n 438,548p django/db/models/sql/query.py
+def get_aggregation(self, using, added_aggregate_names):
+        """
+        Return the dictionary with the values of the existing aggregations.
+        """
+        if not self.annotation_select:
+            return {}
+        existing_annotations = [
+            annotation
+            for alias, annotation in self.annotations.items()
+            if alias not in added_aggregate_names
+        ]
+        # Decide if we need to use a subquery.
+        #
+        # Existing annotations would cause incorrect results as get_aggregation()
+        # must produce just one result and thus must not use GROUP BY. But we
+        # aren't smart enough to remove the existing annotations from the
+        # query, so those would force us to use GROUP BY.
+        #
+        # If the query has limit or distinct, or uses set operations, then
+        # those operations must be done in a subquery so that the query
+        # aggregates on the limit and/or distinct results instead of applying
+        # the distinct and limit after the aggregation.
+        if (
+            isinstance(self.group_by, tuple)
+            or self.is_sliced
+            or existing_annotations
+            or self.distinct
+            or self.combinator
+        ):
+            from django.db.models.sql.subqueries import AggregateQuery
+
+            inner_query = self.clone()
+            inner_query.subquery = True
+            outer_query = AggregateQuery(self.model, inner_query)
+            inner_query.select_for_update = False
+            inner_query.select_related = False
+            inner_query.set_annotation_mask(self.annotation_select)
+            # Queries with distinct_fields need ordering and when a limit is
+            # applied we must take the slice from the ordered query. Otherwise
+            # no need for ordering.
+            inner_query.clear_ordering(force=False)
+            if not inner_query.distinct:
+                # If the inner query uses default select and it has some
+                # aggregate annotations, then we must make sure the inner
+                # query is grouped by the main model's primary key. However,
+                # clearing the select clause can alter results if distinct is
+                # used.
+                has_existing_aggregate_annotations = any(
+                    annotation
+                    for annotation in existing_annotations
+                    if getattr(annotation, "contains_aggregate", True)
+                )
+                if inner_query.default_cols and has_existing_aggregate_annotations:
+                    inner_query.group_by = (
+                        self.model._meta.pk.get_col(inner_query.get_initial_alias()),
+                    )
+                inner_query.default_cols = False
+
+            relabels = {t: "subquery" for t in inner_query.alias_map}
+            relabels[None] = "subquery"
+            # Remove any aggregates marked for reduction from the subquery
+            # and move them to the outer AggregateQuery.
+            col_cnt = 0
+            for alias, expression in list(inner_query.annotation_select.items()):
+                annotation_select_mask = inner_query.annotation_select_mask
+                if expression.is_summary:
+                    expression, col_cnt = inner_query.rewrite_cols(expression, col_cnt)
+                    outer_query.annotations[alias] = expression.relabeled_clone(
+                        relabels
+                    )
+                    del inner_query.annotations[alias]
+                    annotation_select_mask.remove(alias)
+                # Make sure the annotation_select wont use cached results.
+                inner_query.set_annotation_mask(inner_query.annotation_select_mask)
+            if (
+                inner_query.select == ()
+                and not inner_query.default_cols
+                and not inner_query.annotation_select_mask
+            ):
+                # In case of Model.objects[0:3].count(), there would be no
+                # field selected in the inner query, yet we must use a subquery.
+                # So, make sure at least one field is selected.
+                inner_query.select = (
+                    self.model._meta.pk.get_col(inner_query.get_initial_alias()),
+                )
+        else:
+            outer_query = self
+            self.select = ()
+            self.default_cols = False
+            self.extra = {}
+
+        empty_set_result = [
+            expression.empty_result_set_value
+            for expression in outer_query.annotation_select.values()
+        ]
+        elide_empty = not any(result is NotImplemented for result in empty_set_result)
+        outer_query.clear_ordering(force=True)
+        outer_query.clear_limits()
+        outer_query.select_for_update = False
+        outer_query.select_related = False
+        compiler = outer_query.get_compiler(using, elide_empty=elide_empty)
+        result = compiler.execute_sql(SINGLE)
+        if result is None:
+            result = empty_set_result
+
+        converters = compiler.get_converters(outer_query.annotation_select.values())
+        result = next(compiler.apply_converters((result,), converters))
+
+        return dict(zip(outer_query.annotation_select, result))
+
+    def get_count(self, using):
+[0m
+[0m$ [0mcd /testbed && grep -n "def resolve_ref" -A 40 django/db/models/sql/query.py | head -60; grep -n "class Ref" -A 12 django/db/models/expressions.py; grep -n "def flatten" -A 12 django/utils/tree.py django/db/models/sql/where.py | head -30
+1908:    def resolve_ref(self, name, allow_joins=True, reuse=None, summarize=False):
+1909-        annotation = self.annotations.get(name)
+1910-        if annotation is not None:
+1911-            if not allow_joins:
+1912-                for alias in self._gen_col_aliases([annotation]):
+1913-                    if isinstance(self.alias_map[alias], Join):
+1914-                        raise FieldError(
+1915-                            "Joined field references are not permitted in this query"
+1916-                        )
+1917-            if summarize:
+1918-                # Summarize currently means we are doing an aggregate() query
+1919-                # which is executed as a wrapped subquery if any of the
+1920-                # aggregate() elements reference an existing annotation. In
+1921-                # that case we need to return a Ref to the subquery's annotation.
+1922-                if name not in self.annotation_select:
+1923-                    raise FieldError(
+1924-                        "Cannot aggregate over the '%s' alias. Use annotate() "
+1925-                        "to promote it." % name
+1926-                    )
+1927-                return Ref(name, self.annotation_select[name])
+1928-            else:
+1929-                return annotation
+1930-        else:
+1931-            field_list = name.split(LOOKUP_SEP)
+1932-            annotation = self.annotations.get(field_list[0])
+1933-            if annotation is not None:
+1934-                for transform in field_list[1:]:
+1935-                    annotation = self.try_transform(annotation, transform)
+1936-                return annotation
+1937-            join_info = self.setup_joins(
+1938-                field_list, self.get_meta(), self.get_initial_alias(), can_reuse=reuse
+1939-            )
+1940-            targets, final_alias, join_list = self.trim_joins(
+1941-                join_info.targets, join_info.joins, join_info.path
+1942-            )
+1943-            if not allow_joins and len(join_list) > 1:
+1944-                raise FieldError(
+1945-                    "Joined field references are not permitted in this query"
+1946-                )
+1947-            if len(targets) > 1:
+1948-                raise FieldError(
+1144:class Ref(Expression):
+1145-    """
+1146-    Reference to column alias of the query. For example, Ref('sum_cost') in
+1147-    qs.annotate(sum_cost=Sum('cost')) query.
+1148-    """
+1149-
+1150-    def __init__(self, refs, source):
+1151-        super().__init__()
+1152-        self.refs, self.source = refs, source
+1153-
+1154-    def __repr__(self):
+1155-        return "{}({}, {})".format(self.__class__.__name__, self.refs, self.source)
+1156-
+[0m
+[0m$ [0mcd /testbed && grep -n "def _gen_col_aliases" -A 12 django/db/models/sql/query.py; grep -n "def flatten\|def get_group_by_cols\|def get_source_expressions\|def split_having" -A 3 django/db/models/sql/where.py django/db/models/lookups.py | head -60; grep -n "def unref_alias\|def get_from_clause" -A 6 django/db/models/sql/query.py django/db/models/sql/compiler.py | head -30; grep -n "group_by = True" django/db/models/query.py django/db/models/sql/query.py
+1905:    def _gen_col_aliases(cls, exprs):
+1906-        yield from (expr.alias for expr in cls._gen_cols(exprs))
+1907-
+1908-    def resolve_ref(self, name, allow_joins=True, reuse=None, summarize=False):
+1909-        annotation = self.annotations.get(name)
+1910-        if annotation is not None:
+1911-            if not allow_joins:
+1912-                for alias in self._gen_col_aliases([annotation]):
+1913-                    if isinstance(self.alias_map[alias], Join):
+1914-                        raise FieldError(
+1915-                            "Joined field references are not permitted in this query"
+1916-                        )
+1917-            if summarize:
+django/db/models/sql/where.py:38:    def split_having_qualify(self, negated=False, must_group_by=False):
+django/db/models/sql/where.py-39-        """
+django/db/models/sql/where.py-40-        Return three possibly None nodes: one for those parts of self that
+django/db/models/sql/where.py-41-        should be included in the WHERE clause, one for those parts of self
+--
+django/db/models/sql/where.py:184:    def get_group_by_cols(self):
+django/db/models/sql/where.py-185-        cols = []
+django/db/models/sql/where.py-186-        for child in self.children:
+django/db/models/sql/where.py-187-            cols.extend(child.get_group_by_cols())
+--
+django/db/models/sql/where.py:190:    def get_source_expressions(self):
+django/db/models/sql/where.py-191-        return self.children[:]
+django/db/models/sql/where.py-192-
+django/db/models/sql/where.py-193-    def set_source_expressions(self, children):
+--
+django/db/models/lookups.py:69:    def get_source_expressions(self):
+django/db/models/lookups.py-70-        if self.rhs_is_direct_value():
+django/db/models/lookups.py-71-            return [self.lhs]
+django/db/models/lookups.py-72-        return [self.lhs, self.rhs]
+--
+django/db/models/lookups.py:131:    def get_group_by_cols(self):
+django/db/models/lookups.py-132-        cols = []
+django/db/models/lookups.py-133-        for source in self.get_source_expressions():
+django/db/models/lookups.py-134-            cols.extend(source.get_group_by_cols())
+django/db/models/sql/query.py:820:    def unref_alias(self, alias, amount=1):
+django/db/models/sql/query.py-821-        """Decreases the reference count for this alias."""
+django/db/models/sql/query.py-822-        self.alias_refcount[alias] -= amount
+django/db/models/sql/query.py-823-
+django/db/models/sql/query.py-824-    def promote_joins(self, aliases):
+django/db/models/sql/query.py-825-        """
+django/db/models/sql/query.py-826-        Promote recursively the join type of given aliases and its children to
+--
+django/db/models/sql/compiler.py:1061:    def get_from_clause(self):
+django/db/models/sql/compiler.py-1062-        """
+django/db/models/sql/compiler.py-1063-        Return a list of strings that are joined together to go after the
+django/db/models/sql/compiler.py-1064-        "FROM" part of the query, as well as a list any extra parameters that
+django/db/models/sql/compiler.py-1065-        need to be included. Subclasses, can override this to create a
+django/db/models/sql/compiler.py-1066-        from-clause via a "select".
+django/db/models/sql/compiler.py-1067-
+django/db/models/query.py:1663:                    clone.query.group_by = True
+[0m
+[0m$ [0mcd /testbed && grep -n "def set_annotation_mask\|def annotation_select\b\|def base_table\|self.alias_refcount\[" -A 8 django/db/models/sql/query.py | head -80; grep -n "contains_aggregate" django/db/models/sql/where.py
+268:    def base_table(self):
+269-        for alias in self.alias_map:
+270-            return alias
+271-
+272-    def __str__(self):
+273-        """
+274-        Return the query as a string of SQL with the parameter values
+275-        substituted in (use sql_with_params() to see the unsubstituted string).
+276-
+--
+800:            self.alias_refcount[alias] += 1
+801-            return alias, False
+802-
+803-        # Create a new alias for this table.
+804-        if alias_list:
+805-            alias = "%s%d" % (self.alias_prefix, len(self.alias_map) + 1)
+806-            alias_list.append(alias)
+807-        else:
+808-            # The first occurrence of a table uses the table name directly.
+--
+813:        self.alias_refcount[alias] = 1
+814-        return alias, True
+815-
+816-    def ref_alias(self, alias):
+817-        """Increases the reference count for this alias."""
+818:        self.alias_refcount[alias] += 1
+819-
+820-    def unref_alias(self, alias, amount=1):
+821-        """Decreases the reference count for this alias."""
+822:        self.alias_refcount[alias] -= amount
+823-
+824-    def promote_joins(self, aliases):
+825-        """
+826-        Promote recursively the join type of given aliases and its children to
+827-        an outer join. If 'unconditional' is False, only promote the join if
+828-        it is nullable or the parent join is an outer join.
+829-
+830-        The children promotion is done to avoid join chains that contain a LOUTER
+--
+919:            self.alias_refcount[new_alias] = self.alias_refcount[old_alias]
+920:            del self.alias_refcount[old_alias]
+921-            del self.alias_map[old_alias]
+922-
+923-            table_aliases = self.table_map[alias_data.table_name]
+924-            for pos, alias in enumerate(table_aliases):
+925-                if alias == old_alias:
+926-                    table_aliases[pos] = new_alias
+927-                    break
+928-        self.external_aliases = {
+--
+2363:    def set_annotation_mask(self, names):
+2364-        """Set the mask of annotations that will be returned by the SELECT."""
+2365-        if names is None:
+2366-            self.annotation_select_mask = None
+2367-        else:
+2368-            self.annotation_select_mask = set(names)
+2369-        self._annotation_select_cache = None
+2370-
+2371-    def append_annotation_mask(self, names):
+--
+2439:    def annotation_select(self):
+2440-        """
+2441-        Return the dictionary of aggregate columns that are not masked and
+2442-        should be used in the SELECT clause. Cache this result for performance.
+2443-        """
+2444-        if self._annotation_select_cache is not None:
+2445-            return self._annotation_select_cache
+2446-        elif not self.annotations:
+2447-            return {}
+--
+2540:            if self.alias_refcount[table] > 0:
+2541-                self.alias_map[table] = self.base_table_class(
+2542-                    self.alias_map[table].table_name,
+2543-                    table,
+2544-                )
+2545-                break
+2546-        self.set_select([f.get_col(select_alias) for f in select_fields])
+2547-        return trimmed_prefix, contains_louter
+2548-
+31:    contains_aggregate attribute.
+45:        if not self.contains_aggregate and not self.contains_over_clause:
+57:            and self.contains_aggregate
+79:            elif c.contains_aggregate:
+231:    def _contains_aggregate(cls, obj):
+233:            return any(cls._contains_aggregate(c) for c in obj.children)
+234:        return obj.contains_aggregate
+237:    def contains_aggregate(self):
+238:        return self._contains_aggregate(self)
+311:    contains_aggregate = False
+320:    contains_aggregate = False
+335:    contains_aggregate = False
+[0m
+[0m← [0mEdit django/db/models/sql/query.py
+Index: /testbed/django/db/models/sql/query.py
+===================================================================
+--- /testbed/django/db/models/sql/query.py
++++ /testbed/django/db/models/sql/query.py
+@@ -549,11 +549,107 @@
+     """
+     Perform a COUNT() query using the current filter constraints.
+     """
+     obj = self.clone()
++    obj._strip_unused_annotations_for_count()
+     obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+     return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++def _strip_unused_annotations_for_count(self):
++    """
++    Remove annotations that cannot affect the result of a COUNT(*) query.
++
++    An annotation is needed if it is referenced by the WHERE clause or by
++    another needed annotation. Aggregate annotations are only removed when
++    doing so cannot change the number of rows counted, i.e. when there is
++    no explicit GROUP BY and no join other than the base table is needed
++    (joins could otherwise multiply rows that the GROUP BY collapses).
++    """
++    if (
++        not self.annotations
++        or isinstance(self.group_by, tuple)
++        or self.is_sliced
++        or self.distinct
++        or self.combinator
++    ):
++        return
++
++    annotations = self.annotations
++    ann_ids = {id(ann): alias for alias, ann in annotations.items()}
++
++    def referenced_aliases(expr):
++        """Yield annotation aliases directly referenced by expr."""
++        stack = [expr]
++        while stack:
++            node = stack.pop()
++            if isinstance(node, Ref):
++                if node.refs in annotations:
++                    yield node.refs
++            if id(node) in ann_ids:
++                yield ann_ids[id(node)]
++                continue
++            stack.extend(node.get_source_expressions())
++
++    # Fixed point: annotations needed by the WHERE clause, then by the
++    # annotations already known to be needed.
++    needed = set()
++    pending = list(referenced_aliases(self.where))
++    while pending:
++        alias = pending.pop()
++        if alias in needed:
++            continue
++        needed.add(alias)
++        pending.extend(referenced_aliases(annotations[alias]))
++
++    kept = {alias: annotations[alias] for alias in needed}
++    removable = [alias for alias in annotations if alias not in needed]
++    if not removable:
++        return
++    strip_aggregates = (
++        self.group_by in (None, True)
++        and not self.where.contains_aggregate
++        and not any(ann.contains_aggregate for ann in kept.values())
++    )
++    if strip_aggregates:
++        # Only the base table may be joined once the aggregates are gone.
++        base_alias = self.base_table
++        needed_cols = set(self._gen_col_aliases([self.where, *kept.values()]))
++        strip_aggregates = needed_cols <= {base_alias}
++    removed = []
++    for alias in removable:
++        annotation = annotations[alias]
++        if annotation.contains_aggregate and not strip_aggregates:
++            kept[alias] = annotation
++        else:
++            removed.append(alias)
++    if not removed:
++        return
++
++    self.annotations = {
++        alias: ann for alias, ann in annotations.items() if alias not in removed
++    }
++    if self.annotation_select_mask is not None:
++        self.annotation_select_mask = {
++            alias
++            for alias in self.annotation_select_mask
++            if alias not in removed
++        }
++    self._annotation_select_cache = None
++    if self.group_by is True and not any(
++        ann.contains_aggregate for ann in self.annotations.values()
++    ):
++        self.group_by = None
++
++    # Release joins only referenced by the removed annotations.
++    required = set()
++    for alias in self._gen_col_aliases([self.where, *self.annotations.values()]):
++        while alias is not None and alias not in required:
++            required.add(alias)
++            alias = self.alias_map[alias].parent_alias
++    for alias, table in self.alias_map.items():
++        if alias not in required and self.alias_refcount.get(alias):
++            self.alias_refcount[alias] = 0
++
+ def has_filters(self):
+     return self.where
+ 
+ def exists(self, limit=True):
+
+[0m
+[0m$ [0mcd /testbed && grep -n "parent_alias" django/db/models/sql/datastructures.py | head; grep -n "^from django.db.models.expressions\|    Ref,\|import.*Ref" django/db/models/sql/query.py | head
+39:        - parent_alias (which table is this join's parent, can be None similarly
+48:        parent_alias,
+57:        self.parent_alias = parent_alias
+87:                    qn(self.parent_alias),
+97:            self.table_alias, self.parent_alias
+131:        new_parent_alias = change_map.get(self.parent_alias, self.parent_alias)
+142:            new_parent_alias,
+155:            self.parent_alias,
+192:    parent_alias = None
+22:from django.db.models.expressions import (
+28:    Ref,
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+import re
+p='django/db/models/sql/query.py'
+s=open(p).read()
+s=s.replace("""            if annotation.contains_aggregate and not strip_aggregates:
+                kept[alias] = annotation
+            else:
+                removed.append(alias)""","""            if not annotation.contains_aggregate or strip_aggregates:
+                removed.append(alias)""")
+s=s.replace("""        for alias, table in self.alias_map.items():
+            if alias not in required and self.alias_refcount.get(alias):""","""        for alias in self.alias_map:
+            if alias not in required and self.alias_refcount.get(alias):""")
+s=s.replace("""        kept = {alias: annotations[alias] for alias in needed}
+        removable = [alias for alias in annotations if alias not in needed]
+        if not removable:
+            return
+        strip_aggregates""","""        kept_annotations = [annotations[alias] for alias in needed]
+        removable = [alias for alias in annotations if alias not in needed]
+        if not removable:
+            return
+        strip_aggregates""")
+s=s.replace("""            and not any(ann.contains_aggregate for ann in kept.values())""","""            and not any(ann.contains_aggregate for ann in kept_annotations)""")
+s=s.replace("""            needed_cols = set(self._gen_col_aliases([self.where, *kept.values()]))""","""            needed_cols = set(
+                self._gen_col_aliases([self.where, *kept_annotations])
+            )""")
+open(p,'w').write(s)
+EOF
+grep -n "kept" django/db/models/sql/query.py
+603:        kept_annotations = [annotations[alias] for alias in needed]
+610:            and not any(ann.contains_aggregate for ann in kept_annotations)
+616:                self._gen_col_aliases([self.where, *kept_annotations])
+[0m
+[0m$ [0mcd /testbed/tests && timeout 900 python runtests.py aggregation annotations queries expressions aggregation_regress lookup model_inheritance_regress null_queries 2>&1 | tail -30
+Cloning test database for alias 'other'...
+Cloning test database for alias 'other'...
+Cloning test database for alias 'other'...
+Cloning test database for alias 'other'...
+Cloning test database for alias 'other'...
+Cloning test database for alias 'other'...
+System check identified no issues (1 silenced).
+...........s..ss.s...................s........................................................s............x................s............................s....s....ss.....s.......s..............x...........................................................s.............................................................................................................................................................................................s.................................................................s.................................................................................................................................................................................................x..................................................................................................x.........................................................................................................................sss..ss..............................................................ss...........s..s.............................
+----------------------------------------------------------------------
+Ran 1039 tests in 2.213s
+
+OK (skipped=25, expected failures=4)
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+[0m
+[0m$ [0mmkdir -p /tmp/opencode/chk && cd /tmp/opencode/chk && cat > check.py <<'EOF'
+import django
+from django.conf import settings
+settings.configure(INSTALLED_APPS=["chk_app"], DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}})
+django.setup()
+from django.db import connection, models
+from django.db.models import Count, F
+from django.test.utils import CaptureQueriesContext
+import sys, types
+class Book(models.Model):
+    title = models.CharField(max_length=10)
+    class Meta: app_label = "chk_app"
+class Chapter(models.Model):
+    book = models.ForeignKey(Book, models.CASCADE, related_name="chapters")
+    title = models.CharField(max_length=10)
+    class Meta: app_label = "chk_app"
+with connection.schema_editor() as se:
+    se.create_model(Book); se.create_model(Chapter)
+b1 = Book.objects.create(title="a"); b2 = Book.objects.create(title="b"); Book.objects.create(title="c")
+Chapter.objects.create(book=b1, title="x"); Chapter.objects.create(book=b1, title="y"); Chapter.objects.create(book=b2, title="x")
+def show(label, qs):
+    with CaptureQueriesContext(connection) as c:
+        n = qs.count()
+    print(label, n, "\n   ", c.captured_queries[0]["sql"])
+show("issue", Book.objects.annotate(Count("chapters")))
+show("plain", Book.objects.count.__self__ and Book.objects.all())
+show("filter-join+agg (expect 2 distinct books)", Book.objects.filter(chapters__title="x").annotate(Count("chapters")))
+show("nonagg join (strip ok)", Book.objects.annotate(t=F("chapters__title")))
+show("filtered on annotation", Book.objects.annotate(n=Count("chapters")).filter(n__gt=1))
+show("ordered by annotation", Book.objects.annotate(n=Count("chapters")).order_by("n"))
+show("values group", Book.objects.values("title").annotate(n=Count("chapters")))
+EOF
+cat > chk_app.py </dev/null; mkdir -p chk_app && touch chk_app/__init__.py && mv chk_app.py chk_app/models.py 2>/dev/null; cd /tmp/opencode/chk && PYTHONPATH=/testbed:/tmp/opencode/chk python check.py
+issue 3 
+    SELECT COUNT(*) AS "__count" FROM "chk_app_book"
+plain 3 
+    SELECT COUNT(*) AS "__count" FROM "chk_app_book"
+filter-join+agg (expect 2 distinct books) 2 
+    SELECT COUNT(*) FROM (SELECT COUNT("chk_app_chapter"."id") AS "chapters__count" FROM "chk_app_book" INNER JOIN "chk_app_chapter" ON ("chk_app_book"."id" = "chk_app_chapter"."book_id") WHERE "chk_app_chapter"."title" = 'x' GROUP BY "chk_app_book"."id") subquery
+nonagg join (strip ok) 3 
+    SELECT COUNT(*) AS "__count" FROM "chk_app_book"
+filtered on annotation 1 
+    SELECT COUNT(*) FROM (SELECT COUNT("chk_app_chapter"."id") AS "n" FROM "chk_app_book" LEFT OUTER JOIN "chk_app_chapter" ON ("chk_app_book"."id" = "chk_app_chapter"."book_id") GROUP BY "chk_app_book"."id" HAVING COUNT("chk_app_chapter"."id") > 1) subquery
+ordered by annotation 3 
+    SELECT COUNT(*) AS "__count" FROM "chk_app_book"
+values group 3 
+    SELECT COUNT(*) FROM (SELECT "chk_app_book"."title" AS "col1", COUNT("chk_app_chapter"."id") AS "n" FROM "chk_app_book" LEFT OUTER JOIN "chk_app_chapter" ON ("chk_app_book"."id" = "chk_app_chapter"."book_id") GROUP BY "col1") subquery
+[0m
+[0m$ [0mcd /testbed && git status --short && python -m flake8 django/db/models/sql/query.py 2>&1 | head -5; rm -rf /tmp/opencode/chk
+M django/db/models/sql/query.py
+/opt/miniconda3/envs/testbed/bin/python: No module named flake8
+[0m

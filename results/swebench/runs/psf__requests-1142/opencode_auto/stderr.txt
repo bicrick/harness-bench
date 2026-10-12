@@ -1,0 +1,157 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && git log --oneline -2 && grep -n "Content-Length\|content-length\|body is not None\|prepare_content_length" -i requests/models.py | head -50
+546130c SWE-bench
+22623bd Merge pull request #1099 from sprt/master
+362:                self.headers['Content-Length'] = length
+380:            self.prepare_content_length(body)
+388:    def prepare_content_length(self, body):
+389:        self.headers['Content-Length'] = '0'
+392:            self.headers['Content-Length'] = str(body.tell())
+394:        elif body is not None:
+395:            self.headers['Content-Length'] = str(len(body))
+410:            # Recompute Content-Length
+411:            self.prepare_content_length(self.body)
+[0m
+[0m$ [0mcd /testbed && sed -n 340,415p requests/models.py
+content_type = None
+        length = None
+        is_stream = False
+
+        is_stream = all([
+            hasattr(data, '__iter__'),
+            not isinstance(data, basestring),
+            not isinstance(data, dict)
+        ])
+
+        try:
+            length = str(super_len(data))
+        except (TypeError, AttributeError):
+            length = False
+
+        if is_stream:
+            body = data
+
+            if files:
+                raise NotImplementedError('Streamed bodies and files are mutually exclusive.')
+
+            if length:
+                self.headers['Content-Length'] = length
+            else:
+                self.headers['Transfer-Encoding'] = 'chunked'
+        # Check if file, fo, generator, iterator.
+        # If not, run through normal process.
+
+        else:
+            # Multi-part file uploads.
+            if files:
+                (body, content_type) = self._encode_files(files, data)
+            else:
+                if data:
+                    body = self._encode_params(data)
+                    if isinstance(data, str) or isinstance(data, builtin_str) or hasattr(data, 'read'):
+                        content_type = None
+                    else:
+                        content_type = 'application/x-www-form-urlencoded'
+
+            self.prepare_content_length(body)
+
+            # Add content-type if it wasn't explicitly provided.
+            if (content_type) and (not 'content-type' in self.headers):
+                self.headers['Content-Type'] = content_type
+
+        self.body = body
+
+    def prepare_content_length(self, body):
+        self.headers['Content-Length'] = '0'
+        if hasattr(body, 'seek') and hasattr(body, 'tell'):
+            body.seek(0, 2)
+            self.headers['Content-Length'] = str(body.tell())
+            body.seek(0, 0)
+        elif body is not None:
+            self.headers['Content-Length'] = str(len(body))
+
+    def prepare_auth(self, auth):
+        """Prepares the given HTTP auth data."""
+        if auth:
+            if isinstance(auth, tuple) and len(auth) == 2:
+                # special-case basic HTTP auth
+                auth = HTTPBasicAuth(*auth)
+
+            # Allow auth to make its changes.
+            r = auth(self)
+
+            # Update self to reflect the auth changes.
+            self.__dict__.update(r.__dict__)
+
+            # Recompute Content-Length
+            self.prepare_content_length(self.body)
+
+    def prepare_cookies(self, cookies):
+        """Prepares the given HTTP cookie data."""
+[0m
+[0m$ [0mcd /testbed && grep -n "def prepare\b\|prepare_method\|prepare_body(\|self.method" requests/models.py | head -20
+203:        self.method = method
+214:        return '<Request [%s]>' % (self.method)
+216:    def prepare(self):
+220:        p.prepare_method(self.method)
+224:        p.prepare_body(self.data, self.files)
+255:        self.method = None
+266:        return '<PreparedRequest [%s]>' % (self.method)
+268:    def prepare_method(self, method):
+270:        self.method = method
+271:        if self.method is not None:
+272:            self.method = self.method.upper()
+332:    def prepare_body(self, data, files):
+[0m
+[0m← [0mEdit requests/models.py
+Index: /testbed/requests/models.py
+===================================================================
+--- /testbed/requests/models.py
++++ /testbed/requests/models.py
+@@ -385,15 +385,17 @@
+ 
+     self.body = body
+ 
+ def prepare_content_length(self, body):
+-    self.headers['Content-Length'] = '0'
+     if hasattr(body, 'seek') and hasattr(body, 'tell'):
+         body.seek(0, 2)
+         self.headers['Content-Length'] = str(body.tell())
+         body.seek(0, 0)
+     elif body is not None:
+         self.headers['Content-Length'] = str(len(body))
++    elif self.method not in ('GET', 'HEAD'):
++        # Methods that may carry a body get an explicit zero length.
++        self.headers['Content-Length'] = '0'
+ 
+ def prepare_auth(self, auth):
+     """Prepares the given HTTP auth data."""
+     if auth:
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+import requests
+from requests.models import PreparedRequest
+for m,kw in [('GET',{}),('HEAD',{}),('POST',{}),('POST',{'data':'a=b'})]:
+    p=requests.Request(m,'http://x/',**kw).prepare()
+    print(m, kw, p.headers.get('Content-Length'))
+" && python -m pytest -q test_requests.py 2>&1 | tail -5
+/testbed/requests/models.py:562: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if self.status_code is 0:
+GET {} None
+HEAD {} None
+POST {} 0
+POST {'data': 'a=b'} 3
+FAILED test_requests.py::RequestsTestCase::test_status_raising - TypeError: __init__() got an unexpected keyword argument 'strict'
+FAILED test_requests.py::RequestsTestCase::test_unicode_get - TypeError: __init__() got an unexpected keyword argument 'strict'
+FAILED test_requests.py::RequestsTestCase::test_urlencoded_get_query_multivalued_param - TypeError: __init__() got an unexpected keyword argument 'strict'
+FAILED test_requests.py::RequestsTestCase::test_user_agent_transfers - TypeError: __init__() got an unexpected keyword argument 'strict'
+21 failed, 5 passed, 2 warnings in 0.48s
+[0m
+[0m$ [0mcd /testbed && git stash -q && python -m pytest -q test_requests.py 2>&1 | tail -1; git stash pop -q && git diff --stat
+21 failed, 5 passed, 4 warnings in 0.45s
+ requests/models.py | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+[0m

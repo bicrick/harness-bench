@@ -1,0 +1,59 @@
+diff --git a/src/_pytest/mark/structures.py b/src/_pytest/mark/structures.py
+index 800a25c92..c0ef07611 100644
+--- a/src/_pytest/mark/structures.py
++++ b/src/_pytest/mark/structures.py
+@@ -355,11 +355,37 @@ class MarkDecorator:
+         return self.with_args(*args, **kwargs)
+ 
+ 
+-def get_unpacked_marks(obj: object) -> Iterable[Mark]:
+-    """Obtain the unpacked marks that are stored on an object."""
+-    mark_list = getattr(obj, "pytestmark", [])
++def _get_own_pytestmark(obj: object) -> list:
++    """Return the ``pytestmark`` stored directly in ``obj.__dict__``, unpacked to a list."""
++    mark_list = getattr(obj, "__dict__", {}).get("pytestmark", [])
+     if not isinstance(mark_list, list):
+         mark_list = [mark_list]
++    return mark_list
++
++
++def get_unpacked_marks(obj: object) -> Iterable[Mark]:
++    """Obtain the unpacked marks that are stored on an object.
++
++    For classes, marks are collected from the whole MRO, so that a class
++    inheriting from several marked base classes gets the marks of all of them
++    (not only those of the first base class providing ``pytestmark``).
++    Marks are deduplicated while preserving MRO order.
++    """
++    if inspect.isclass(obj):
++        mark_list: list = []
++        seen: set = set()
++        for klass in obj.__mro__:
++            for mark in _get_own_pytestmark(klass):
++                # The same Mark may be reachable through several bases (diamond
++                # inheritance); only keep its first occurrence in MRO order.
++                if id(mark) in seen:
++                    continue
++                seen.add(id(mark))
++                mark_list.append(mark)
++    else:
++        mark_list = getattr(obj, "pytestmark", [])
++        if not isinstance(mark_list, list):
++            mark_list = [mark_list]
+     return normalize_mark_list(mark_list)
+ 
+ 
+@@ -388,7 +414,12 @@ def store_mark(obj, mark: Mark) -> None:
+     assert isinstance(mark, Mark), mark
+     # Always reassign name to avoid updating pytestmark in a reference that
+     # was only borrowed.
+-    obj.pytestmark = [*get_unpacked_marks(obj), mark]
++    if inspect.isclass(obj):
++        # For classes, only the object's own marks are stored; marks from base
++        # classes are gathered along the MRO when they are read.
++        obj.pytestmark = [*normalize_mark_list(_get_own_pytestmark(obj)), mark]
++    else:
++        obj.pytestmark = [*get_unpacked_marks(obj), mark]
+ 
+ 
+ # Typing for builtin pytest marks. This is cheating; it gives builtin marks

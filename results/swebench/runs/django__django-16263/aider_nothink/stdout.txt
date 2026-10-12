@@ -1,0 +1,120 @@
+Detected dumb terminal, disabling fancy input and pretty output.
+
+Update git name with: git config user.name "Your Name"
+Update git email with: git config user.email "you@example.com"
+Aider v0.86.2
+Model: anthropic/claude-haiku-5-5 with diff edit format, prompt cache
+Git repo: .git with 6,652 files
+Warning: For large repos, consider using --subtree-only and .aiderignore
+See: https://aider.chat/docs/faq.html#can-i-use-aider-in-a-large-mono-repo
+Repo-map: using 4096 tokens, files refresh
+
+
+https://aider.chat/HISTORY.html#release-notes
+
+Initial repo scan can be slow in larger repos, but only happens once.
+I need the relevant file to make the change. The fix belongs in 
+`django/db/models/query.py` (the `QuerySet.count()` method) and possibly 
+`django/db/models/sql/query.py` (`Query.get_count()`), since annotation 
+stripping is done at the SQL query level. Could you add these files to the chat?
+
+- `django/db/models/query.py`
+- `django/db/models/sql/query.py`
+
+Once they're added, I'll propose the *SEARCH/REPLACE* edits.
+
+Tokens: 27k sent, 12k cache write, 2.4k cache hit, 161 received.
+Cost: $0.0017 message, $0.0017 session.
+
+django/db/models/query.py
+
+django/db/models/sql/query.py
+I'll make `Query.get_count()` strip annotations that aren't referenced by 
+anything else before running the COUNT, so that 
+`Book.objects.annotate(Count('chapters')).count()` no longer joins and 
+aggregates unnecessarily.
+
+The approach: in `get_count()`, drop every annotation that is not used by a 
+filter (`where`), another annotation, or ordering. Aggregate annotations are 
+only dropped when they don't affect row multiplicity; a conservative check is to
+remove any annotation that isn't referenced. Annotations that contain aggregates
+are still safe to remove because the COUNT is taken over the base rows, and 
+`get_aggregation` will wrap the query in a subquery only if needed.
+
+To be conservative, I'll only strip annotations when `distinct`, `combinator`, 
+and slicing are not in play (those cases still need the annotation rows to 
+define the result set). I'll also keep anything referenced by `where`, 
+`order_by`, or other annotations.
+
+query.py is not involved for this change, so the edit goes only in 
+`django/db/models/sql/query.py`.
+
+django/db/models/sql/query.py
+```python
+<<<<<<< SEARCH
+    def get_count(self, using):
+        """
+        Perform a COUNT() query using the current filter constraints.
+        """
+        obj = self.clone()
+        obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+        return obj.get_aggregation(using, ["__count"])["__count"]
+=======
+    def get_count(self, using):
+        """
+        Perform a COUNT() query using the current filter constraints.
+        """
+        obj = self.clone()
+        if not (obj.distinct or obj.is_sliced or obj.combinator):
+            obj.strip_unused_annotations()
+        obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+        return obj.get_aggregation(using, ["__count"])["__count"]
+
+    def strip_unused_annotations(self):
+        """
+        Remove annotations that are not referenced by the WHERE clause, other
+        annotations, or ordering. Such annotations cannot affect the row count.
+        """
+        if not self.annotations:
+            return
+        referenced = set()
+        for expr in chain(self.where.children, self.order_by):
+            if isinstance(expr, str):
+                referenced.add(expr.lstrip("-"))
+            elif hasattr(expr, "flatten"):
+                for node in expr.flatten():
+                    if isinstance(node, Ref):
+                        referenced.add(node.refs)
+            else:
+                for node in self._gen_cols([expr]):
+                    pass
+        # Iterate to a fixed point, since kept annotations may reference others.
+        changed = True
+        while changed:
+            changed = False
+            for alias, annotation in self.annotations.items():
+                if alias in referenced:
+                    for node in annotation.flatten():
+                        if isinstance(node, Ref) and node.refs not in 
+referenced:
+                            referenced.add(node.refs)
+                            changed = True
+                        elif isinstance(node, Ref):
+                            continue
+        for alias in list(self.annotations):
+            if alias not in referenced:
+                del self.annotations[alias]
+                if self.annotation_select_mask is not None:
+                    self.annotation_select_mask.discard(alias)
+        self._annotation_select_cache = None
+>>>>>>> REPLACE
+```
+
+Note: this is a best-effort change; I haven't run the test suite, so after 
+applying it, run the queryset count tests (for example `python -m pytest 
+tests/aggregation tests/queries` or `./runtests.py aggregation queries` from the
+`tests` directory) to verify behavior.
+
+Tokens: 157k sent, 77k cache write, 2.4k cache hit, 1.2k received.
+Cost: $0.01 message, $0.01 session.
+Applied edit to django/db/models/sql/query.py

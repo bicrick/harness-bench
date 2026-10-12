@@ -1,0 +1,611 @@
+{
+  "info": {
+    "model_stats": {
+      "instance_cost": 0.00242341,
+      "api_calls": 5
+    },
+    "config": {
+      "agent": {
+        "system_template": "You are a helpful assistant that can interact with a computer shell to solve programming tasks.\n",
+        "instance_template": "<pr_description>\nConsider the following PR description:\n{{task}}\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\n\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n<IMPORTANT>This is an interactive process where you will think and issue AT LEAST ONE command, see the result, then think and issue your next command(s).</important>\n\nFor each response:\n\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide one or more bash tool calls to execute\n\n## Important Boundaries\n\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\n\nYou are operating in an environment where\n\n1. You issue at least one command\n2. The system executes the command(s) in a subshell\n3. You see the result(s)\n4. You write your next command(s)\n\nEach response should include:\n\n1. **Reasoning text** where you explain your analysis and plan\n2. At least one tool call with your command\n\n**CRITICAL REQUIREMENTS:**\n\n- Your response SHOULD include reasoning text explaining what you're doing\n- Your response MUST include AT LEAST ONE bash tool call. You can make MULTIPLE tool calls in a single response when the commands are independent (e.g., searching multiple files, reading different parts of the codebase).\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nI need to understand the Builder-related code. Let me find relevant files and check the project structure.\n\n[Makes multiple bash tool calls: {\"command\": \"ls -la\"}, {\"command\": \"find src -name '*.java' | grep -i builder\"}, {\"command\": \"cat README.md | head -50\"}]\n</example_response>\n\n## Environment Details\n\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- You can use bash commands or invoke any tool that is available in the environment\n- You can also create new tools or scripts to help you with the task\n- If a tool isn't available, you can also install it\n\n## Submission\n\nWhen you've completed your work, you MUST submit your changes as a git patch.\nFollow these steps IN ORDER, with SEPARATE commands:\n\nStep 1: Create the patch file\nRun `git diff -- path/to/file1 path/to/file2 > patch.txt` listing only the source files you modified.\nDo NOT commit your changes.\n\n<IMPORTANT>\nThe patch must only contain changes to the specific source files you modified to fix the issue.\nDo not submit file creations or changes to any of the following files:\n\n- test and reproduction files\n- helper scripts, tests, or tools that you created\n- installation, build, packaging, configuration, or setup scripts unless they are directly part of the issue you were fixing (you can assume that the environment is already set up for your client)\n- binary or compiled files\n</IMPORTANT>\n\nStep 2: Verify your patch\nInspect patch.txt to confirm it only contains your intended changes and headers show `--- a/` and `+++ b/` paths.\n\nStep 3: Submit (EXACT command required)\nYou MUST use this EXACT command to submit:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat patch.txt\n```\n\nIf the command fails (nonzero exit status), it will not submit.\n\n<CRITICAL>\n- Creating/viewing the patch and submitting it MUST be separate commands (not combined with &&).\n- If you modify patch.txt after verifying, you SHOULD verify again before submitting.\n- You CANNOT continue working (reading, editing, testing) in any way on this task after submitting.\n</CRITICAL>\n</instructions>\n",
+        "step_limit": 50,
+        "cost_limit": 100.0,
+        "wall_time_limit_seconds": 0,
+        "max_consecutive_format_errors": 3,
+        "output_path": null
+      },
+      "agent_type": "minisweagent.run.benchmarks.utils.common.ProgressTrackingAgent",
+      "model": {
+        "model_name": "anthropic/claude-haiku-5-5",
+        "model_kwargs": {
+          "drop_params": true,
+          "parallel_tool_calls": true
+        },
+        "litellm_model_registry": null,
+        "set_cache_control": "default_end",
+        "cost_tracking": "ignore_errors",
+        "format_error_template": "{% if finish_reason is defined and (finish_reason == \"length\" or (finish_reason == \"tool_calls\" and not has_tool_calls)) -%}\nYour previous response reached the output token limit (finish_reason={{ finish_reason }}) before you produced a tool call, so it was cut off. Respond more concisely and finish with exactly one bash tool call. If you need to think more, do so briefly.\n{%- else -%}\nTool call error:\n\n<error>\n{{error}}\n</error>\n\nHere is general guidance on how to submit correct toolcalls:\n\nEvery response needs to use the 'bash' tool at least once to execute commands.\n\nCall the bash tool with your command as the argument:\n- Tool: bash\n- Arguments: {\"command\": \"your_command_here\"}\n\nIf you have completed your assignment, please consult the first message about how to\nsubmit your solution (you will not be able to continue working on this task after that).\n{%- endif %}\n",
+        "observation_template": "{% if output.exception_info -%}\n<exception>{{output.exception_info}}</exception>\n{% endif -%}\n<returncode>{{output.returncode}}</returncode>\n{% if output.output | length < 10000 -%}\n<output>\n{{ output.output -}}\n</output>\n{%- else -%}\n<warning>\nThe output of your last command was too long.\nPlease try a different command that produces less output.\nIf you're looking at a file you can try use head, tail or sed to view a smaller number of lines selectively.\nIf you're using grep or find and it produced too much output, you can use a more selective search pattern.\nIf you really need to see something from the full command's output, you can redirect output to a file and then search in that file.\n</warning>\n{%- set elided_chars = output.output | length - 10000 -%}\n<output_head>\n{{ output.output[:5000] }}\n</output_head>\n<elided_chars>\n{{ elided_chars }} characters elided\n</elided_chars>\n<output_tail>\n{{ output.output[-5000:] }}\n</output_tail>\n{%- endif -%}\n",
+        "multimodal_regex": ""
+      },
+      "model_type": "minisweagent.models.litellm_model.LitellmModel",
+      "environment": {
+        "image": "docker.io/swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-10356:latest",
+        "cwd": "/testbed",
+        "env": {
+          "PAGER": "cat",
+          "MANPAGER": "cat",
+          "LESS": "-R",
+          "PIP_PROGRESS_BAR": "off",
+          "TQDM_DISABLE": "1",
+          "BASH_ENV": "/root/.bashrc"
+        },
+        "forward_env": [],
+        "timeout": 60,
+        "executable": "docker",
+        "run_args": [
+          "--rm"
+        ],
+        "container_timeout": "2h",
+        "pull_timeout": 120,
+        "interpreter": [
+          "bash",
+          "-c"
+        ]
+      },
+      "environment_type": "minisweagent.environments.docker.DockerEnvironment"
+    },
+    "mini_version": "2.4.6",
+    "exit_status": "Submitted",
+    "submission": "diff --git a/src/_pytest/mark/structures.py b/src/_pytest/mark/structures.py\nindex 800a25c92..2eea416f9 100644\n--- a/src/_pytest/mark/structures.py\n+++ b/src/_pytest/mark/structures.py\n@@ -356,10 +356,24 @@ class MarkDecorator:\n \n \n def get_unpacked_marks(obj: object) -> Iterable[Mark]:\n-    \"\"\"Obtain the unpacked marks that are stored on an object.\"\"\"\n-    mark_list = getattr(obj, \"pytestmark\", [])\n-    if not isinstance(mark_list, list):\n-        mark_list = [mark_list]\n+    \"\"\"Obtain the unpacked marks that are stored on an object.\n+\n+    For classes, marks are collected from every class in the MRO, so that\n+    marks from multiple base classes are all retained.\n+    \"\"\"\n+    if isinstance(obj, type):\n+        mark_list: List[Any] = []\n+        for klass in reversed(obj.__mro__):\n+            own = vars(klass).get(\"pytestmark\", [])\n+            if not isinstance(own, list):\n+                own = [own]\n+            for mark in own:\n+                if mark not in mark_list:\n+                    mark_list.append(mark)\n+    else:\n+        mark_list = getattr(obj, \"pytestmark\", [])\n+        if not isinstance(mark_list, list):\n+            mark_list = [mark_list]\n     return normalize_mark_list(mark_list)\n \n \n"
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant that can interact with a computer shell to solve programming tasks."
+    },
+    {
+      "role": "user",
+      "content": "<pr_description>\nConsider the following PR description:\nConsider MRO when obtaining marks for classes\nWhen using pytest markers in two baseclasses `Foo` and `Bar`, inheriting from both of those baseclasses will lose the markers of one of those classes. This behavior is present in pytest 3-6, and I think it may as well have been intended. I am still filing it as a bug because I am not sure if this edge case was ever explicitly considered.\r\n\r\nIf it is widely understood that all markers are part of a single attribute, I guess you could say that this is just expected behavior as per MRO. However, I'd argue that it would be more intuitive to attempt to merge marker values into one, possibly deduplicating marker names by MRO.\r\n\r\n```python\r\nimport itertools\r\nimport pytest\r\n\r\nclass BaseMeta(type):\r\n    @property\r\n    def pytestmark(self):\r\n        return (\r\n            getattr(self, \"_pytestmark\", []) +\r\n            list(itertools.chain.from_iterable(getattr(x, \"_pytestmark\", []) for x in self.__mro__))\r\n        )\r\n\r\n    @pytestmark.setter\r\n    def pytestmark(self, value):\r\n        self._pytestmark = value\r\n\r\n\r\nclass Base(object):\r\n    # Without this metaclass, foo and bar markers override each other, and test_dings\r\n    # will only have one marker\r\n    # With the metaclass, test_dings will have both\r\n    __metaclass__ = BaseMeta\r\n\r\n@pytest.mark.foo\r\nclass Foo(Base):\r\n    pass\r\n\r\n\r\n@pytest.mark.bar\r\nclass Bar(Base):\r\n    pass\r\n\r\nclass TestDings(Foo, Bar):\r\n    def test_dings(self):\r\n        # This test should have both markers, foo and bar.\r\n        # In practice markers are resolved using MRO (so foo wins), unless the\r\n        # metaclass is applied\r\n        pass\r\n```\r\n\r\nI'd expect `foo` and `bar` to be markers for `test_dings`, but this only actually is the case with this metaclass.\r\n\r\nPlease note that the repro case is Python 2/3 compatible excluding how metaclasses are added to `Base` (this needs to be taken care of to repro this issue on pytest 6)\nConsider MRO when obtaining marks for classes\nWhen using pytest markers in two baseclasses `Foo` and `Bar`, inheriting from both of those baseclasses will lose the markers of one of those classes. This behavior is present in pytest 3-6, and I think it may as well have been intended. I am still filing it as a bug because I am not sure if this edge case was ever explicitly considered.\r\n\r\nIf it is widely understood that all markers are part of a single attribute, I guess you could say that this is just expected behavior as per MRO. However, I'd argue that it would be more intuitive to attempt to merge marker values into one, possibly deduplicating marker names by MRO.\r\n\r\n```python\r\nimport itertools\r\nimport pytest\r\n\r\nclass BaseMeta(type):\r\n    @property\r\n    def pytestmark(self):\r\n        return (\r\n            getattr(self, \"_pytestmark\", []) +\r\n            list(itertools.chain.from_iterable(getattr(x, \"_pytestmark\", []) for x in self.__mro__))\r\n        )\r\n\r\n    @pytestmark.setter\r\n    def pytestmark(self, value):\r\n        self._pytestmark = value\r\n\r\n\r\nclass Base(object):\r\n    # Without this metaclass, foo and bar markers override each other, and test_dings\r\n    # will only have one marker\r\n    # With the metaclass, test_dings will have both\r\n    __metaclass__ = BaseMeta\r\n\r\n@pytest.mark.foo\r\nclass Foo(Base):\r\n    pass\r\n\r\n\r\n@pytest.mark.bar\r\nclass Bar(Base):\r\n    pass\r\n\r\nclass TestDings(Foo, Bar):\r\n    def test_dings(self):\r\n        # This test should have both markers, foo and bar.\r\n        # In practice markers are resolved using MRO (so foo wins), unless the\r\n        # metaclass is applied\r\n        pass\r\n```\r\n\r\nI'd expect `foo` and `bar` to be markers for `test_dings`, but this only actually is the case with this metaclass.\r\n\r\nPlease note that the repro case is Python 2/3 compatible excluding how metaclasses are added to `Base` (this needs to be taken care of to repro this issue on pytest 6)\nFix missing marks when inheritance from multiple classes\n\r\n<!--\r\nThanks for submitting a PR, your contribution is really appreciated!\r\n\r\nHere is a quick checklist that should be present in PRs.\r\n\r\n- [] Include documentation when adding new features.\r\n- [ ] Include new tests or update existing tests when applicable.\r\n- [X] Allow maintainers to push and squash when merging my commits. Please uncheck this if you prefer to squash the commits yourself.\r\n\r\nIf this change fixes an issue, please:\r\n\r\n- [x] Add text like ``closes #XYZW`` to the PR description and/or commits (where ``XYZW`` is the issue number). See the [github docs](https://help.github.com/en/github/managing-your-work-on-github/linking-a-pull-request-to-an-issue#linking-a-pull-request-to-an-issue-using-a-keyword) for more information.\r\n\r\nUnless your change is trivial or a small documentation fix (e.g., a typo or reword of a small section) please:\r\n\r\n- [x] Create a new changelog file in the `changelog` folder, with a name like `<ISSUE NUMBER>.<TYPE>.rst`. See [changelog/README.rst](https://github.com/pytest-dev/pytest/blob/main/changelog/README.rst) for details.\r\n\r\n  Write sentences in the **past or present tense**, examples:\r\n\r\n  * *Improved verbose diff output with sequences.*\r\n  * *Terminal summary statistics now use multiple colors.*\r\n\r\n  Also make sure to end the sentence with a `.`.\r\n\r\n- [x] Add yourself to `AUTHORS` in alphabetical order.\r\n-->\r\n\n\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\n\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n<IMPORTANT>This is an interactive process where you will think and issue AT LEAST ONE command, see the result, then think and issue your next command(s).</important>\n\nFor each response:\n\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide one or more bash tool calls to execute\n\n## Important Boundaries\n\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\n\nYou are operating in an environment where\n\n1. You issue at least one command\n2. The system executes the command(s) in a subshell\n3. You see the result(s)\n4. You write your next command(s)\n\nEach response should include:\n\n1. **Reasoning text** where you explain your analysis and plan\n2. At least one tool call with your command\n\n**CRITICAL REQUIREMENTS:**\n\n- Your response SHOULD include reasoning text explaining what you're doing\n- Your response MUST include AT LEAST ONE bash tool call. You can make MULTIPLE tool calls in a single response when the commands are independent (e.g., searching multiple files, reading different parts of the codebase).\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nI need to understand the Builder-related code. Let me find relevant files and check the project structure.\n\n[Makes multiple bash tool calls: {\"command\": \"ls -la\"}, {\"command\": \"find src -name '*.java' | grep -i builder\"}, {\"command\": \"cat README.md | head -50\"}]\n</example_response>\n\n## Environment Details\n\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- You can use bash commands or invoke any tool that is available in the environment\n- You can also create new tools or scripts to help you with the task\n- If a tool isn't available, you can also install it\n\n## Submission\n\nWhen you've completed your work, you MUST submit your changes as a git patch.\nFollow these steps IN ORDER, with SEPARATE commands:\n\nStep 1: Create the patch file\nRun `git diff -- path/to/file1 path/to/file2 > patch.txt` listing only the source files you modified.\nDo NOT commit your changes.\n\n<IMPORTANT>\nThe patch must only contain changes to the specific source files you modified to fix the issue.\nDo not submit file creations or changes to any of the following files:\n\n- test and reproduction files\n- helper scripts, tests, or tools that you created\n- installation, build, packaging, configuration, or setup scripts unless they are directly part of the issue you were fixing (you can assume that the environment is already set up for your client)\n- binary or compiled files\n</IMPORTANT>\n\nStep 2: Verify your patch\nInspect patch.txt to confirm it only contains your intended changes and headers show `--- a/` and `+++ b/` paths.\n\nStep 3: Submit (EXACT command required)\nYou MUST use this EXACT command to submit:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat patch.txt\n```\n\nIf the command fails (nonzero exit status), it will not submit.\n\n<CRITICAL>\n- Creating/viewing the patch and submitting it MUST be separate commands (not combined with &&).\n- If you modify patch.txt after verifying, you SHOULD verify again before submitting.\n- You CANNOT continue working (reading, editing, testing) in any way on this task after submitting.\n</CRITICAL>\n</instructions>"
+    },
+    {
+      "content": "I'll look at how pytest collects marks from classes in the codebase.",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "index": 1,
+          "caller": {
+            "type": "direct"
+          },
+          "function": {
+            "arguments": "{\"command\": \"cd /testbed && grep -n \\\"pytestmark\\\" src/_pytest/mark/structures.py | head -50; grep -n \\\"def get_unpacked_marks\\\" -A 30 src/_pytest/mark/structures.py\"}",
+            "name": "bash"
+          },
+          "id": "toolu_01982KfkSMvQrrBDZrAvjUJK",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "citations": null,
+        "thinking_blocks": null
+      },
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && grep -n \"pytestmark\" src/_pytest/mark/structures.py | head -50; grep -n \"def get_unpacked_marks\" -A 30 src/_pytest/mark/structures.py",
+            "tool_call_id": "toolu_01982KfkSMvQrrBDZrAvjUJK"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-5d9ab791-e10a-4776-99ff-acd22dec767d",
+          "created": 1791750692,
+          "model": "claude-haiku-5-5",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": "I'll look at how pytest collects marks from classes in the codebase.",
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "index": 1,
+                    "caller": {
+                      "type": "direct"
+                    },
+                    "function": {
+                      "arguments": "{\"command\": \"cd /testbed && grep -n \\\"pytestmark\\\" src/_pytest/mark/structures.py | head -50; grep -n \\\"def get_unpacked_marks\\\" -A 30 src/_pytest/mark/structures.py\"}",
+                      "name": "bash"
+                    },
+                    "id": "toolu_01982KfkSMvQrrBDZrAvjUJK",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "citations": null,
+                  "thinking_blocks": null
+                }
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 140,
+            "prompt_tokens": 3802,
+            "total_tokens": 3942,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "text_tokens": 140
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cache_write_tokens": 3798,
+              "cached_tokens": 0,
+              "text_tokens": 4,
+              "image_tokens": null,
+              "video_tokens": null,
+              "cache_creation_tokens": 3798,
+              "cache_creation_token_details": {
+                "ephemeral_5m_input_tokens": 3798,
+                "ephemeral_1h_input_tokens": 0
+              }
+            },
+            "cache_creation_input_tokens": 3798,
+            "cache_read_input_tokens": 0,
+            "iterations": null,
+            "inference_geo": "global",
+            "speed": null,
+            "service_tier": "standard"
+          }
+        },
+        "cost": 0.00054515,
+        "timestamp": 1791750692.4033875
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\n360:    mark_list = getattr(obj, \"pytestmark\", [])\n389:    # Always reassign name to avoid updating pytestmark in a reference that\n391:    obj.pytestmark = [*get_unpacked_marks(obj), mark]\n358:def get_unpacked_marks(obj: object) -> Iterable[Mark]:\n359-    \"\"\"Obtain the unpacked marks that are stored on an object.\"\"\"\n360-    mark_list = getattr(obj, \"pytestmark\", [])\n361-    if not isinstance(mark_list, list):\n362-        mark_list = [mark_list]\n363-    return normalize_mark_list(mark_list)\n364-\n365-\n366-def normalize_mark_list(\n367-    mark_list: Iterable[Union[Mark, MarkDecorator]]\n368-) -> Iterable[Mark]:\n369-    \"\"\"\n370-    Normalize an iterable of Mark or MarkDecorator objects into a list of marks\n371-    by retrieving the `mark` attribute on MarkDecorator instances.\n372-\n373-    :param mark_list: marks to normalize\n374-    :returns: A new list of the extracted Mark objects\n375-    \"\"\"\n376-    for mark in mark_list:\n377-        mark_obj = getattr(mark, \"mark\", mark)\n378-        if not isinstance(mark_obj, Mark):\n379-            raise TypeError(f\"got {repr(mark_obj)} instead of Mark\")\n380-        yield mark_obj\n381-\n382-\n383-def store_mark(obj, mark: Mark) -> None:\n384-    \"\"\"Store a Mark on an object.\n385-\n386-    This is used to implement the Mark declarations/decorators correctly.\n387-    \"\"\"\n388-    assert isinstance(mark, Mark), mark\n</output>",
+      "extra": {
+        "raw_output": "360:    mark_list = getattr(obj, \"pytestmark\", [])\n389:    # Always reassign name to avoid updating pytestmark in a reference that\n391:    obj.pytestmark = [*get_unpacked_marks(obj), mark]\n358:def get_unpacked_marks(obj: object) -> Iterable[Mark]:\n359-    \"\"\"Obtain the unpacked marks that are stored on an object.\"\"\"\n360-    mark_list = getattr(obj, \"pytestmark\", [])\n361-    if not isinstance(mark_list, list):\n362-        mark_list = [mark_list]\n363-    return normalize_mark_list(mark_list)\n364-\n365-\n366-def normalize_mark_list(\n367-    mark_list: Iterable[Union[Mark, MarkDecorator]]\n368-) -> Iterable[Mark]:\n369-    \"\"\"\n370-    Normalize an iterable of Mark or MarkDecorator objects into a list of marks\n371-    by retrieving the `mark` attribute on MarkDecorator instances.\n372-\n373-    :param mark_list: marks to normalize\n374-    :returns: A new list of the extracted Mark objects\n375-    \"\"\"\n376-    for mark in mark_list:\n377-        mark_obj = getattr(mark, \"mark\", mark)\n378-        if not isinstance(mark_obj, Mark):\n379-            raise TypeError(f\"got {repr(mark_obj)} instead of Mark\")\n380-        yield mark_obj\n381-\n382-\n383-def store_mark(obj, mark: Mark) -> None:\n384-    \"\"\"Store a Mark on an object.\n385-\n386-    This is used to implement the Mark declarations/decorators correctly.\n387-    \"\"\"\n388-    assert isinstance(mark, Mark), mark\n",
+        "returncode": 0,
+        "timestamp": 1791750692.8522823,
+        "exception_info": ""
+      },
+      "tool_call_id": "toolu_01982KfkSMvQrrBDZrAvjUJK",
+      "role": "tool"
+    },
+    {
+      "content": "The problem is `getattr(obj, \"pytestmark\")` only resolves through MRO to the first class's attribute. The fix is in `get_unpacked_marks`: for classes, gather marks from each class in the MRO (via each class's own `__dict__`). Let me check how `store_mark` writes to classes so I know which attribute to read.",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "index": 1,
+          "caller": {
+            "type": "direct"
+          },
+          "function": {
+            "arguments": "{\"command\": \"cd /testbed && sed -n 383,395p src/_pytest/mark/structures.py && sed -n 1,30p src/_pytest/mark/structures.py | grep -n import\"}",
+            "name": "bash"
+          },
+          "id": "toolu_01UdYZrpU5HA5GfxTp1FjfLA",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "citations": null,
+        "thinking_blocks": null
+      },
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && sed -n 383,395p src/_pytest/mark/structures.py && sed -n 1,30p src/_pytest/mark/structures.py | grep -n import",
+            "tool_call_id": "toolu_01UdYZrpU5HA5GfxTp1FjfLA"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-65afe7c3-cc64-4834-b0c9-fd350391d8d2",
+          "created": 1791751181,
+          "model": "claude-haiku-5-5",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": "The problem is `getattr(obj, \"pytestmark\")` only resolves through MRO to the first class's attribute. The fix is in `get_unpacked_marks`: for classes, gather marks from each class in the MRO (via each class's own `__dict__`). Let me check how `store_mark` writes to classes so I know which attribute to read.",
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "index": 1,
+                    "caller": {
+                      "type": "direct"
+                    },
+                    "function": {
+                      "arguments": "{\"command\": \"cd /testbed && sed -n 383,395p src/_pytest/mark/structures.py && sed -n 1,30p src/_pytest/mark/structures.py | grep -n import\"}",
+                      "name": "bash"
+                    },
+                    "id": "toolu_01UdYZrpU5HA5GfxTp1FjfLA",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "citations": null,
+                  "thinking_blocks": null
+                }
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 215,
+            "prompt_tokens": 4556,
+            "total_tokens": 4771,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "text_tokens": 215
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cache_write_tokens": 4554,
+              "cached_tokens": 0,
+              "text_tokens": 2,
+              "image_tokens": null,
+              "video_tokens": null,
+              "cache_creation_tokens": 4554,
+              "cache_creation_token_details": {
+                "ephemeral_5m_input_tokens": 4554,
+                "ephemeral_1h_input_tokens": 0
+              }
+            },
+            "cache_creation_input_tokens": 4554,
+            "cache_read_input_tokens": 0,
+            "iterations": null,
+            "inference_geo": "global",
+            "speed": null,
+            "service_tier": "standard"
+          }
+        },
+        "cost": 0.00067695,
+        "timestamp": 1791751181.9729874
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\ndef store_mark(obj, mark: Mark) -> None:\n    \"\"\"Store a Mark on an object.\n\n    This is used to implement the Mark declarations/decorators correctly.\n    \"\"\"\n    assert isinstance(mark, Mark), mark\n    # Always reassign name to avoid updating pytestmark in a reference that\n    # was only borrowed.\n    obj.pytestmark = [*get_unpacked_marks(obj), mark]\n\n\n# Typing for builtin pytest marks. This is cheating; it gives builtin marks\n# special privilege, and breaks modularity. But practicality beats purity...\n1:import collections.abc\n2:import inspect\n3:import warnings\n4:from typing import Any\n5:from typing import Callable\n6:from typing import Collection\n7:from typing import Iterable\n8:from typing import Iterator\n9:from typing import List\n10:from typing import Mapping\n11:from typing import MutableMapping\n12:from typing import NamedTuple\n13:from typing import Optional\n14:from typing import overload\n15:from typing import Sequence\n16:from typing import Set\n17:from typing import Tuple\n18:from typing import Type\n19:from typing import TYPE_CHECKING\n20:from typing import TypeVar\n21:from typing import Union\n23:import attr\n25:from .._code import getfslineno\n26:from ..compat import ascii_escaped\n27:from ..compat import final\n28:from ..compat import NOTSET\n29:from ..compat import NotSetType\n30:from _pytest.config import Config\n</output>",
+      "extra": {
+        "raw_output": "def store_mark(obj, mark: Mark) -> None:\n    \"\"\"Store a Mark on an object.\n\n    This is used to implement the Mark declarations/decorators correctly.\n    \"\"\"\n    assert isinstance(mark, Mark), mark\n    # Always reassign name to avoid updating pytestmark in a reference that\n    # was only borrowed.\n    obj.pytestmark = [*get_unpacked_marks(obj), mark]\n\n\n# Typing for builtin pytest marks. This is cheating; it gives builtin marks\n# special privilege, and breaks modularity. But practicality beats purity...\n1:import collections.abc\n2:import inspect\n3:import warnings\n4:from typing import Any\n5:from typing import Callable\n6:from typing import Collection\n7:from typing import Iterable\n8:from typing import Iterator\n9:from typing import List\n10:from typing import Mapping\n11:from typing import MutableMapping\n12:from typing import NamedTuple\n13:from typing import Optional\n14:from typing import overload\n15:from typing import Sequence\n16:from typing import Set\n17:from typing import Tuple\n18:from typing import Type\n19:from typing import TYPE_CHECKING\n20:from typing import TypeVar\n21:from typing import Union\n23:import attr\n25:from .._code import getfslineno\n26:from ..compat import ascii_escaped\n27:from ..compat import final\n28:from ..compat import NOTSET\n29:from ..compat import NotSetType\n30:from _pytest.config import Config\n",
+        "returncode": 0,
+        "timestamp": 1791751182.776169,
+        "exception_info": ""
+      },
+      "tool_call_id": "toolu_01UdYZrpU5HA5GfxTp1FjfLA",
+      "role": "tool"
+    },
+    {
+      "content": "I'll change `get_unpacked_marks` so that for classes, it walks the MRO and collects each class's own `pytestmark` from its `__dict__`, merging them in MRO order (deduplicating identical Mark objects). Non-class objects keep the existing behavior.",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "index": 1,
+          "caller": {
+            "type": "direct"
+          },
+          "function": {
+            "arguments": "{\"command\": \"cd /testbed && python - <<'EOF'\\np='src/_pytest/mark/structures.py'\\ns=open(p).read()\\nold='''def get_unpacked_marks(obj: object) -> Iterable[Mark]:\\n    \\\"\\\"\\\"Obtain the unpacked marks that are stored on an object.\\\"\\\"\\\"\\n    mark_list = getattr(obj, \\\"pytestmark\\\", [])\\n    if not isinstance(mark_list, list):\\n        mark_list = [mark_list]\\n    return normalize_mark_list(mark_list)\\n'''\\nnew='''def get_unpacked_marks(obj: object) -> Iterable[Mark]:\\n    \\\"\\\"\\\"Obtain the unpacked marks that are stored on an object.\\n\\n    For classes, marks are collected from every class in the MRO, so that\\n    marks from multiple base classes are all retained.\\n    \\\"\\\"\\\"\\n    if isinstance(obj, type):\\n        mark_list: List[Any] = []\\n        for klass in reversed(obj.__mro__):\\n            own = vars(klass).get(\\\"pytestmark\\\", [])\\n            if not isinstance(own, list):\\n                own = [own]\\n            for mark in own:\\n                if mark not in mark_list:\\n                    mark_list.append(mark)\\n    else:\\n        mark_list = getattr(obj, \\\"pytestmark\\\", [])\\n        if not isinstance(mark_list, list):\\n            mark_list = [mark_list]\\n    return normalize_mark_list(mark_list)\\n'''\\nassert old in s\\nopen(p,'w').write(s.replace(old,new))\\nEOF\\nmkdir -p /tmp/t && cat > /tmp/t/test_x.py <<'EOF'\\nimport pytest\\n\\n@pytest.mark.foo\\nclass Foo: pass\\n\\n@pytest.mark.bar\\nclass Bar: pass\\n\\nclass TestDings(Foo, Bar):\\n    def test_dings(self):\\n        pass\\nEOF\\ncd /tmp/t && python -m pytest test_x.py -q --markers >/dev/null; python -c \\\"\\nimport sys; sys.path.insert(0,'/testbed/src')\\nimport pytest\\n\\\" ; cd /tmp/t && python -m pytest test_x.py -q -m \\\"foo and bar\\\" ; python -m pytest test_x.py -q -m \\\"bar\\\" ; cd /testbed && python -m pytest testing/test_mark.py testing/test_mark_expression.py -q 2>&1 | tail -3\"}",
+            "name": "bash"
+          },
+          "id": "toolu_01KX4RLaQyDjZHvKMiyXucRU",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "citations": null,
+        "thinking_blocks": null
+      },
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && python - <<'EOF'\np='src/_pytest/mark/structures.py'\ns=open(p).read()\nold='''def get_unpacked_marks(obj: object) -> Iterable[Mark]:\n    \"\"\"Obtain the unpacked marks that are stored on an object.\"\"\"\n    mark_list = getattr(obj, \"pytestmark\", [])\n    if not isinstance(mark_list, list):\n        mark_list = [mark_list]\n    return normalize_mark_list(mark_list)\n'''\nnew='''def get_unpacked_marks(obj: object) -> Iterable[Mark]:\n    \"\"\"Obtain the unpacked marks that are stored on an object.\n\n    For classes, marks are collected from every class in the MRO, so that\n    marks from multiple base classes are all retained.\n    \"\"\"\n    if isinstance(obj, type):\n        mark_list: List[Any] = []\n        for klass in reversed(obj.__mro__):\n            own = vars(klass).get(\"pytestmark\", [])\n            if not isinstance(own, list):\n                own = [own]\n            for mark in own:\n                if mark not in mark_list:\n                    mark_list.append(mark)\n    else:\n        mark_list = getattr(obj, \"pytestmark\", [])\n        if not isinstance(mark_list, list):\n            mark_list = [mark_list]\n    return normalize_mark_list(mark_list)\n'''\nassert old in s\nopen(p,'w').write(s.replace(old,new))\nEOF\nmkdir -p /tmp/t && cat > /tmp/t/test_x.py <<'EOF'\nimport pytest\n\n@pytest.mark.foo\nclass Foo: pass\n\n@pytest.mark.bar\nclass Bar: pass\n\nclass TestDings(Foo, Bar):\n    def test_dings(self):\n        pass\nEOF\ncd /tmp/t && python -m pytest test_x.py -q --markers >/dev/null; python -c \"\nimport sys; sys.path.insert(0,'/testbed/src')\nimport pytest\n\" ; cd /tmp/t && python -m pytest test_x.py -q -m \"foo and bar\" ; python -m pytest test_x.py -q -m \"bar\" ; cd /testbed && python -m pytest testing/test_mark.py testing/test_mark_expression.py -q 2>&1 | tail -3",
+            "tool_call_id": "toolu_01KX4RLaQyDjZHvKMiyXucRU"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-d96dbcf1-41b1-4203-8606-d4159f13f6b7",
+          "created": 1791751186,
+          "model": "claude-haiku-5-5",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": "I'll change `get_unpacked_marks` so that for classes, it walks the MRO and collects each class's own `pytestmark` from its `__dict__`, merging them in MRO order (deduplicating identical Mark objects). Non-class objects keep the existing behavior.",
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "index": 1,
+                    "caller": {
+                      "type": "direct"
+                    },
+                    "function": {
+                      "arguments": "{\"command\": \"cd /testbed && python - <<'EOF'\\np='src/_pytest/mark/structures.py'\\ns=open(p).read()\\nold='''def get_unpacked_marks(obj: object) -> Iterable[Mark]:\\n    \\\"\\\"\\\"Obtain the unpacked marks that are stored on an object.\\\"\\\"\\\"\\n    mark_list = getattr(obj, \\\"pytestmark\\\", [])\\n    if not isinstance(mark_list, list):\\n        mark_list = [mark_list]\\n    return normalize_mark_list(mark_list)\\n'''\\nnew='''def get_unpacked_marks(obj: object) -> Iterable[Mark]:\\n    \\\"\\\"\\\"Obtain the unpacked marks that are stored on an object.\\n\\n    For classes, marks are collected from every class in the MRO, so that\\n    marks from multiple base classes are all retained.\\n    \\\"\\\"\\\"\\n    if isinstance(obj, type):\\n        mark_list: List[Any] = []\\n        for klass in reversed(obj.__mro__):\\n            own = vars(klass).get(\\\"pytestmark\\\", [])\\n            if not isinstance(own, list):\\n                own = [own]\\n            for mark in own:\\n                if mark not in mark_list:\\n                    mark_list.append(mark)\\n    else:\\n        mark_list = getattr(obj, \\\"pytestmark\\\", [])\\n        if not isinstance(mark_list, list):\\n            mark_list = [mark_list]\\n    return normalize_mark_list(mark_list)\\n'''\\nassert old in s\\nopen(p,'w').write(s.replace(old,new))\\nEOF\\nmkdir -p /tmp/t && cat > /tmp/t/test_x.py <<'EOF'\\nimport pytest\\n\\n@pytest.mark.foo\\nclass Foo: pass\\n\\n@pytest.mark.bar\\nclass Bar: pass\\n\\nclass TestDings(Foo, Bar):\\n    def test_dings(self):\\n        pass\\nEOF\\ncd /tmp/t && python -m pytest test_x.py -q --markers >/dev/null; python -c \\\"\\nimport sys; sys.path.insert(0,'/testbed/src')\\nimport pytest\\n\\\" ; cd /tmp/t && python -m pytest test_x.py -q -m \\\"foo and bar\\\" ; python -m pytest test_x.py -q -m \\\"bar\\\" ; cd /testbed && python -m pytest testing/test_mark.py testing/test_mark_expression.py -q 2>&1 | tail -3\"}",
+                      "name": "bash"
+                    },
+                    "id": "toolu_01KX4RLaQyDjZHvKMiyXucRU",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "citations": null,
+                  "thinking_blocks": null
+                }
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 904,
+            "prompt_tokens": 5292,
+            "total_tokens": 6196,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "text_tokens": 904
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cache_write_tokens": 736,
+              "cached_tokens": 4554,
+              "text_tokens": 2,
+              "image_tokens": null,
+              "video_tokens": null,
+              "cache_creation_tokens": 736,
+              "cache_creation_token_details": {
+                "ephemeral_5m_input_tokens": 736,
+                "ephemeral_1h_input_tokens": 0
+              }
+            },
+            "cache_creation_input_tokens": 736,
+            "cache_read_input_tokens": 4554,
+            "iterations": null,
+            "inference_geo": "global",
+            "speed": null,
+            "service_tier": "standard"
+          }
+        },
+        "cost": 0.00058974,
+        "timestamp": 1791751186.2888584
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\n.                                                                        [100%]\n=============================== warnings summary ===============================\ntest_x.py:3\n  /tmp/t/test_x.py:3: PytestUnknownMarkWarning: Unknown pytest.mark.foo - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html\n    @pytest.mark.foo\n\ntest_x.py:6\n  /tmp/t/test_x.py:6: PytestUnknownMarkWarning: Unknown pytest.mark.bar - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html\n    @pytest.mark.bar\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n1 passed, 2 warnings in 0.01s\n.                                                                        [100%]\n=============================== warnings summary ===============================\ntest_x.py:3\n  /tmp/t/test_x.py:3: PytestUnknownMarkWarning: Unknown pytest.mark.foo - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html\n    @pytest.mark.foo\n\ntest_x.py:6\n  /tmp/t/test_x.py:6: PytestUnknownMarkWarning: Unknown pytest.mark.bar - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html\n    @pytest.mark.bar\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n1 passed, 2 warnings in 0.01s\n........................................................................ [ 83%]\n............x................                                            [100%]\n172 passed, 1 xfailed in 3.09s\n</output>",
+      "extra": {
+        "raw_output": ".                                                                        [100%]\n=============================== warnings summary ===============================\ntest_x.py:3\n  /tmp/t/test_x.py:3: PytestUnknownMarkWarning: Unknown pytest.mark.foo - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html\n    @pytest.mark.foo\n\ntest_x.py:6\n  /tmp/t/test_x.py:6: PytestUnknownMarkWarning: Unknown pytest.mark.bar - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html\n    @pytest.mark.bar\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n1 passed, 2 warnings in 0.01s\n.                                                                        [100%]\n=============================== warnings summary ===============================\ntest_x.py:3\n  /tmp/t/test_x.py:3: PytestUnknownMarkWarning: Unknown pytest.mark.foo - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html\n    @pytest.mark.foo\n\ntest_x.py:6\n  /tmp/t/test_x.py:6: PytestUnknownMarkWarning: Unknown pytest.mark.bar - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html\n    @pytest.mark.bar\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n1 passed, 2 warnings in 0.01s\n........................................................................ [ 83%]\n............x................                                            [100%]\n172 passed, 1 xfailed in 3.09s\n",
+        "returncode": 0,
+        "timestamp": 1791751191.2435694,
+        "exception_info": ""
+      },
+      "tool_call_id": "toolu_01KX4RLaQyDjZHvKMiyXucRU",
+      "role": "tool"
+    },
+    {
+      "content": "Both markers now apply to `TestDings.test_dings` (`-m \"foo and bar\"` selects it), and the existing mark tests pass. Let me add a changelog entry and produce the patch.",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "index": 1,
+          "caller": {
+            "type": "direct"
+          },
+          "function": {
+            "arguments": "{\"command\": \"cd /testbed && echo \\\"Fixed marks being lost when a class inherits from multiple classes that each have marks; marks are now collected across the MRO.\\\" > changelog/7792.bugfix.rst && git diff -- src/_pytest/mark/structures.py > patch.txt && cat patch.txt\"}",
+            "name": "bash"
+          },
+          "id": "toolu_019RmqvYLsy4yz3UCQJjjEpY",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "citations": null,
+        "thinking_blocks": null
+      },
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && echo \"Fixed marks being lost when a class inherits from multiple classes that each have marks; marks are now collected across the MRO.\" > changelog/7792.bugfix.rst && git diff -- src/_pytest/mark/structures.py > patch.txt && cat patch.txt",
+            "tool_call_id": "toolu_019RmqvYLsy4yz3UCQJjjEpY"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-447eab4e-9a3a-4054-8572-df583137e7e8",
+          "created": 1791751192,
+          "model": "claude-haiku-5-5",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": "Both markers now apply to `TestDings.test_dings` (`-m \"foo and bar\"` selects it), and the existing mark tests pass. Let me add a changelog entry and produce the patch.",
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "index": 1,
+                    "caller": {
+                      "type": "direct"
+                    },
+                    "function": {
+                      "arguments": "{\"command\": \"cd /testbed && echo \\\"Fixed marks being lost when a class inherits from multiple classes that each have marks; marks are now collected across the MRO.\\\" > changelog/7792.bugfix.rst && git diff -- src/_pytest/mark/structures.py > patch.txt && cat patch.txt\"}",
+                      "name": "bash"
+                    },
+                    "id": "toolu_019RmqvYLsy4yz3UCQJjjEpY",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "citations": null,
+                  "thinking_blocks": null
+                }
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 207,
+            "prompt_tokens": 6879,
+            "total_tokens": 7086,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "text_tokens": 207
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cache_write_tokens": 1587,
+              "cached_tokens": 5290,
+              "text_tokens": 2,
+              "image_tokens": null,
+              "video_tokens": null,
+              "cache_creation_tokens": 1587,
+              "cache_creation_token_details": {
+                "ephemeral_5m_input_tokens": 1587,
+                "ephemeral_1h_input_tokens": 0
+              }
+            },
+            "cache_creation_input_tokens": 1587,
+            "cache_read_input_tokens": 5290,
+            "iterations": null,
+            "inference_geo": "global",
+            "speed": null,
+            "service_tier": "standard"
+          }
+        },
+        "cost": 0.000354975,
+        "timestamp": 1791751192.6341593
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\ndiff --git a/src/_pytest/mark/structures.py b/src/_pytest/mark/structures.py\nindex 800a25c92..2eea416f9 100644\n--- a/src/_pytest/mark/structures.py\n+++ b/src/_pytest/mark/structures.py\n@@ -356,10 +356,24 @@ class MarkDecorator:\n \n \n def get_unpacked_marks(obj: object) -> Iterable[Mark]:\n-    \"\"\"Obtain the unpacked marks that are stored on an object.\"\"\"\n-    mark_list = getattr(obj, \"pytestmark\", [])\n-    if not isinstance(mark_list, list):\n-        mark_list = [mark_list]\n+    \"\"\"Obtain the unpacked marks that are stored on an object.\n+\n+    For classes, marks are collected from every class in the MRO, so that\n+    marks from multiple base classes are all retained.\n+    \"\"\"\n+    if isinstance(obj, type):\n+        mark_list: List[Any] = []\n+        for klass in reversed(obj.__mro__):\n+            own = vars(klass).get(\"pytestmark\", [])\n+            if not isinstance(own, list):\n+                own = [own]\n+            for mark in own:\n+                if mark not in mark_list:\n+                    mark_list.append(mark)\n+    else:\n+        mark_list = getattr(obj, \"pytestmark\", [])\n+        if not isinstance(mark_list, list):\n+            mark_list = [mark_list]\n     return normalize_mark_list(mark_list)\n \n \n</output>",
+      "extra": {
+        "raw_output": "diff --git a/src/_pytest/mark/structures.py b/src/_pytest/mark/structures.py\nindex 800a25c92..2eea416f9 100644\n--- a/src/_pytest/mark/structures.py\n+++ b/src/_pytest/mark/structures.py\n@@ -356,10 +356,24 @@ class MarkDecorator:\n \n \n def get_unpacked_marks(obj: object) -> Iterable[Mark]:\n-    \"\"\"Obtain the unpacked marks that are stored on an object.\"\"\"\n-    mark_list = getattr(obj, \"pytestmark\", [])\n-    if not isinstance(mark_list, list):\n-        mark_list = [mark_list]\n+    \"\"\"Obtain the unpacked marks that are stored on an object.\n+\n+    For classes, marks are collected from every class in the MRO, so that\n+    marks from multiple base classes are all retained.\n+    \"\"\"\n+    if isinstance(obj, type):\n+        mark_list: List[Any] = []\n+        for klass in reversed(obj.__mro__):\n+            own = vars(klass).get(\"pytestmark\", [])\n+            if not isinstance(own, list):\n+                own = [own]\n+            for mark in own:\n+                if mark not in mark_list:\n+                    mark_list.append(mark)\n+    else:\n+        mark_list = getattr(obj, \"pytestmark\", [])\n+        if not isinstance(mark_list, list):\n+            mark_list = [mark_list]\n     return normalize_mark_list(mark_list)\n \n \n",
+        "returncode": 0,
+        "timestamp": 1791751192.907565,
+        "exception_info": ""
+      },
+      "tool_call_id": "toolu_019RmqvYLsy4yz3UCQJjjEpY",
+      "role": "tool"
+    },
+    {
+      "content": "One concern: `store_mark` calls `get_unpacked_marks(obj)` and then assigns `obj.pytestmark`, so for classes it would now store the merged list onto the class itself \u2014 which is fine, since the merged list is a superset and deduplicated. The patch is written to `patch.txt`.",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "index": 1,
+          "caller": {
+            "type": "direct"
+          },
+          "function": {
+            "arguments": "{\"command\": \"echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat /testbed/patch.txt\"}",
+            "name": "bash"
+          },
+          "id": "toolu_0185ch6EvTCSjXXVfWxPBh7r",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "citations": null,
+        "thinking_blocks": null
+      },
+      "extra": {
+        "actions": [
+          {
+            "command": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat /testbed/patch.txt",
+            "tool_call_id": "toolu_0185ch6EvTCSjXXVfWxPBh7r"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-d2995652-814b-445f-a9b4-54601b8f246e",
+          "created": 1791751194,
+          "model": "claude-haiku-5-5",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": "One concern: `store_mark` calls `get_unpacked_marks(obj)` and then assigns `obj.pytestmark`, so for classes it would now store the merged list onto the class itself \u2014 which is fine, since the merged list is a superset and deduplicated. The patch is written to `patch.txt`.",
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "index": 1,
+                    "caller": {
+                      "type": "direct"
+                    },
+                    "function": {
+                      "arguments": "{\"command\": \"echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat /testbed/patch.txt\"}",
+                      "name": "bash"
+                    },
+                    "id": "toolu_0185ch6EvTCSjXXVfWxPBh7r",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "citations": null,
+                  "thinking_blocks": null
+                }
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 190,
+            "prompt_tokens": 7620,
+            "total_tokens": 7810,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "text_tokens": 190
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cache_write_tokens": 741,
+              "cached_tokens": 6877,
+              "text_tokens": 2,
+              "image_tokens": null,
+              "video_tokens": null,
+              "cache_creation_tokens": 741,
+              "cache_creation_token_details": {
+                "ephemeral_5m_input_tokens": 741,
+                "ephemeral_1h_input_tokens": 0
+              }
+            },
+            "cache_creation_input_tokens": 741,
+            "cache_read_input_tokens": 6877,
+            "iterations": null,
+            "inference_geo": "global",
+            "speed": null,
+            "service_tier": "standard"
+          }
+        },
+        "cost": 0.000256595,
+        "timestamp": 1791751194.1481135
+      }
+    },
+    {
+      "role": "exit",
+      "content": "diff --git a/src/_pytest/mark/structures.py b/src/_pytest/mark/structures.py\nindex 800a25c92..2eea416f9 100644\n--- a/src/_pytest/mark/structures.py\n+++ b/src/_pytest/mark/structures.py\n@@ -356,10 +356,24 @@ class MarkDecorator:\n \n \n def get_unpacked_marks(obj: object) -> Iterable[Mark]:\n-    \"\"\"Obtain the unpacked marks that are stored on an object.\"\"\"\n-    mark_list = getattr(obj, \"pytestmark\", [])\n-    if not isinstance(mark_list, list):\n-        mark_list = [mark_list]\n+    \"\"\"Obtain the unpacked marks that are stored on an object.\n+\n+    For classes, marks are collected from every class in the MRO, so that\n+    marks from multiple base classes are all retained.\n+    \"\"\"\n+    if isinstance(obj, type):\n+        mark_list: List[Any] = []\n+        for klass in reversed(obj.__mro__):\n+            own = vars(klass).get(\"pytestmark\", [])\n+            if not isinstance(own, list):\n+                own = [own]\n+            for mark in own:\n+                if mark not in mark_list:\n+                    mark_list.append(mark)\n+    else:\n+        mark_list = getattr(obj, \"pytestmark\", [])\n+        if not isinstance(mark_list, list):\n+            mark_list = [mark_list]\n     return normalize_mark_list(mark_list)\n \n \n",
+      "extra": {
+        "exit_status": "Submitted",
+        "submission": "diff --git a/src/_pytest/mark/structures.py b/src/_pytest/mark/structures.py\nindex 800a25c92..2eea416f9 100644\n--- a/src/_pytest/mark/structures.py\n+++ b/src/_pytest/mark/structures.py\n@@ -356,10 +356,24 @@ class MarkDecorator:\n \n \n def get_unpacked_marks(obj: object) -> Iterable[Mark]:\n-    \"\"\"Obtain the unpacked marks that are stored on an object.\"\"\"\n-    mark_list = getattr(obj, \"pytestmark\", [])\n-    if not isinstance(mark_list, list):\n-        mark_list = [mark_list]\n+    \"\"\"Obtain the unpacked marks that are stored on an object.\n+\n+    For classes, marks are collected from every class in the MRO, so that\n+    marks from multiple base classes are all retained.\n+    \"\"\"\n+    if isinstance(obj, type):\n+        mark_list: List[Any] = []\n+        for klass in reversed(obj.__mro__):\n+            own = vars(klass).get(\"pytestmark\", [])\n+            if not isinstance(own, list):\n+                own = [own]\n+            for mark in own:\n+                if mark not in mark_list:\n+                    mark_list.append(mark)\n+    else:\n+        mark_list = getattr(obj, \"pytestmark\", [])\n+        if not isinstance(mark_list, list):\n+            mark_list = [mark_list]\n     return normalize_mark_list(mark_list)\n \n \n"
+      }
+    }
+  ],
+  "trajectory_format": "mini-swe-agent-1.1",
+  "instance_id": "pytest-dev__pytest-10356"
+}

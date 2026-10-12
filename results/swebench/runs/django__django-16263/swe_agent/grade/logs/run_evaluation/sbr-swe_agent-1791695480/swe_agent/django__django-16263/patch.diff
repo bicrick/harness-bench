@@ -1,0 +1,131 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..33d698c088 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -549,10 +549,125 @@ class Query(BaseExpression):
+         """
+         Perform a COUNT() query using the current filter constraints.
+         """
+-        obj = self.clone()
++        obj = self.without_unused_annotations()
+         obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+         return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++    def without_unused_annotations(self):
++        """
++        Return a clone of this query for counting purposes, but without the
++        annotations that are not referenced by the WHERE clause, the ordering,
++        or any other kept annotation.
++
++        Only aggregate annotations are stripped: they collapse rows through
++        GROUP BY, so they can be removed without changing the row count. Other
++        annotations can multiply rows through joins, and are kept. An aggregate
++        is also only stripped if doing so leaves no joins behind that could
++        multiply rows, as the GROUP BY would no longer collapse them. Otherwise
++        the clone is returned with its annotations intact. Queries using
++        distinct, slicing or set operations are not changed, as there the
++        annotations can change which rows are kept.
++        """
++        if (
++            not self.annotations
++            or self.distinct
++            or self.distinct_fields
++            or self.is_sliced
++            or self.combinator
++        ):
++            return self.clone()
++
++        used = self._referenced_annotations()
++        unused = [
++            alias
++            for alias, annotation in self.annotations.items()
++            if alias not in used and annotation.contains_aggregate
++        ]
++        if not unused:
++            return self.clone()
++        # An explicit GROUP BY (e.g. from values().annotate()) or columns
++        # grouped by the remaining annotations define the rows that are
++        # counted, so the aggregates cannot be stripped without changing it.
++        if isinstance(self.group_by, tuple) or any(
++            annotation.get_group_by_cols()
++            for alias, annotation in self.annotations.items()
++            if alias not in unused
++        ):
++            return self.clone()
++
++        obj = self.clone()
++        for alias in unused:
++            annotation = obj.annotations.pop(alias)
++            if obj.annotation_select_mask is not None:
++                obj.annotation_select_mask.discard(alias)
++            # Release the joins required by the annotation.
++            for col_alias in obj._gen_col_aliases([annotation]):
++                join_alias = col_alias
++                while isinstance(obj.alias_map.get(join_alias), Join):
++                    obj.unref_alias(join_alias)
++                    join_alias = obj.alias_map[join_alias].parent_alias
++        # If any join is still needed (e.g. by a WHERE clause, or by a
++        # subquery annotation that was not stripped), the GROUP BY of the
++        # annotations would no longer collapse the rows it produces, so keep
++        # the annotations.
++        if any(
++            obj.alias_refcount[alias]
++            for alias, join in obj.alias_map.items()
++            if isinstance(join, Join)
++        ):
++            return self.clone()
++        return obj
++
++    def _referenced_annotations(self):
++        """
++        Return the set of annotation aliases referenced, directly or
++        indirectly, by the WHERE clause, the ordering, or the annotations that
++        are not aggregates (which are always kept).
++        """
++        annotations = self.annotations
++        used = set()
++        stack = [self.where]
++        stack.extend(
++            annotation
++            for annotation in annotations.values()
++            if not annotation.contains_aggregate
++        )
++        for item in self.order_by:
++            if isinstance(item, str):
++                name = item[1:] if item.startswith("-") else item
++                if name in annotations:
++                    used.add(name)
++                    stack.append(annotations[name])
++            else:
++                stack.append(item)
++
++        # Walk the expression trees to find all annotation references. This
++        # follows subqueries too, as OuterRef() can reference an outer
++        # annotation from within an inner WHERE clause.
++        seen = set()
++        while stack:
++            node = stack.pop()
++            if node is None or id(node) in seen:
++                continue
++            seen.add(id(node))
++            if isinstance(node, Query):
++                stack.append(node.where)
++                stack.extend(node.order_by)
++                stack.extend(node.annotations.values())
++                continue
++            if isinstance(node, Ref) and node.refs in annotations:
++                if node.refs not in used:
++                    used.add(node.refs)
++                    stack.append(annotations[node.refs])
++            for alias, annotation in annotations.items():
++                if alias not in used and (node is annotation or node == annotation):
++                    used.add(alias)
++                    stack.append(annotation)
++            get_source_expressions = getattr(node, "get_source_expressions", None)
++            if get_source_expressions is not None:
++                stack.extend(get_source_expressions())
++        return used
++
+     def has_filters(self):
+         return self.where
+ 

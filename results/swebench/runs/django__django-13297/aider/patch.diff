@@ -1,0 +1,50 @@
+diff --git a/django/db/backends/sqlite3/base.py b/django/db/backends/sqlite3/base.py
+index 8a105d4f35..5aed3beea9 100644
+--- a/django/db/backends/sqlite3/base.py
++++ b/django/db/backends/sqlite3/base.py
+@@ -23,6 +23,7 @@ from django.utils import timezone
+ from django.utils.asyncio import async_unsafe
+ from django.utils.dateparse import parse_datetime, parse_time
+ from django.utils.duration import duration_microseconds
++from django.utils.functional import LazyObject, empty
+ from django.utils.regex_helper import _lazy_re_compile
+ from django.utils.version import PY38
+ 
+@@ -399,6 +400,24 @@ class DatabaseWrapper(BaseDatabaseWrapper):
+ FORMAT_QMARK_REGEX = _lazy_re_compile(r'(?<!%)%s')
+ 
+ 
++def _unwrap_lazy_param(value):
++    """
++    Resolve LazyObject wrappers (e.g. SimpleLazyObject) to the underlying
++    value, since the sqlite3 driver can't bind them as parameters.
++    """
++    while isinstance(value, LazyObject):
++        if value._wrapped is empty:
++            value._setup()
++        value = value._wrapped
++    return value
++
++
++def _unwrap_params(params):
++    if isinstance(params, dict):
++        return {key: _unwrap_lazy_param(value) for key, value in params.items()}
++    return tuple(_unwrap_lazy_param(value) for value in params)
++
++
+ class SQLiteCursorWrapper(Database.Cursor):
+     """
+     Django uses "format" style placeholders, but pysqlite2 uses "qmark" style.
+@@ -409,10 +428,11 @@ class SQLiteCursorWrapper(Database.Cursor):
+         if params is None:
+             return Database.Cursor.execute(self, query)
+         query = self.convert_query(query)
+-        return Database.Cursor.execute(self, query, params)
++        return Database.Cursor.execute(self, query, _unwrap_params(params))
+ 
+     def executemany(self, query, param_list):
+         query = self.convert_query(query)
++        param_list = [_unwrap_params(params) for params in param_list]
+         return Database.Cursor.executemany(self, query, param_list)
+ 
+     def convert_query(self, query):

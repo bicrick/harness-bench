@@ -1,0 +1,12 @@
+Dataset.quantile already handles `keep_attrs`; let me see the DataArray and Variable paths.
+The Dataset path drops variable-level attrs because `Variable.quantile` has no `keep_attrs` parameter. I'll add it there and pass it through from Dataset, following the pattern used by other reductions in `variable.py`.
+In `Dataset.quantile`, `keep_attrs` is resolved after the loop, so I need to move that resolution before the loop.
+`DataArray.quantile(..., keep_attrs=True)` now keeps the attributes. The issue's example returns `OrderedDict([('units', 'K')])`, and the default (no `keep_attrs`) still returns empty attrs.
+
+The cause was that `Variable.quantile` had no `keep_attrs` parameter and always built the result without attrs. `DataArray` goes through `Dataset.quantile`, which only passed attrs on the dataset level, so per-variable attrs were lost.
+
+Changes:
+- **`xarray/core/variable.py`**: `Variable.quantile` accepts `keep_attrs` (defaulting to the global option, as other reductions do) and passes the attrs to the result.
+- **`xarray/core/dataset.py`**: `Dataset.quantile` resolves `keep_attrs` before the loop and forwards it to each `var.quantile(...)` call.
+
+I ran the existing quantile tests in `test_dataarray.py`, `test_dataset.py` and `test_variable.py` (4 passed). I did not add tests, per your instructions.

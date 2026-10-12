@@ -1,0 +1,9 @@
+The `Exists` expression raises `EmptyResultSet` for an empty subquery, and the WHERE node then drops the whole negated clause. I'll make a negated `Exists` over an empty queryset compile to a true constant instead.
+The negated case now produces `WHERE (True AND name = 'test')`. The non-negated case still raises `EmptyResultSet`, which is correct. Next I'll run the related test suites.
+Fixed in `django/db/models/expressions.py`, in `Exists.as_sql`.
+
+The cause: an empty subquery makes `Exists.as_sql` raise `EmptyResultSet`. The WHERE node then drops the whole clause, including the other filters, even though `NOT EXISTS(empty)` is always true.
+
+The fix catches `EmptyResultSet` when the `Exists` is negated and returns a constant true instead. It emits `'1=1'` on backends that don't support boolean expressions in the SELECT clause, and `Value(True)` otherwise. Non-negated `Exists` over an empty queryset still raises, so the clause is correctly treated as matching nothing.
+
+With the reproduction from the issue, `filter(~Exists(M.objects.none()), name='test')` now compiles to `WHERE (True AND "auth_m"."name" = test)`. The `expressions`, `queries`, `expressions_case` and `lookup` test suites pass (770 tests). I did not add tests, as requested.

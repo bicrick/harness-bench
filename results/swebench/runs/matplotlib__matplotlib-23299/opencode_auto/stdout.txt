@@ -1,0 +1,15 @@
+The root cause is that `rcParams['backend']` resolves the auto sentinel lazily, and that resolution calls `switch_backend`, which runs `close("all")`. I'll skip the close when resolving the sentinel, since no figures can exist before a backend is resolved except in this rc_context case where they should be kept.
+Now the recursive calls inside the sentinel branch should use the non-closing helper.
+Three failures. I'll check whether they predate my change.
+Fixed in `lib/matplotlib/pyplot.py`.
+
+**Cause:** The backend is resolved lazily. When `rcParams['backend']` is still the auto-sentinel, reading it (as `get_backend()` does) calls `switch_backend`, which ran `close("all")` before resolving. Figures created under `rc_context` don't trigger resolution, so they were closed on the first `get_backend()` call.
+
+**Change:**
+- `switch_backend` now only calls `close("all")` for explicit backend switches, not when resolving the auto sentinel.
+- The actual switching logic moved into a private `_switch_backend`. The sentinel candidate loop calls that helper instead of the public function, so it no longer closes figures.
+
+**Verification:**
+- The issue's reproduction script now passes.
+- `Gcf.figs` keeps its figure after `get_backend()`.
+- `test_pyplot.py` and `test_rcparams.py` have 3 failing tests (`test_rcparams_update`, `test_rcparams_init`, and one more). The same 3 fail without my change, so they are pre-existing and unrelated to this fix.

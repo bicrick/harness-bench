@@ -1,0 +1,20 @@
+I'll look at the relevant code first.
+The issue is that for permutation groups, `r[i]` is a generator or its inverse, and `gens.index` fails for inverses. The simplest robust fix is to map each domain generator's symbol-level element to its image directly, handling inverses by using `images[g]**-1`. I'll rewrite `_image` to work with the relator's array form directly: for each letter (generator index, power), look up the generator in the domain's generator list and the image for it.
+
+For a PermutationGroup, `r` is a word over `domain.generators` (as group elements), so I'll compute the image by iterating over `r.array_form`, which gives `(perm, exponent)` pairs in terms of the generator elements.
+
+Let me check how relators are represented for PermutationGroups in this version.
+For permutation groups the relators are words over the free generators `x_0, x_1`, and `presentation().generators` are free-group symbols. The `gens` passed in are permutation generators, so the mapping from free symbols to permutation generators is `domain.generators[k]` ↔ `presentation.generators[k]`. The existing code tries to map `r[i]` (a free symbol) through `gens`, which is wrong. The cleanest fix is to build the map from the presentation's free generators to the images directly.
+Wait — for a free group `domain`, `images` is keyed by free-group generators, and `sym_images` built from `gens` is fine. But for `FpGroup` with `relators`, `domain.generators` are the free symbols too, which matches. Let me verify the change and run the existing homomorphism tests.
+The array form for a free group word yields `(sym, power)` where `sym` may be an inverse symbol with a negative power already, so `sym` is `x_1` with a negative `power`, and `sym**-1` isn't needed in that way. Let me check the array form output and the exact keys.
+The array form gives `(symbol, signed_power)`, with negative powers for inverses. So the symbol is always a positive generator, and the power sign handles inversion. Since `x**-1**p` is handled by `**power` with negative `power`, I just need the generator symbol lookup.
+The `sym_images` keys are the presentation generators, but `gens` here is a tuple of free symbols from `pres.generators`, and `images` is keyed by permutation generators. The key problem is `sym_images` construction: I used `gens[k]` on the free-group presentation, which should be fine, so the KeyError means `sym` in the array form is not the same object as `gens[k]`. Let me check the types.
+The array form yields raw `Symbol`s, while presentation generators are `FreeGroupElement`s. I'll key by the symbol, using `g.array_form[0][0]` to extract the symbol from each generator.
+The fix works: the identity homomorphism is accepted and a bad one is rejected. pytest isn't installed, so I'll run the test module through sympy's own runner.
+The issue is fixed. `homomorphism(D3, D3, D3.generators, D3.generators)` now succeeds, and a non-homomorphic image set is still rejected.
+
+**Root cause:** `_check_homomorphism` looked up each relator letter in the permutation `gens` list via `gens.index(r[i])`. The relator letters are free-group symbols, and inverted letters aren't in that list, so the lookup failed.
+
+**Fix** (`sympy/combinatorics/homomorphisms.py`): I simplified `_check_homomorphism`. It now builds a direct map from each presentation generator symbol (via `array_form[0][0]`) to its image, using positional correspondence with `domain.generators` for permutation groups. `_image` then walks the relator's `array_form` as `(symbol, signed_power)` pairs and multiplies `image**power`. This removes the index-tracking loop and handles inverses through the signed power.
+
+All existing tests in `sympy/combinatorics/tests/test_homomorphisms.py` pass when run directly, since pytest isn't installed in this environment. I did not add or modify any tests.

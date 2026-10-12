@@ -1,0 +1,298 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m✱ [0mGrep "def infer_node|def get_annotation|annotation"[90m in pylint/pyreverse · 0 matches[0m
+[0m
+[0m$ [0mcd /testbed && git status --short | head; ls; grep -rn "def infer_node\|def get_annotation\|annotation" --include=*.py . | grep -i "pyreverse\|diagrams\|inspector" | head -30
+CONTRIBUTORS.txt
+ChangeLog
+Dockerfile
+LICENSE
+MANIFEST.in
+README.rst
+doc
+elisp
+examples
+pylint
+pylint.egg-info
+pylintrc
+requirements_test.txt
+requirements_test_min.txt
+requirements_test_pre_commit.txt
+script
+setup.cfg
+setup.py
+tbump.toml
+tests
+tox.ini
+[0m
+[0m$ [0mcd /testbed && ls pylint/pyreverse; grep -n "infer_node\|def \|AssignAttr" pylint/pyreverse/inspector.py | head -80
+__init__.py
+diadefslib.py
+diagrams.py
+inspector.py
+main.py
+utils.py
+vcgutils.py
+writer.py
+26:def _iface_hdlr(_):
+31:def _astroid_wrapper(func, modname):
+42:def interfaces(node, herited=True, handler_func=_iface_hdlr):
+66:    def __init__(self, start_value=0):
+69:    def init_counter(self, start_value=0):
+73:    def generate_id(self):
+102:    def __init__(self, project, inherited_interfaces=0, tag=False):
+112:    def visit_project(self, node):
+122:    def visit_package(self, node):
+132:    def visit_module(self, node):
+146:    def visit_classdef(self, node):
+175:    def visit_functiondef(self, node):
+192:    def visit_assignname(self, node):
+227:    def handle_assignattr_type(node, parent):
+239:    def visit_import(self, node):
+249:    def visit_importfrom(self, node):
+273:    def compute_module(self, context_name, mod_path):
+282:    def _imported_module(self, node, mod_path, relative):
+300:    def __init__(self, name=""):
+311:    def add_module(self, node):
+315:    def get_module(self, name):
+318:    def get_children(self):
+321:    def __repr__(self):
+325:def project_from_files(
+[0m
+[0m$ [0mcd /testbed && sed -n 175,240p pylint/pyreverse/inspector.py
+def visit_functiondef(self, node):
+        """visit an astroid.Function node
+
+        * set the locals_type mapping
+        * optionally tag the node with a unique id
+        """
+        if hasattr(node, "locals_type"):
+            return
+        node.locals_type = collections.defaultdict(list)
+        if self.tag:
+            node.uid = self.generate_id()
+
+    link_project = visit_project
+    link_module = visit_module
+    link_class = visit_classdef
+    link_function = visit_functiondef
+
+    def visit_assignname(self, node):
+        """visit an astroid.AssignName node
+
+        handle locals_type
+        """
+        # avoid double parsing done by different Linkers.visit
+        # running over the same project:
+        if hasattr(node, "_handled"):
+            return
+        node._handled = True
+        if node.name in node.frame():
+            frame = node.frame()
+        else:
+            # the name has been defined as 'global' in the frame and belongs
+            # there.
+            frame = node.root()
+        try:
+            if not hasattr(frame, "locals_type"):
+                # If the frame doesn't have a locals_type yet,
+                # it means it wasn't yet visited. Visit it now
+                # to add what's missing from it.
+                if isinstance(frame, astroid.ClassDef):
+                    self.visit_classdef(frame)
+                elif isinstance(frame, astroid.FunctionDef):
+                    self.visit_functiondef(frame)
+                else:
+                    self.visit_module(frame)
+
+            current = frame.locals_type[node.name]
+            values = set(node.infer())
+            frame.locals_type[node.name] = list(set(current) | values)
+        except astroid.InferenceError:
+            pass
+
+    @staticmethod
+    def handle_assignattr_type(node, parent):
+        """handle an astroid.assignattr node
+
+        handle instance_attrs_type
+        """
+        try:
+            values = set(node.infer())
+            current = set(parent.instance_attrs_type[node.attrname])
+            parent.instance_attrs_type[node.attrname] = list(current | values)
+        except astroid.InferenceError:
+            pass
+
+    def visit_import(self, node):
+        """visit an astroid.Import node
+[0m
+[0m$ [0mcd /testbed && grep -n "handle_assignattr_type\|visit_assignattr" -A8 pylint/pyreverse/inspector.py | sed -n 1,40p; grep -n "instance_attrs_type\|locals_type" pylint/pyreverse/*.py | grep -v inspector.py; python -c "import astroid;print(astroid.__version__)"
+168:                    self.handle_assignattr_type(assignattr, node)
+169-        # resolve implemented interface
+170-        try:
+171-            node.implements = list(interfaces(node, self.inherited_interfaces))
+172-        except astroid.InferenceError:
+173-            node.implements = ()
+174-
+175-    def visit_functiondef(self, node):
+176-        """visit an astroid.Function node
+--
+227:    def handle_assignattr_type(node, parent):
+228-        """handle an astroid.assignattr node
+229-
+230-        handle instance_attrs_type
+231-        """
+232-        try:
+233-            values = set(node.infer())
+234-            current = set(parent.instance_attrs_type[node.attrname])
+235-            parent.instance_attrs_type[node.attrname] = list(current | values)
+pylint/pyreverse/diadefslib.py:101:        for association_nodes in list(klass_node.instance_attrs_type.values()) + list(
+pylint/pyreverse/diadefslib.py:102:            klass_node.locals_type.values()
+pylint/pyreverse/diagrams.py:88:            list(node.instance_attrs_type.items())
+pylint/pyreverse/diagrams.py:89:            + list(node.locals_type.items())
+pylint/pyreverse/diagrams.py:183:            for name, values in list(node.instance_attrs_type.items()) + list(
+pylint/pyreverse/diagrams.py:184:                node.locals_type.items()
+2.6.5
+[0m
+[0m← [0mEdit pylint/pyreverse/inspector.py
+Index: /testbed/pylint/pyreverse/inspector.py
+===================================================================
+--- /testbed/pylint/pyreverse/inspector.py
++++ /testbed/pylint/pyreverse/inspector.py
+@@ -230,8 +230,11 @@
+ handle instance_attrs_type
+ """
+ try:
+     values = set(node.infer())
++    annotated = _annotated_type_of_assigned_value(node)
++    if annotated is not None:
++        values = {annotated}
+     current = set(parent.instance_attrs_type[node.attrname])
+     parent.instance_attrs_type[node.attrname] = list(current | values)
+ except astroid.InferenceError:
+     pass
+
+[0m
+[0m$ [0mcd /testbed && sed -n 1,45p pylint/pyreverse/inspector.py
+# Copyright (c) 2015-2020 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2017 Łukasz Rogalski <rogalski.91@gmail.com>
+# Copyright (c) 2018 ssolanki <sushobhitsolanki@gmail.com>
+# Copyright (c) 2018 Ville Skyttä <ville.skytta@iki.fi>
+# Copyright (c) 2019-2021 Pierre Sassoulas <pierre.sassoulas@gmail.com>
+# Copyright (c) 2019 Hugo van Kemenade <hugovk@users.noreply.github.com>
+# Copyright (c) 2020 hippo91 <guillaume.peillex@gmail.com>
+# Copyright (c) 2020 Anthony Sottile <asottile@umich.edu>
+
+# Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+# For details: https://github.com/PyCQA/pylint/blob/master/LICENSE
+
+"""
+Visitor doing some postprocessing on the astroid tree.
+Try to resolve definitions (namespace) dictionary, relationship...
+"""
+import collections
+import os
+import traceback
+
+import astroid
+
+from pylint.pyreverse import utils
+
+
+def _iface_hdlr(_):
+    """Handler used by interfaces to handle suspicious interface nodes."""
+    return True
+
+
+def _astroid_wrapper(func, modname):
+    print("parsing %s..." % modname)
+    try:
+        return func(modname)
+    except astroid.exceptions.AstroidBuildingException as exc:
+        print(exc)
+    except Exception:  # pylint: disable=broad-except
+        traceback.print_exc()
+    return None
+
+
+def interfaces(node, herited=True, handler_func=_iface_hdlr):
+    """Return an iterator on interfaces implemented by the given class node."""
+    try:
+        implements = astroid.bases.Instance(node).getattr("__implements__")[0]
+[0m
+[0m← [0mEdit pylint/pyreverse/inspector.py
+Index: /testbed/pylint/pyreverse/inspector.py
+===================================================================
+--- /testbed/pylint/pyreverse/inspector.py
++++ /testbed/pylint/pyreverse/inspector.py
+@@ -27,8 +27,38 @@
+     """Handler used by interfaces to handle suspicious interface nodes."""
+     return True
+ 
+ 
++def _annotated_type_of_assigned_value(assignattr):
++    """Return the type given by a PEP 484 annotation of the value assigned to
++    an attribute, if the value is a function argument annotated with a type.
++
++    Return None when no usable annotation is found.
++    """
++    assign = assignattr.parent
++    value = getattr(assign, "value", None)
++    if not isinstance(value, astroid.Name):
++        return None
++    frame = assignattr.frame()
++    if not isinstance(frame, astroid.FunctionDef):
++        return None
++    args = frame.args
++    if args is None or args.args is None:
++        return None
++    for arg_node, annotation in zip(args.args, args.annotations or []):
++        if arg_node.name != value.name or annotation is None:
++            continue
++        try:
++            inferred = list(annotation.infer())
++        except astroid.InferenceError:
++            return None
++        for inferred_node in inferred:
++            if isinstance(inferred_node, astroid.ClassDef):
++                return inferred_node
++        return None
++    return None
++
++
+ def _astroid_wrapper(func, modname):
+     print("parsing %s..." % modname)
+     try:
+         return func(modname)
+
+[0m
+[0m$ [0mcd /tmp && mkdir -p opencode && cat > opencode/test_mod.py <<'EOF'
+class C(object):
+    def __init__(self, a: str = None):
+        self.a = a
+EOF
+cd /testbed && python -c "
+import astroid
+from pylint.pyreverse.inspector import project_from_files, Linker
+from pylint.pyreverse.inspector import Linker
+p = astroid.MANAGER.ast_from_file('/tmp/opencode/test_mod.py', 'test_mod')
+from pylint.pyreverse.inspector import Linker
+from pylint.pyreverse.utils import get_visibility
+proj = project_from_files(['/tmp/opencode/test_mod.py'])
+Linker(proj).visit(proj)
+for m in proj.get_children():
+    for c in m.get_children():
+        print(c.name, c.instance_attrs_type)
+"
+parsing /tmp/opencode/test_mod.py...
+C defaultdict(<class 'list'>, {'a': [<ClassDef.str l.0 at 0x7f2d64369820>]})
+[0m
+[0m$ [0mcd /testbed && python -m pytest tests/unittest_pyreverse_inspector.py tests/unittest_pyreverse_writer.py tests/test_functional.py -q -k "pyreverse or inspector or writer" 2>&1 | tail -5; rm -rf /tmp/opencode
+/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/astroid/interpreter/_import/util.py:6: DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html
+    import pkg_resources
+
+-- Docs: https://docs.pytest.org/en/stable/warnings.html
+14 passed, 513 deselected, 1 warning in 0.22s
+[0m

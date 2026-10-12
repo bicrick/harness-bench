@@ -1,0 +1,52 @@
+diff --git a/sympy/core/power.py b/sympy/core/power.py
+index 02ec6480c..58848391d 100644
+--- a/sympy/core/power.py
++++ b/sympy/core/power.py
+@@ -811,6 +811,15 @@ def _eval_transpose(self):
+             if expanded != self:
+                 return transpose(expanded)
+ 
++    def _eval_expand_tensorproduct(self, **hints):
++        # Let the base evaluate its own power (e.g. TensorProduct) if it can.
++        base_power = getattr(self.base, '_eval_power_tensorproduct', None)
++        if base_power is not None:
++            result = base_power(self.exp)
++            if result is not None:
++                return result
++        return self
++
+     def _eval_expand_power_exp(self, **hints):
+         """a**(n+m) -> a**n*a**m"""
+         b = self.base
+diff --git a/sympy/physics/quantum/tensorproduct.py b/sympy/physics/quantum/tensorproduct.py
+index 9dd10d219..abb3f37e2 100644
+--- a/sympy/physics/quantum/tensorproduct.py
++++ b/sympy/physics/quantum/tensorproduct.py
+@@ -238,6 +238,16 @@ def _label_wrap(label, nlabels):
+     def doit(self, **hints):
+         return TensorProduct(*[item.doit(**hints) for item in self.args])
+ 
++    def _eval_power_tensorproduct(self, exp):
++        """Evaluate ``self**exp`` by raising each factor to ``exp``.
++
++        Only integer exponents are handled, since ``(A x B)**n == A**n x B**n``
++        does not hold in general for other exponents. Returns None otherwise.
++        """
++        if not exp.is_Integer:
++            return None
++        return TensorProduct(*[arg**exp for arg in self.args])
++
+     def _eval_expand_tensorproduct(self, **hints):
+         """Distribute TensorProducts across addition."""
+         args = self.args
+@@ -382,6 +392,10 @@ def tensor_product_simp(e, **hints):
+     if isinstance(e, Add):
+         return Add(*[tensor_product_simp(arg) for arg in e.args])
+     elif isinstance(e, Pow):
++        if isinstance(e.base, TensorProduct):
++            result = e.base._eval_power_tensorproduct(e.exp)
++            if result is not None:
++                return result
+         return tensor_product_simp(e.base) ** e.exp
+     elif isinstance(e, Mul):
+         return tensor_product_simp_Mul(e)

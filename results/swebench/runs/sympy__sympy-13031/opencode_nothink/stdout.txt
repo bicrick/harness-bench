@@ -1,0 +1,33 @@
+I'll look at the hstack/vstack implementation.
+The generic path uses `row_join`, which in the dense/sparse implementations drops zero-row blocks incorrectly. Let me check the row_join implementations.
+The problem is in `row_join`/`col_join`: when `self` has zero columns but a row count that differs from `other`, it replaces `self` with an empty block, which discards the zero-width block's contribution. The fix is to skip the special case when `self` is an empty matrix whose row count mismatches, but instead allow stacking whenever either side is empty in the stacking dimension. The cleanest fix is to make `hstack`/`vstack` handle empty matrices explicitly by skipping them when the shapes are incompatible, while keeping their column/row counts.
+
+I'll rewrite `hstack` and `vstack` to accumulate shapes directly for the zero-size case.
+Wait — replacing mismatched empty operands with zero-filled matrices would wrongly add columns/rows. Let me reconsider: a `(0, c)` operand in an hstack with `rows=0` already matches, and a `(r, 0)` operand with `r != rows` should be dropped (contributes nothing). I'll rewrite both to simply drop the zero-width/zero-height operands that mismatch, which is what the issue expects.
+Let me verify the logic against the issue cases and the existing tests.
+The issue cases now give the expected results: `(0, 6)` and `(1, 6)`. Pytest isn't installed, so I'll run the matrix tests with sympy's own runner.
+Two failures and two exceptions need checking. Let me see which tests they are and whether they're pre-existing.
+The `test_refine` exceptions are pre-existing. My change broke `test_hstack`/`test_vstack`: they expect a `ShapeError` for mismatched non-empty shapes, but my filter silently drops mismatched operands. I need to keep raising for real mismatches. I'll rewrite the logic so only genuinely empty operands are skipped and everything else goes through `row_join`/`col_join` (which raise).
+That's getting convoluted. Let me simplify to a clean, correct rule: the original `row_join` already handles zero-column `self` with mismatched rows by reshaping it. The real bug is that `reduce` builds the result left-to-right, so a zero-column first operand gets its rows replaced by the next operand's rows, which is fine, but a zero-row operand followed by a zero-column one breaks. The minimal correct fix is to make `row_join` keep column counts when `self` is zero-row. I'll revert my `hstack`/`vstack` changes and fix this in `row_join`/`col_join` instead.
+Now let me reason about the bug precisely. In `row_join`, `if self.cols == 0 and self.rows != other.rows` rebuilds `self` as `(other.rows, 0)`. For `hstack(M(0,0), M(0,1), ...)`: `M(0,0).row_join(M(0,1))` has rows 0 == 0, so it goes to `_eval_row_join` → `(0,1)`. Then `(0,1).row_join(M(0,2))` → `(0,3)`, and so on, giving `(0,6)`. So the failure must be elsewhere. Let me check the actual `_eval_row_join` implementations.
+Row-join by itself is correct, and the issue reproduces only with the original code path. So `hstack` on the original code gives `(0,6)` here... Let me run the exact issue snippet on the reverted code.
+The current code returns `(0, 6)` for the issue's example, so the reported behavior doesn't reproduce here. The bug is likely in the sparse or immutable `row_join`, or in `_eval_row_join` for a different type. Let me check the sparse implementation, since the issue's `(0,0)` case hits the `self.cols == 0` branch.
+The issue example with the reverted code returns the expected `(0,6)`, but the issue reports `(0,3)` in sympy 1.1. Let me check the git history and the `vstack`/`hstack` usage: the issue's text may describe the state after a change to `row_join`'s zero-column rule (#10770). Let me inspect the branch that handles `self.cols == 0` more carefully with a zero-row, zero-col case as the *first* arg, and the `(1,0)` case from the second example.
+The bug is real in the chained form: `M(0,0).row_join(M(0,1)).row_join(M(0,2))` gives `(0,3)`, which is wrong. The `hstack` result depends on the path. But the direct call on the issue's exact input gave `(0,6)` earlier. The difference: `reduce` passes `M(0,0)` as `self`, and the first `row_join` produces `(0,1)`, then `(0,1).row_join(M(0,2))`. That should be `(0,3)`, so `(0,3)` is the intermediate — meaning the issue's `(0,3)` likely arises when `M(0,0)` is `self` with `cols==0` and `rows == other.rows`. My earlier check of this chain printed `(0,3)` for three args, which is correct for 3 args (0+1+2). The true failure case is the 4-arg chain. Let me test the exact issue example once more and the 4-arg sum directly.
+Every step is correct when run this way. So the code path that produces `(0,3)` in the issue must be the `_eval_row_join` for an `ImmutableMatrix`/`MutableDenseMatrix` that *modifies* `self` in place or caches shape. Since the repo's current code yields the correct `(0,6)` for the issue example, let me check whether the issue is already fixed by a different path: running the exact issue snippets with the exact `M1 = sy.Matrix.zeros(0, 0)` names once more, plus the `hstack` variant that the issue used in sympy 1.1.
+The repository already produces the correct output for every case in the issue, and my investigation found no code path that yields `(0, 3)` here. The chained `row_join` and the `reduce`-based `hstack` both give the right answer. I also verified the `row_join` special-case (#10770) is intact.
+
+Since the code is now back to the original (I reverted my edits), let me confirm the working tree is clean and the matrix tests pass on this unmodified code.
+I could not reproduce the reported bug, so I made no change to the repository.
+
+On the current checkout, the issue's examples already give the expected results:
+
+- `hstack` of `zeros(0,0), zeros(0,1), zeros(0,2), zeros(0,3)` returns `(0, 6)`.
+- `hstack` of the `zeros(1,·)` versions returns `(1, 6)`.
+- The same holds for `vstack`, `ImmutableMatrix`, and `SparseMatrix`.
+
+The matrix test suites pass (240 passed). The 2 exceptions are in `test_refine`, which also fail on the untouched checkout.
+
+I did try two fixes in `hstack`/`vstack` and reverted both. The first broke the existing `test_hstack`/`test_vstack` tests, which expect a `ShapeError` for genuinely mismatched shapes. The `row_join` and `col_join` special cases (issue #10770) already handle the empty-matrix behavior the issue describes.
+
+If you're seeing `(0, 3)` on your side, please share the exact sympy commit or version and the full traceback, since the behavior here is correct.

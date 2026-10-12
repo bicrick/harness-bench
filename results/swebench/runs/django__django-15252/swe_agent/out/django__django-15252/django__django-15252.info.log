@@ -1,0 +1,1249 @@
+2026-10-11 05:57:38,040 - INFO - rex-deploy - Building image docker.io/swebench/sweb.eval.x86_64.django_1776_django-15252:latest to install a standalone python to /root. This might take a while (but you only have to do it once). To skip this step, set `python_standalone_dir` to None.
+2026-10-11 05:58:35,018 - INFO - rex-deploy - Starting container docker.ioswebenchsweb.eval.x86_64.django_1776_django-15252latest-66af2601-3664-432f-9ef1-b052584fae30 with image docker.io/swebench/sweb.eval.x86_64.django_1776_django-15252:latest serving on port 54673
+2026-10-11 05:58:35,029 - INFO - rex-deploy - Starting runtime at 54673
+2026-10-11 05:58:36,542 - INFO - rex-deploy - Runtime started in 1.50s
+2026-10-11 05:58:37,484 - INFO - swea-env - Environment Initialized
+2026-10-11 05:58:43,456 - INFO - swea-agent - Setting up agent for instance django__django-15252
+2026-10-11 05:58:43,458 - INFO - swea-agent - Trajectory will be saved to /home/box/context-shaping/results/swebench/runs/django__django-15252/swe_agent/out/django__django-15252/django__django-15252.traj
+2026-10-11 05:58:46,452 - INFO - swea-tools - Resetting tools
+2026-10-11 05:58:46,822 - INFO - swea-agent - SYSTEM (main)
+You are a helpful assistant that can interact with a computer to solve tasks.
+2026-10-11 05:58:46,975 - INFO - swea-agent - 🤖 MODEL INPUT
+<uploaded_files>
+/testbed
+</uploaded_files>
+I've uploaded a python code repository in the directory /testbed. Consider the following PR description:
+
+<pr_description>
+MigrationRecorder does not obey db_router allow_migrate rules
+Description
+	
+Hi,
+We have a multi-db setup. We have one connection that is for the django project, and several connections that talk to other dbs for information (ie models with managed = False). Django should only create tables in the first connection, never in any of the other connections. We have a simple router that does the following: 
+class Router(object):
+	def allow_migrate(self, db, model):
+		if db == 'default':
+			return True
+		return False
+Current Behaviour
+We run our functional tests and the migrate command is called against each connection when the test databases are created (see django/test/runner.py, setup_databases, line 300-ish, which calls django/db/backends/creation.py, create_test_db, line 377-ish)
+When this migrate runs, it tries to apply our migrations, which tries to record that a migration has been applied (see django/db/migrations/executor.py, apply_migration, which has several calls to self.recorder.record_applied). 
+The first thing that record_applied does is a call to self.ensure_schema() (see django/db/migrations/recorder.py, record_applied, lien 66-ish). 
+ensure_schema checks to see if the Migration model is in the tables in the connection. If it does not find the table then it tries to create the table. 
+I believe that this is incorrect behaviour when a db_router has been provided. If using the router above, my expectation would be that the table is not created on any connection other than the 'default' connection. Looking at the other methods on the MigrationRecorder, I would expect that there will be similar issues with applied_migrations and record_unapplied.
+
+</pr_description>
+
+Can you help me implement the necessary changes to the repository so that the requirements specified in the <pr_description> are met?
+I've already taken care of all changes to any of the test files described in the <pr_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!
+Your task is to make the minimal changes to non-tests files in the /testbed directory to ensure the <pr_description> is satisfied.
+Follow these steps to resolve the issue:
+1. As a first step, it might be a good idea to find and read code relevant to the <pr_description>
+2. Create a script to reproduce the error and execute it with `python <filename.py>` using the bash tool, to confirm the error
+3. Edit the sourcecode of the repo to resolve the issue
+4. Rerun your reproduce script and confirm that the error is fixed!
+5. Think about edgecases and make sure your fix handles them as well
+Your thinking should be thorough and so it's fine if it's very long.
+2026-10-11 05:58:46,983 - INFO - swea-agent - ========================= STEP 1 =========================
+2026-10-11 05:58:47,160 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 05:58:49,169 - INFO - swea-agent - 💭 THOUGHT
+I'll start by reading the recorder and the executor that calls it.
+
+🎬 ACTION
+cat /testbed/django/db/migrations/recorder.py; cd /testbed && git log --oneline -1 && grep -n "allow_migrate" -r django/db/migrations/ django/db/backends/base/ | head -30
+2026-10-11 05:58:49,464 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+from django.apps.registry import Apps
+from django.db import DatabaseError, models
+from django.utils.functional import classproperty
+from django.utils.timezone import now
+
+from .exceptions import MigrationSchemaMissing
+
+
+class MigrationRecorder:
+    """
+    Deal with storing migration records in the database.
+
+    Because this table is actually itself used for dealing with model
+    creation, it's the one thing we can't do normally via migrations.
+    We manually handle table creation/schema updating (using schema backend)
+    and then have a floating model to do queries with.
+
+    If a migration is unapplied its row is removed from the table. Having
+    a row in the table always means a migration is applied.
+    """
+    _migration_class = None
+
+    @classproperty
+    def Migration(cls):
+        """
+        Lazy load to avoid AppRegistryNotReady if installed apps import
+        MigrationRecorder.
+        """
+        if cls._migration_class is None:
+            class Migration(models.Model):
+                app = models.CharField(max_length=255)
+                name = models.CharField(max_length=255)
+                applied = models.DateTimeField(default=now)
+
+                class Meta:
+                    apps = Apps()
+                    app_label = 'migrations'
+                    db_table = 'django_migrations'
+
+                def __str__(self):
+                    return 'Migration %s for %s' % (self.name, self.app)
+
+            cls._migration_class = Migration
+        return cls._migration_class
+
+    def __init__(self, connection):
+        self.connection = connection
+
+    @property
+    def migration_qs(self):
+        return self.Migration.objects.using(self.connection.alias)
+
+    def has_table(self):
+        """Return True if the django_migrations table exists."""
+        with self.connection.cursor() as cursor:
+            tables = self.connection.introspection.table_names(cursor)
+        return self.Migration._meta.db_table in tables
+
+    def ensure_schema(self):
+        """Ensure the table exists and has the correct schema."""
+        # If the table's there, that's fine - we've never changed its schema
+        # in the codebase.
+        if self.has_table():
+            return
+        # Make the table
+        try:
+            with self.connection.schema_editor() as editor:
+                editor.create_model(self.Migration)
+        except DatabaseError as exc:
+            raise MigrationSchemaMissing("Unable to create the django_migrations table (%s)" % exc)
+
+    def applied_migrations(self):
+        """
+        Return a dict mapping (app_name, migration_name) to Migration instances
+        for all applied migrations.
+        """
+        if self.has_table():
+            return {(migration.app, migration.name): migration for migration in self.migration_qs}
+        else:
+            # If the django_migrations table doesn't exist, then no migrations
+            # are applied.
+            return {}
+
+    def record_applied(self, app, name):
+        """Record that a migration was applied."""
+        self.ensure_schema()
+        self.migration_qs.create(app=app, name=name)
+
+    def record_unapplied(self, app, name):
+        """Record that a migration was unapplied."""
+        self.ensure_schema()
+        self.migration_qs.filter(app=app, name=name).delete()
+
+    def flush(self):
+        """Delete all migration records. Useful for testing migrations."""
+        self.migration_qs.all().delete()
+361bb8f786 (HEAD) Refs #26872 -- Fixed wrapping of long choices in ModelAdmin.list_filter.
+django/db/migrations/operations/fields.py:95:        if self.allow_migrate_model(schema_editor.connection.alias, to_model):
+django/db/migrations/operations/fields.py:109:        if self.allow_migrate_model(schema_editor.connection.alias, from_model):
+django/db/migrations/operations/fields.py:161:        if self.allow_migrate_model(schema_editor.connection.alias, from_model):
+django/db/migrations/operations/fields.py:166:        if self.allow_migrate_model(schema_editor.connection.alias, to_model):
+django/db/migrations/operations/fields.py:219:        if self.allow_migrate_model(schema_editor.connection.alias, to_model):
+django/db/migrations/operations/fields.py:291:        if self.allow_migrate_model(schema_editor.connection.alias, to_model):
+django/db/migrations/operations/fields.py:301:        if self.allow_migrate_model(schema_editor.connection.alias, to_model):
+django/db/migrations/operations/models.py:91:        if self.allow_migrate_model(schema_editor.connection.alias, model):
+django/db/migrations/operations/models.py:96:        if self.allow_migrate_model(schema_editor.connection.alias, model):
+django/db/migrations/operations/models.py:268:        if self.allow_migrate_model(schema_editor.connection.alias, model):
+django/db/migrations/operations/models.py:273:        if self.allow_migrate_model(schema_editor.connection.alias, model):
+django/db/migrations/operations/models.py:321:        if self.allow_migrate_model(schema_editor.connection.alias, new_model):
+django/db/migrations/operations/models.py:440:        if self.allow_migrate_model(schema_editor.connection.alias, new_model):
+django/db/migrations/operations/models.py:503:        if self.allow_migrate_model(schema_editor.connection.alias, new_model):
+django/db/migrations/operations/models.py:583:        if self.allow_migrate_model(schema_editor.connection.alias, to_model):
+django/db/migrations/operations/models.py:736:        if self.allow_migrate_model(schema_editor.connection.alias, model):
+django/db/migrations/operations/models.py:741:        if self.allow_migrate_model(schema_editor.connection.alias, model):
+django/db/migrations/operations/models.py:785:        if self.allow_migrate_model(schema_editor.connection.alias, model):
+django/db/migrations/operations/models.py:792:        if self.allow_migrate_model(schema_editor.connection.alias, model):
+django/db/migrations/operations/models.py:828:        if self.allow_migrate_model(schema_editor.connection.alias, model):
+django/db/migrations/operations/models.py:833:        if self.allow_migrate_model(schema_editor.connection.alias, model):
+django/db/migrations/operations/models.py:862:        if self.allow_migrate_model(schema_editor.connection.alias, model):
+django/db/migrations/operations/models.py:869:        if self.allow_migrate_model(schema_editor.connection.alias, model):
+django/db/migrations/operations/base.py:111:    def allow_migrate_model(self, connection_alias, model):
+django/db/migrations/operations/base.py:115:        This is a thin wrapper around router.allow_migrate_model() that
+django/db/migrations/operations/base.py:121:        return router.allow_migrate_model(connection_alias, model)
+django/db/migrations/operations/special.py:104:        if router.allow_migrate(schema_editor.connection.alias, app_label, **self.hints):
+django/db/migrations/operations/special.py:110:        if router.allow_migrate(schema_editor.connection.alias, app_label, **self.hints):
+django/db/migrations/operations/special.py:185:        if router.allow_migrate(schema_editor.connection.alias, app_label, **self.hints):
+django/db/migrations/operations/special.py:195:        if router.allow_migrate(schema_editor.connection.alias, app_label, **self.hints):
+
+2026-10-11 05:58:49,472 - INFO - swea-agent - ========================= STEP 2 =========================
+2026-10-11 05:58:49,478 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 05:59:02,182 - INFO - swea-agent - 💭 THOUGHT
+The recorder writes to `django_migrations` without consulting the router. Before I change anything, I'll check the router API and the executor's use of the recorder.
+
+🎬 ACTION
+cd /testbed && grep -n "def allow_migrate" -A12 django/db/utils.py | head -60; sed -n 105,125p django/db/migrations/operations/base.py; grep -n "recorder" django/db/migrations/executor.py django/core/management/commands/*.py django/test/*.py | head -40
+2026-10-11 05:59:02,463 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+272:    def allow_migrate(self, db, app_label, **hints):
+273-        for router in self.routers:
+274-            try:
+275-                method = router.allow_migrate
+276-            except AttributeError:
+277-                # If the router doesn't have a method, skip to the next one.
+278-                continue
+279-
+280-            allow = method(db, app_label, **hints)
+281-
+282-            if allow is not None:
+283-                return allow
+284-        return True
+--
+286:    def allow_migrate_model(self, db, model):
+287-        return self.allow_migrate(
+288-            db,
+289-            model._meta.app_label,
+290-            model_name=model._meta.model_name,
+291-            model=model,
+292-        )
+293-
+294-    def get_migratable_models(self, app_config, db, include_auto_created=False):
+295-        """Return app models allowed to be migrated on provided db."""
+296-        models = app_config.get_models(include_auto_created=include_auto_created)
+297-        return [model for model in models if self.allow_migrate_model(db, model)]
+        field name, with an app label for accuracy.
+
+        Used for optimization. If in doubt, return True.
+        """
+        return self.references_model(model_name, app_label)
+
+    def allow_migrate_model(self, connection_alias, model):
+        """
+        Return whether or not a model may be migrated.
+
+        This is a thin wrapper around router.allow_migrate_model() that
+        preemptively rejects any proxy, swapped out, or unmanaged model.
+        """
+        if not model._meta.can_migrate(connection_alias):
+            return False
+
+        return router.allow_migrate_model(connection_alias, model)
+
+    def reduce(self, operation, app_label):
+        """
+        Return either a list of operations the actual operation should be
+django/db/migrations/executor.py:6:from .recorder import MigrationRecorder
+django/db/migrations/executor.py:19:        self.recorder = MigrationRecorder(self.connection)
+django/db/migrations/executor.py:100:        self.recorder.ensure_schema()
+django/db/migrations/executor.py:251:                self.recorder.record_applied(app_label, name)
+django/db/migrations/executor.py:253:            self.recorder.record_applied(migration.app_label, migration.name)
+django/db/migrations/executor.py:265:                self.recorder.record_unapplied(app_label, name)
+django/db/migrations/executor.py:266:        self.recorder.record_unapplied(migration.app_label, migration.name)
+django/db/migrations/executor.py:283:        applied = self.recorder.applied_migrations()
+django/db/migrations/executor.py:287:                self.recorder.record_applied(*key)
+django/core/management/commands/showmigrations.py:7:from django.db.migrations.recorder import MigrationRecorder
+django/core/management/commands/showmigrations.py:76:        recorder = MigrationRecorder(connection)
+django/core/management/commands/showmigrations.py:77:        recorded_migrations = recorder.applied_migrations()
+
+2026-10-11 05:59:02,469 - INFO - swea-agent - ========================= STEP 3 =========================
+2026-10-11 05:59:02,475 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 05:59:05,532 - INFO - swea-agent - 💭 THOUGHT
+The executor calls `ensure_schema()` directly at line 100, so I need to see that context too. I'll also write a reproduction script first.
+
+🎬 ACTION
+cd /testbed && sed -n 90,104p django/db/migrations/executor.py; mkdir -p /tmp/repro && cat > /tmp/repro/repro.py <<'EOF'
+import django, os, sys
+from django.conf import settings
+settings.configure(
+    DATABASES={
+        'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': '/tmp/repro/default.db'},
+        'other': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': '/tmp/repro/other.db'},
+    },
+    INSTALLED_APPS=['django.contrib.contenttypes', 'django.contrib.auth'],
+    DATABASE_ROUTERS=['repro_router.Router'],
+)
+django.setup()
+from django.db import connections
+from django.db.migrations.recorder import MigrationRecorder
+from django.db.migrations.executor import MigrationExecutor
+from django.core.management import call_command
+
+rec = MigrationRecorder(connections['other'])
+rec.ensure_schema()  # should not create the table on 'other'
+print("other has table after ensure_schema:", rec.has_table())
+rec.record_applied('x', 'y')
+print("other has table after record_applied:", rec.has_table())
+print("applied on other:", rec.applied_migrations())
+call_command('migrate', database='other', verbosity=0)
+print("other has table after migrate:", MigrationRecorder(connections['other']).has_table())
+call_command('migrate', database='default', verbosity=0)
+print("default has table:", MigrationRecorder(connections['default']).has_table())
+EOF
+cat > /tmp/repro/repro_router.py <<'EOF'
+class Router:
+    def allow_migrate(self, db, app_label, **hints):
+        return db == 'default'
+EOF
+cd /tmp/repro && rm -f *.db && PYTHONPATH=/testbed:/tmp/repro python repro.py
+2026-10-11 05:59:07,044 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+
+    def migrate(self, targets, plan=None, state=None, fake=False, fake_initial=False):
+        """
+        Migrate the database up to the given targets.
+
+        Django first needs to create all project states before a migration is
+        (un)applied and in a second step run all the database operations.
+        """
+        # The django_migrations table must be present to record applied
+        # migrations.
+        self.recorder.ensure_schema()
+
+        if plan is None:
+            plan = self.migration_plan(targets)
+        # Create the forwards plan Django would follow on an empty database
+other has table after ensure_schema: True
+other has table after record_applied: True
+applied on other: {('x', 'y'): <Migration: Migration y for x>}
+other has table after migrate: True
+default has table: True
+
+2026-10-11 05:59:07,050 - INFO - swea-agent - ========================= STEP 4 =========================
+2026-10-11 05:59:07,059 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 05:59:12,762 - INFO - swea-agent - 💭 THOUGHT
+Reproduced: with the router disallowing `other`, the `django_migrations` table is still created there by `ensure_schema`, `record_applied`, and `migrate`.
+
+The fix is to make the recorder ask the router whether the `django_migrations` table may be managed on its connection. When it may not, the recorder should not create the table, should not write rows, and should report no applied migrations. I'll apply that to every public method, including `flush`.
+
+🎬 ACTION
+cd /testbed && python - <<'EOF'
+import re
+p='django/db/migrations/recorder.py'
+s=open(p).read()
+def rep(old,new):
+    global s
+    assert s.count(old)==1, old
+    s=s.replace(old,new)
+rep("from django.db import DatabaseError, models\n",
+    "from django.db import DatabaseError, models, router\n")
+rep('''    def has_table(self):
+        """Return True if the django_migrations table exists."""''',
+'''    def allow_migrate(self):
+        """
+        Return whether the django_migrations table may be managed on this
+        connection, according to the database routers.
+        """
+        return router.allow_migrate_model(self.connection.alias, self.Migration)
+
+    def has_table(self):
+        """Return True if the django_migrations table exists."""''')
+rep('''        # If the table's there, that's fine - we've never changed its schema
+        # in the codebase.
+        if self.has_table():
+            return
+        # Make the table''',
+'''        # The table may only be created on connections the routers allow it
+        # to be migrated on.
+        if not self.allow_migrate():
+            return
+        # If the table's there, that's fine - we've never changed its schema
+        # in the codebase.
+        if self.has_table():
+            return
+        # Make the table''')
+rep('''        if self.has_table():
+            return {(migration.app''','''        if self.allow_migrate() and self.has_table():
+            return {(migration.app''')
+rep('''        """Record that a migration was applied."""
+        self.ensure_schema()''','''        """Record that a migration was applied."""
+        if not self.allow_migrate():
+            return
+        self.ensure_schema()''')
+rep('''        """Record that a migration was unapplied."""
+        self.ensure_schema()''','''        """Record that a migration was unapplied."""
+        if not self.allow_migrate():
+            return
+        self.ensure_schema()''')
+rep('''        """Delete all migration records. Useful for testing migrations."""
+        self.migration_qs.all().delete()''','''        """Delete all migration records. Useful for testing migrations."""
+        if not self.allow_migrate():
+            return
+        self.migration_qs.all().delete()''')
+open(p,'w').write(s)
+EOF
+cd /tmp/repro && rm -f *.db && PYTHONPATH=/testbed:/tmp/repro python repro.py
+2026-10-11 05:59:13,717 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+other has table after ensure_schema: False
+other has table after record_applied: False
+applied on other: {}
+other has table after migrate: False
+default has table: True
+
+2026-10-11 05:59:13,722 - INFO - swea-agent - ========================= STEP 5 =========================
+2026-10-11 05:59:13,729 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 05:59:15,142 - INFO - swea-agent - 💭 THOUGHT
+The reproduction now behaves as the PR asks. Next I'll run the existing migration and multi-db test suites to check for regressions.
+
+🎬 ACTION
+cd /testbed/tests && timeout 900 python runtests.py migrations migrations2 backends.base multiple_database --parallel 4 2>&1 | tail -15
+2026-10-11 05:59:19,118 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+
+----------------------------------------------------------------------
+Ran 773 tests in 2.651s
+
+FAILED (errors=1, skipped=7)
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+
+2026-10-11 05:59:19,123 - INFO - swea-agent - ========================= STEP 6 =========================
+2026-10-11 05:59:19,130 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 05:59:20,327 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+cd /testbed/tests && timeout 900 python runtests.py migrations migrations2 backends.base multiple_database --parallel 1 2>&1 | grep -E "^(ERROR|FAIL):|Error|Ran" | head; git stash -q && timeout 900 python runtests.py migrations migrations2 backends.base multiple_database --parallel 1 2>&1 | grep -E "^(ERROR|FAIL):|Ran"; git stash pop -q && git status --short
+2026-10-11 05:59:30,358 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+ERROR: test_migrate_fake_initial (migrations.test_commands.MigrateTests)
+sqlite3.OperationalError: table "migrations_tribble" already exists
+django.db.utils.OperationalError: table "migrations_tribble" already exists
+Ran 773 tests in 4.033s
+Ran 773 tests in 4.155s
+ M ../django/db/migrations/recorder.py
+
+2026-10-11 05:59:30,365 - INFO - swea-agent - ========================= STEP 7 =========================
+2026-10-11 05:59:30,374 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 05:59:31,693 - INFO - swea-agent - 💭 THOUGHT
+My change breaks `test_migrate_fake_initial`, which passes on the unmodified code. I'll look at that test.
+
+🎬 ACTION
+cd /testbed/tests && grep -n "def test_migrate_fake_initial" -A40 migrations/test_commands.py | head -60
+2026-10-11 05:59:31,958 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+133:    def test_migrate_fake_initial(self):
+134-        """
+135-        --fake-initial only works if all tables created in the initial
+136-        migration of an app exists. Database routers must be obeyed when doing
+137-        that check.
+138-        """
+139-        # Make sure no tables are created
+140-        for db in self.databases:
+141-            self.assertTableNotExists("migrations_author", using=db)
+142-            self.assertTableNotExists("migrations_tribble", using=db)
+143-        # Run the migrations to 0001 only
+144-        call_command("migrate", "migrations", "0001", verbosity=0)
+145-        call_command("migrate", "migrations", "0001", verbosity=0, database="other")
+146-        # Make sure the right tables exist
+147-        self.assertTableExists("migrations_author")
+148-        self.assertTableNotExists("migrations_tribble")
+149-        # Also check the "other" database
+150-        self.assertTableNotExists("migrations_author", using="other")
+151-        self.assertTableExists("migrations_tribble", using="other")
+152-
+153-        # Fake a roll-back
+154-        call_command("migrate", "migrations", "zero", fake=True, verbosity=0)
+155-        call_command("migrate", "migrations", "zero", fake=True, verbosity=0, database="other")
+156-        # Make sure the tables still exist
+157-        self.assertTableExists("migrations_author")
+158-        self.assertTableExists("migrations_tribble", using="other")
+159-        # Try to run initial migration
+160-        with self.assertRaises(DatabaseError):
+161-            call_command("migrate", "migrations", "0001", verbosity=0)
+162-        # Run initial migration with an explicit --fake-initial
+163-        out = io.StringIO()
+164-        with mock.patch('django.core.management.color.supports_color', lambda *args: False):
+165-            call_command("migrate", "migrations", "0001", fake_initial=True, stdout=out, verbosity=1)
+166-            call_command("migrate", "migrations", "0001", fake_initial=True, verbosity=0, database="other")
+167-        self.assertIn(
+168-            "migrations.0001_initial... faked",
+169-            out.getvalue().lower()
+170-        )
+171-        try:
+172-            # Run migrations all the way.
+173-            call_command('migrate', verbosity=0)
+--
+209:    def test_migrate_fake_initial_case_insensitive(self):
+210-        with override_settings(MIGRATION_MODULES={
+211-            'migrations': 'migrations.test_fake_initial_case_insensitive.initial',
+212-        }):
+213-            call_command('migrate', 'migrations', '0001', verbosity=0)
+214-            call_command('migrate', 'migrations', 'zero', fake=True, verbosity=0)
+215-
+216-        with override_settings(MIGRATION_MODULES={
+217-            'migrations': 'migrations.test_fake_initial_case_insensitive.fake_initial',
+218-        }):
+219-            out = io.StringIO()
+220-            call_command(
+221-                'migrate',
+222-                'migrations',
+223-                '0001',
+224-                fake_initial=True,
+225-                stdout=out,
+226-                verbosity=1,
+
+2026-10-11 05:59:31,973 - INFO - swea-agent - ========================= STEP 8 =========================
+2026-10-11 05:59:31,980 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 05:59:35,133 - INFO - swea-agent - 💭 THOUGHT
+The test uses a database router. I need to see how that router handles the `Migration` model on the `other` database.
+
+🎬 ACTION
+cd /testbed/tests && grep -rn "class .*Router" -A12 migrations/routers.py; grep -n "routers\|multi_db" migrations/test_commands.py | head
+2026-10-11 05:59:35,404 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+1:class DefaultOtherRouter:
+2-    def allow_migrate(self, db, app_label, model_name=None, **hints):
+3-        return db in {'default', 'other'}
+4-
+5-
+6:class TestRouter:
+7-    def allow_migrate(self, db, app_label, model_name=None, **hints):
+8-        """
+9-        The Tribble model should be the only one to appear in the 'other' db.
+10-        """
+11-        if model_name == 'tribble':
+12-            return db == 'other'
+13-        elif db != 'default':
+14-            return False
+24:from .routers import TestRouter
+131:        DATABASE_ROUTERS=['migrations.routers.TestRouter'],
+136:        migration of an app exists. Database routers must be obeyed when doing
+1117:    def test_makemigrations_consistency_checks_respect_routers(self):
+1141:                with self.settings(DATABASE_ROUTERS=['migrations.routers.TestRouter']):
+1147:                with self.settings(DATABASE_ROUTERS=['migrations.routers.DefaultOtherRouter']):
+1154:                with self.settings(DATABASE_ROUTERS=['migrations.routers.TestRouter']):
+
+2026-10-11 05:59:35,412 - INFO - swea-agent - ========================= STEP 9 =========================
+2026-10-11 05:59:35,420 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 05:59:38,373 - INFO - swea-agent - 💭 THOUGHT
+The test router rejects the `Migration` model on `other`, which is what the PR wants. But this test still expects `other` to track applied migrations. I need the exact failing line before deciding how to reconcile the two.
+
+🎬 ACTION
+cd /testbed/tests && timeout 300 python runtests.py migrations.test_commands.MigrateTests.test_migrate_fake_initial 2>&1 | grep -B3 -A3 "test_commands.py\", line" | head -60
+2026-10-11 05:59:39,129 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+Traceback (most recent call last):
+  File "/testbed/django/test/utils.py", line 437, in inner
+    return func(*args, **kwargs)
+  File "/testbed/tests/migrations/test_commands.py", line 174, in test_migrate_fake_initial
+    call_command('migrate', verbosity=0, database="other")
+  File "/testbed/django/core/management/__init__.py", line 187, in call_command
+    return command.execute(*args, **defaults)
+
+2026-10-11 05:59:39,347 - INFO - swea-agent - ========================= STEP 10 =========================
+2026-10-11 05:59:39,355 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 05:59:40,276 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+cd /testbed/tests && sed -n 171,200p migrations/test_commands.py; cat migrations/test_migrations/../migrations/0001_initial.py 2>/dev/null | head -5; ls migrations/migrations | head -30
+2026-10-11 05:59:40,551 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+        try:
+            # Run migrations all the way.
+            call_command('migrate', verbosity=0)
+            call_command('migrate', verbosity=0, database="other")
+            self.assertTableExists('migrations_author')
+            self.assertTableNotExists('migrations_tribble')
+            self.assertTableExists('migrations_book')
+            self.assertTableNotExists('migrations_author', using='other')
+            self.assertTableNotExists('migrations_tribble', using='other')
+            self.assertTableNotExists('migrations_book', using='other')
+            # Fake a roll-back.
+            call_command('migrate', 'migrations', 'zero', fake=True, verbosity=0)
+            call_command('migrate', 'migrations', 'zero', fake=True, verbosity=0, database='other')
+            self.assertTableExists('migrations_author')
+            self.assertTableNotExists('migrations_tribble')
+            self.assertTableExists('migrations_book')
+            # Run initial migration.
+            with self.assertRaises(DatabaseError):
+                call_command('migrate', 'migrations', verbosity=0)
+            # Run initial migration with an explicit --fake-initial.
+            with self.assertRaises(DatabaseError):
+                # Fails because "migrations_tribble" does not exist but needs
+                # to in order to make --fake-initial work.
+                call_command('migrate', 'migrations', fake_initial=True, verbosity=0)
+            # Fake an apply.
+            call_command('migrate', 'migrations', fake=True, verbosity=0)
+            call_command('migrate', 'migrations', fake=True, verbosity=0, database='other')
+        finally:
+            # Unmigrate everything.
+            call_command('migrate', 'migrations', 'zero', verbosity=0)
+ls: cannot access 'migrations/migrations': No such file or directory
+
+2026-10-11 05:59:40,562 - INFO - swea-agent - ========================= STEP 11 =========================
+2026-10-11 05:59:40,569 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 06:00:02,265 - INFO - swea-agent - 💭 THOUGHT
+Line 174 is a plain `migrate` on `other`. It only succeeds because the earlier `--fake-initial` run on `other` recorded `0001` there. With my change, `other` has no `django_migrations` table, so nothing is recorded and `0001` runs again. I'll check the git history to see whether this test was written against the old behaviour.
+
+🎬 ACTION
+cd /testbed && git log --oneline -3 -- tests/migrations/test_commands.py tests/migrations/routers.py; git show --stat HEAD | head -20; sed -n 120,132p tests/migrations/test_commands.py
+2026-10-11 06:00:02,551 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+2d07e1aaeb Refs #22983 -- Added tests for squashing migrations with functions from migration files.
+1833a9eee9 Increased test coverage of django.db.migrations.questioner.
+9e6d631697 Fixed #33246 -- Made squashmigrations raise CommandError when squashed_name already exists.
+commit 361bb8f786f112ee275be136795c0b1ecefff928
+Author: Mariusz Felisiak <felisiak.mariusz@gmail.com>
+Date:   Wed Dec 29 10:57:23 2021 +0100
+
+    Refs #26872 -- Fixed wrapping of long choices in ModelAdmin.list_filter.
+    
+    Regression in 269a76714616fd7ad166a14113f3354bab8d9b65.
+
+ django/contrib/admin/static/admin/css/changelists.css | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+        call_command("migrate", "migrations", "0001", fake=True, verbosity=0)
+        # Real rollback
+        call_command("migrate", "migrations", "zero", verbosity=0)
+        # Make sure it's all gone
+        self.assertTableNotExists("migrations_author")
+        self.assertTableNotExists("migrations_tribble")
+        self.assertTableNotExists("migrations_book")
+
+    @override_settings(
+        MIGRATION_MODULES={"migrations": "migrations.test_migrations"},
+        DATABASE_ROUTERS=['migrations.routers.TestRouter'],
+    )
+
+2026-10-11 06:00:02,562 - INFO - swea-agent - ========================= STEP 12 =========================
+2026-10-11 06:00:02,572 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 06:00:24,171 - INFO - swea-agent - 💭 THOUGHT
+This is a genuine conflict, not a bug in my change. `TestRouter` rejects the `migrations.Migration` model on `other`, so under the PR's requirement `other` must not hold a `django_migrations` table, but this test relies on `other` recording `0001`. No recorder implementation can satisfy both. To confirm the rest of the logic is sound, I'll temporarily let that router allow the recorder on `other`, run the suite, and then revert the router.
+
+🎬 ACTION
+cd /testbed/tests && cp migrations/routers.py /tmp/routers.bak && python - <<'EOF'
+p='migrations/routers.py'
+s=open(p).read()
+s=s.replace("        if model_name == 'tribble':\n            return db == 'other'\n","        if model_name in ('tribble', 'migration'):\n            return db == 'other'\n",1)
+open(p,'w').write(s)
+EOF
+timeout 900 python runtests.py migrations migrations2 backends.base multiple_database --parallel 1 2>&1 | grep -E "^(ERROR|FAIL):|^Ran|^OK|FAILED"; cp /tmp/routers.bak migrations/routers.py; git status --short
+2026-10-11 06:00:29,291 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+ERROR: test_migrate_fake_initial (migrations.test_commands.MigrateTests)
+ERROR: test_migrate_fake_split_initial (migrations.test_commands.MigrateTests)
+ERROR: test_migrate_partially_applied_squashed_migration (migrations.test_commands.MigrateTests)
+ERROR: test_migrate_plan (migrations.test_commands.MigrateTests)
+FAIL: test_makemigrations_consistency_checks_respect_routers (migrations.test_commands.MakeMigrationsTests)
+FAIL: test_migrate_initial_false (migrations.test_commands.MigrateTests)
+Ran 773 tests in 4.000s
+FAILED (failures=2, errors=4, skipped=7)
+ M ../django/db/migrations/recorder.py
+
+2026-10-11 06:00:29,303 - INFO - swea-agent - ========================= STEP 13 =========================
+2026-10-11 06:00:29,314 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 06:00:33,690 - INFO - swea-agent - 💭 THOUGHT
+Allowing the recorder on `other` in that router makes other tests fail too, so it is not a clean path. I've restored `routers.py` and confirmed only the recorder change is in the diff. Last, I'll check other callers of the recorder, including `flush`, which I also guarded, and run a few adjacent suites.
+
+🎬 ACTION
+cd /testbed && grep -rn "MigrationRecorder\|recorder.flush" --include=*.py django tests | grep -v "^django/db/migrations/recorder.py" | head; cd tests && timeout 900 python runtests.py migrations migrations2 backends.base multiple_database admin_scripts test_runner --parallel 4 2>&1 | grep -E "^(ERROR|FAIL):|^Ran|^OK|FAILED"; cd /testbed && git diff
+2026-10-11 06:01:03,792 - CRITICAL - rex-runtime - Traceback: 
+Traceback (most recent call last):
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/runtime/local.py", line 311, in _run_normal
+    expect_index = self.shell.expect(expect_strings, timeout=action.timeout)  # type: ignore
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/pexpect/spawnbase.py", line 354, in expect
+    return self.expect_list(compiled_pattern_list,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/pexpect/spawnbase.py", line 383, in expect_list
+    return exp.expect_loop(timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/pexpect/expect.py", line 181, in expect_loop
+    return self.timeout(e)
+           ^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/pexpect/expect.py", line 144, in timeout
+    raise exc
+pexpect.exceptions.TIMEOUT: Timeout exceeded.
+<pexpect.pty_spawn.spawn object at 0x7f3f3bfb0c50>
+command: /usr/bin/env
+args: [b'/usr/bin/env', b'bash']
+buffer (last 100 chars): 'ationRecorder\r\ntests/migrations/test_loader.py:26:        recorder = MigrationRecorder(connection)\r\n'
+before (last 100 chars): 'ationRecorder\r\ntests/migrations/test_loader.py:26:        recorder = MigrationRecorder(connection)\r\n'
+after: <class 'pexpect.exceptions.TIMEOUT'>
+match: None
+match_index: None
+exitstatus: None
+flag_eof: False
+pid: 8
+child_fd: 10
+closed: False
+timeout: 30
+delimiter: <class 'pexpect.exceptions.EOF'>
+logfile: None
+logfile_read: None
+logfile_send: None
+maxread: 2000
+ignorecase: False
+searchwindowsize: None
+delaybeforesend: 0.05
+delayafterclose: 0.1
+delayafterterminate: 0.1
+searcher: searcher_re:
+    0: re.compile('SHELLPS1PREFIX')
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/telemetry/_asgi.py", line 151, in __call__
+    await self.app(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 197, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/server.py", line 86, in handle_request_id
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 173, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 197, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/server.py", line 74, in authenticate
+    return await call_next(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 173, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/routing.py", line 676, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 2786, in app
+    await route.handle(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 1310, in handle
+    await super().handle(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/routing.py", line 282, in handle
+    await self.app(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 165, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 151, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 727, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 360, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/server.py", line 139, in run
+    return serialize_model(await runtime.run_in_session(action))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/runtime/local.py", line 407, in run_in_session
+    return await self.sessions[action.session].run(action)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/runtime/local.py", line 236, in run
+    r = await self._run_normal(action)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/runtime/local.py", line 315, in _run_normal
+    raise CommandTimeoutError(msg) from e
+swerex.exceptions.CommandTimeoutError: timeout after 30.0 seconds while running command 'cd /testbed && grep -rn "MigrationRecorder\\|recorder.flush" --include=*.py django tests | grep -v "^django/db/migrations/recorder.py" | head; cd tests && timeout 900 python runtests.py migrations migrations2 backends.base multiple_database admin_scripts test_runner --parallel 4 2>&1 | grep -E "^(ERROR|FAIL):|^Ran|^OK|FAILED"; cd /testbed && git diff'
+
+2026-10-11 06:01:03,806 - ERROR - rex-runtime - Error making request 920c6f53-a95e-4828-8d82-ff7e220b737a after 0 retries: timeout after 30.0 seconds while running command 'cd /testbed && grep -rn "MigrationRecorder\\|recorder.flush" --include=*.py django tests | grep -v "^django/db/migrations/recorder.py" | head; cd tests && timeout 900 python runtests.py migrations migrations2 backends.base multiple_database admin_scripts test_runner --parallel 4 2>&1 | grep -E "^(ERROR|FAIL):|^Ran|^OK|FAILED"; cd /testbed && git diff'
+2026-10-11 06:01:03,808 - INFO - swea-env - Interrupting session
+2026-10-11 06:01:04,679 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+The command 'cd /testbed && grep -rn "MigrationRecorder\|recorder.flush" --include=*.py django tests | grep -v "^django/db/migrations/recorder.py" | head; cd tests && timeout 900 python runtests.py migrations migrations2 backends.base multiple_database admin_scripts test_runner --parallel 4 2>&1 | grep -E "^(ERROR|FAIL):|^Ran|^OK|FAILED"; cd /testbed && git diff' was cancelled because it took more than 30 seconds. Please try a different command that completes more quickly. Note: A common source of this error is if the command is interactive or requires user input (it is impossible to receive user input in the current environment, so the command will never complete).
+2026-10-11 06:01:04,692 - INFO - swea-agent - ========================= STEP 14 =========================
+2026-10-11 06:01:04,702 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 06:01:05,781 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+cd /testbed/tests && (timeout 600 python runtests.py migrations migrations2 backends.base multiple_database admin_scripts test_runner --parallel 4 > /tmp/run.log 2>&1 &) ; cd /testbed && git diff
+2026-10-11 06:01:06,064 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+diff --git a/django/db/migrations/recorder.py b/django/db/migrations/recorder.py
+index 1a37c6b7d0..7d22ac3b51 100644
+--- a/django/db/migrations/recorder.py
++++ b/django/db/migrations/recorder.py
+@@ -1,5 +1,5 @@
+ from django.apps.registry import Apps
+-from django.db import DatabaseError, models
++from django.db import DatabaseError, models, router
+ from django.utils.functional import classproperty
+ from django.utils.timezone import now
+ 
+@@ -50,6 +50,13 @@ class MigrationRecorder:
+     def migration_qs(self):
+         return self.Migration.objects.using(self.connection.alias)
+ 
++    def allow_migrate(self):
++        """
++        Return whether the django_migrations table may be managed on this
++        connection, according to the database routers.
++        """
++        return router.allow_migrate_model(self.connection.alias, self.Migration)
++
+     def has_table(self):
+         """Return True if the django_migrations table exists."""
+         with self.connection.cursor() as cursor:
+@@ -58,6 +65,10 @@ class MigrationRecorder:
+ 
+     def ensure_schema(self):
+         """Ensure the table exists and has the correct schema."""
++        # The table may only be created on connections the routers allow it
++        # to be migrated on.
++        if not self.allow_migrate():
++            return
+         # If the table's there, that's fine - we've never changed its schema
+         # in the codebase.
+         if self.has_table():
+@@ -74,7 +85,7 @@ class MigrationRecorder:
+         Return a dict mapping (app_name, migration_name) to Migration instances
+         for all applied migrations.
+         """
+-        if self.has_table():
++        if self.allow_migrate() and self.has_table():
+             return {(migration.app, migration.name): migration for migration in self.migration_qs}
+         else:
+             # If the django_migrations table doesn't exist, then no migrations
+@@ -83,14 +94,20 @@ class MigrationRecorder:
+ 
+     def record_applied(self, app, name):
+         """Record that a migration was applied."""
++        if not self.allow_migrate():
++            return
+         self.ensure_schema()
+         self.migration_qs.create(app=app, name=name)
+ 
+     def record_unapplied(self, app, name):
+         """Record that a migration was unapplied."""
++        if not self.allow_migrate():
++            return
+         self.ensure_schema()
+         self.migration_qs.filter(app=app, name=name).delete()
+ 
+     def flush(self):
+         """Delete all migration records. Useful for testing migrations."""
++        if not self.allow_migrate():
++            return
+         self.migration_qs.all().delete()
+
+2026-10-11 06:01:06,081 - INFO - swea-agent - ========================= STEP 15 =========================
+2026-10-11 06:01:06,090 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 06:01:07,005 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+sleep 25; grep -E "^(ERROR|FAIL):|^Ran|^OK|FAILED" /tmp/run.log || tail -3 /tmp/run.log
+2026-10-11 06:01:32,291 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+Cloning test database for alias 'other'...
+System check identified no issues (0 silenced).
+.........ss..................................................................................................................................................................................................................................................................................................................................................................................................................................................................................E..................................................................ssss............................................................................................................................................................................s...............................................................................................................................................................................................................................................................................................................................................................................................
+2026-10-11 06:01:32,310 - INFO - swea-agent - ========================= STEP 16 =========================
+2026-10-11 06:01:32,321 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 06:01:33,345 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+sleep 40; grep -E "^(ERROR|FAIL):|^Ran|^OK|FAILED" /tmp/run.log || tail -c 300 /tmp/run.log
+2026-10-11 06:02:03,418 - CRITICAL - rex-runtime - Traceback: 
+Traceback (most recent call last):
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/runtime/local.py", line 311, in _run_normal
+    expect_index = self.shell.expect(expect_strings, timeout=action.timeout)  # type: ignore
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/pexpect/spawnbase.py", line 354, in expect
+    return self.expect_list(compiled_pattern_list,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/pexpect/spawnbase.py", line 383, in expect_list
+    return exp.expect_loop(timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/pexpect/expect.py", line 181, in expect_loop
+    return self.timeout(e)
+           ^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/pexpect/expect.py", line 144, in timeout
+    raise exc
+pexpect.exceptions.TIMEOUT: Timeout exceeded.
+<pexpect.pty_spawn.spawn object at 0x7f3f3bfb0c50>
+command: /usr/bin/env
+args: [b'/usr/bin/env', b'bash']
+buffer (last 100 chars): ''
+before (last 100 chars): ''
+after: <class 'pexpect.exceptions.TIMEOUT'>
+match: None
+match_index: None
+exitstatus: None
+flag_eof: False
+pid: 8
+child_fd: 10
+closed: False
+timeout: 30
+delimiter: <class 'pexpect.exceptions.EOF'>
+logfile: None
+logfile_read: None
+logfile_send: None
+maxread: 2000
+ignorecase: False
+searchwindowsize: None
+delaybeforesend: 0.05
+delayafterclose: 0.1
+delayafterterminate: 0.1
+searcher: searcher_re:
+    0: re.compile('SHELLPS1PREFIX')
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/telemetry/_asgi.py", line 151, in __call__
+    await self.app(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 197, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/server.py", line 86, in handle_request_id
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 173, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 197, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/server.py", line 74, in authenticate
+    return await call_next(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 173, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/routing.py", line 676, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 2786, in app
+    await route.handle(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 1310, in handle
+    await super().handle(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/routing.py", line 282, in handle
+    await self.app(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 165, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 151, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 727, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 360, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/server.py", line 139, in run
+    return serialize_model(await runtime.run_in_session(action))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/runtime/local.py", line 407, in run_in_session
+    return await self.sessions[action.session].run(action)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/runtime/local.py", line 236, in run
+    r = await self._run_normal(action)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/runtime/local.py", line 315, in _run_normal
+    raise CommandTimeoutError(msg) from e
+swerex.exceptions.CommandTimeoutError: timeout after 30.0 seconds while running command 'sleep 40; grep -E "^(ERROR|FAIL):|^Ran|^OK|FAILED" /tmp/run.log || tail -c 300 /tmp/run.log'
+
+2026-10-11 06:02:03,430 - ERROR - rex-runtime - Error making request eeeb541a-306d-40a0-9ea2-80d82b5c6476 after 0 retries: timeout after 30.0 seconds while running command 'sleep 40; grep -E "^(ERROR|FAIL):|^Ran|^OK|FAILED" /tmp/run.log || tail -c 300 /tmp/run.log'
+2026-10-11 06:02:03,433 - INFO - swea-env - Interrupting session
+2026-10-11 06:02:04,201 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+The command 'sleep 40; grep -E "^(ERROR|FAIL):|^Ran|^OK|FAILED" /tmp/run.log || tail -c 300 /tmp/run.log' was cancelled because it took more than 30 seconds. Please try a different command that completes more quickly. Note: A common source of this error is if the command is interactive or requires user input (it is impossible to receive user input in the current environment, so the command will never complete).
+2026-10-11 06:02:04,219 - INFO - swea-agent - ========================= STEP 17 =========================
+2026-10-11 06:02:04,231 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 06:02:05,044 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+sleep 20; grep -E "^(ERROR|FAIL):|^Ran|^OK|FAILED" /tmp/run.log || tail -c 200 /tmp/run.log
+2026-10-11 06:02:25,327 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+ERROR: test_migrate_fake_initial (migrations.test_commands.MigrateTests)
+Ran 1127 tests in 32.371s
+FAILED (errors=1, skipped=7)
+
+2026-10-11 06:02:25,351 - INFO - swea-agent - ========================= STEP 18 =========================
+2026-10-11 06:02:25,362 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 06:02:29,431 - WARNING - swea-agent - Requerying model after FunctionCallingFormatError (1th requery)
+2026-10-11 06:02:29,436 - WARNING - swea-agent - Your last output did not use any tool calls!
+Please make sure your output includes exactly _ONE_ function call!
+You must invoke the function directly using the function call format.
+You cannot invoke commands with ```, you have to use the function call format.
+If you think you have already resolved the issue, please submit your changes by running the `submit` command.
+If you think you cannot solve the problem, please run `exit_forfeit` (if available) or `submit`.
+Else, please continue with a new tool call!
+2026-10-11 06:02:29,446 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 06:02:30,472 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+submit
+2026-10-11 06:02:31,006 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+Thank you for your work on this issue. Please carefully follow the steps below to help review your changes.
+
+1. If you made any changes to your code after running the reproduction script, please run the reproduction script again.
+  If the reproduction script is failing, please revisit your changes and make sure they are correct.
+  If you have already removed your reproduction script, please ignore this step.
+2. Remove your reproduction script (if you haven't done so already).
+3. If you have modified any TEST files, please revert them to the state they had before you started fixing the issue.
+  You can do this with `git checkout -- /path/to/test/file.py`. Use below <diff> to find the files you need to revert.
+4. Run the submit command again to confirm.
+
+Here is a list of all of your changes:
+
+<diff>
+diff --git a/django/db/migrations/recorder.py b/django/db/migrations/recorder.py
+index 1a37c6b7d0..7d22ac3b51 100644
+--- a/django/db/migrations/recorder.py
++++ b/django/db/migrations/recorder.py
+@@ -1,5 +1,5 @@
+ from django.apps.registry import Apps
+-from django.db import DatabaseError, models
++from django.db import DatabaseError, models, router
+ from django.utils.functional import classproperty
+ from django.utils.timezone import now
+ 
+@@ -50,6 +50,13 @@ class MigrationRecorder:
+     def migration_qs(self):
+         return self.Migration.objects.using(self.connection.alias)
+ 
++    def allow_migrate(self):
++        """
++        Return whether the django_migrations table may be managed on this
++        connection, according to the database routers.
++        """
++        return router.allow_migrate_model(self.connection.alias, self.Migration)
++
+     def has_table(self):
+         """Return True if the django_migrations table exists."""
+         with self.connection.cursor() as cursor:
+@@ -58,6 +65,10 @@ class MigrationRecorder:
+ 
+     def ensure_schema(self):
+         """Ensure the table exists and has the correct schema."""
++        # The table may only be created on connections the routers allow it
++        # to be migrated on.
++        if not self.allow_migrate():
++            return
+         # If the table's there, that's fine - we've never changed its schema
+         # in the codebase.
+         if self.has_table():
+@@ -74,7 +85,7 @@ class MigrationRecorder:
+         Return a dict mapping (app_name, migration_name) to Migration instances
+         for all applied migrations.
+         """
+-        if self.has_table():
++        if self.allow_migrate() and self.has_table():
+             return {(migration.app, migration.name): migration for migration in self.migration_qs}
+         else:
+             # If the django_migrations table doesn't exist, then no migrations
+@@ -83,14 +94,20 @@ class MigrationRecorder:
+ 
+     def record_applied(self, app, name):
+         """Record that a migration was applied."""
++        if not self.allow_migrate():
++            return
+         self.ensure_schema()
+         self.migration_qs.create(app=app, name=name)
+ 
+     def record_unapplied(self, app, name):
+         """Record that a migration was unapplied."""
++        if not self.allow_migrate():
++            return
+         self.ensure_schema()
+         self.migration_qs.filter(app=app, name=name).delete()
+ 
+     def flush(self):
+         """Delete all migration records. Useful for testing migrations."""
++        if not self.allow_migrate():
++            return
+         self.migration_qs.all().delete()
+
+</diff>
+
+
+2026-10-11 06:02:31,030 - INFO - swea-agent - ========================= STEP 20 =========================
+2026-10-11 06:02:31,040 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 06:02:32,443 - INFO - swea-agent - 💭 THOUGHT
+I restored `routers.py` after the experiment, and git status shows only `recorder.py` changed. The reproduction script lives in `/tmp`, outside the repo. Submitting again to confirm.
+
+🎬 ACTION
+submit
+2026-10-11 06:02:32,831 - INFO - swea-agent - Found submission: diff --git a/django/db/migrations/recorder.py b/django/db/migrations/recorder.py
+index 1a37c6b7d0..7d22ac3b51 100644
+--- a/django/db/migrations/recorder.py
++++ b/django/db/migrations/recorder.py
+@@ -1,5 +1,5 @@
+ from django.apps.registry import Apps
+-from django.db import DatabaseError, models
++from django.db import DatabaseError, models, router
+ from django.utils.functional import classproperty
+ from django.utils.timezone import now
+ 
+@@ -50,6 +50,13 @@ class MigrationRecorder:
+     def migration_qs(self):
+         return self.Migration.objects.using(self.connection.alias)
+ 
++    def allow_migrate(self):
++        """
++        Return whether the django_migrations table may be managed on this
++        connection, according to the database routers.
++        """
++        return router.allow_migrate_model(self.connection.alias, self.Migration)
++
+     def has_table(self):
+         """Return True if the django_migrations table exists."""
+         with self.connection.cursor() as cursor:
+@@ -58,6 +65,10 @@ class MigrationRecorder:
+ 
+     def ensure_schema(self):
+         """Ensure the table exists and has the correct schema."""
++        # The table may only be created on connections the routers allow it
++        # to be migrated on.
++        if not self.allow_migrate():
++            return
+         # If the table's there, that's fine - we've never changed its schema
+         # in the codebase.
+         if self.has_table():
+@@ -74,7 +85,7 @@ class MigrationRecorder:
+         Return a dict mapping (app_name, migration_name) to Migration instances
+         for all applied migrations.
+         """
+-        if self.has_table():
++        if self.allow_migrate() and self.has_table():
+             return {(migration.app, migration.name): migration for migration in self.migration_qs}
+         else:
+             # If the django_migrations table doesn't exist, then no migrations
+@@ -83,14 +94,20 @@ class MigrationRecorder:
+ 
+     def record_applied(self, app, name):
+         """Record that a migration was applied."""
++        if not self.allow_migrate():
++            return
+         self.ensure_schema()
+         self.migration_qs.create(app=app, name=name)
+ 
+     def record_unapplied(self, app, name):
+         """Record that a migration was unapplied."""
++        if not self.allow_migrate():
++            return
+         self.ensure_schema()
+         self.migration_qs.filter(app=app, name=name).delete()
+ 
+     def flush(self):
+         """Delete all migration records. Useful for testing migrations."""
++        if not self.allow_migrate():
++            return
+         self.migration_qs.all().delete()
+
+2026-10-11 06:02:32,840 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+diff --git a/django/db/migrations/recorder.py b/django/db/migrations/recorder.py
+index 1a37c6b7d0..7d22ac3b51 100644
+--- a/django/db/migrations/recorder.py
++++ b/django/db/migrations/recorder.py
+@@ -1,5 +1,5 @@
+ from django.apps.registry import Apps
+-from django.db import DatabaseError, models
++from django.db import DatabaseError, models, router
+ from django.utils.functional import classproperty
+ from django.utils.timezone import now
+ 
+@@ -50,6 +50,13 @@ class MigrationRecorder:
+     def migration_qs(self):
+         return self.Migration.objects.using(self.connection.alias)
+ 
++    def allow_migrate(self):
++        """
++        Return whether the django_migrations table may be managed on this
++        connection, according to the database routers.
++        """
++        return router.allow_migrate_model(self.connection.alias, self.Migration)
++
+     def has_table(self):
+         """Return True if the django_migrations table exists."""
+         with self.connection.cursor() as cursor:
+@@ -58,6 +65,10 @@ class MigrationRecorder:
+ 
+     def ensure_schema(self):
+         """Ensure the table exists and has the correct schema."""
++        # The table may only be created on connections the routers allow it
++        # to be migrated on.
++        if not self.allow_migrate():
++            return
+         # If the table's there, that's fine - we've never changed its schema
+         # in the codebase.
+         if self.has_table():
+@@ -74,7 +85,7 @@ class MigrationRecorder:
+         Return a dict mapping (app_name, migration_name) to Migration instances
+         for all applied migrations.
+         """
+-        if self.has_table():
++        if self.allow_migrate() and self.has_table():
+             return {(migration.app, migration.name): migration for migration in self.migration_qs}
+         else:
+             # If the django_migrations table doesn't exist, then no migrations
+@@ -83,14 +94,20 @@ class MigrationRecorder:
+ 
+     def record_applied(self, app, name):
+         """Record that a migration was applied."""
++        if not self.allow_migrate():
++            return
+         self.ensure_schema()
+         self.migration_qs.create(app=app, name=name)
+ 
+     def record_unapplied(self, app, name):
+         """Record that a migration was unapplied."""
++        if not self.allow_migrate():
++            return
+         self.ensure_schema()
+         self.migration_qs.filter(app=app, name=name).delete()
+ 
+     def flush(self):
+         """Delete all migration records. Useful for testing migrations."""
++        if not self.allow_migrate():
++            return
+         self.migration_qs.all().delete()
+
+2026-10-11 06:02:32,870 - INFO - swea-agent - Trajectory saved to /home/box/context-shaping/results/swebench/runs/django__django-15252/swe_agent/out/django__django-15252/django__django-15252.traj
+2026-10-11 06:02:32,884 - INFO - swea-env - Beginning environment shutdown...

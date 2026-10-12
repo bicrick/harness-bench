@@ -1,0 +1,510 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "initial_strategy\|fill_value" sklearn/impute/_iterative.py | head -80
+115:    initial_strategy : {'mean', 'median', 'most_frequent', 'constant'}, \
+177:        `initial_strategy="constant"` in which case `fill_value` will be
+281:        "initial_strategy": [
+303:        initial_strategy="mean",
+324:        self.initial_strategy = initial_strategy
+615:                strategy=self.initial_strategy,
+[0m
+[0m$ [0mcd /testbed && sed -n 110,125p sklearn/impute/_iterative.py; sed -n 170,185p sklearn/impute/_iterative.py; sed -n 275,340p sklearn/impute/_iterative.py; sed -n 600,630p sklearn/impute/_iterative.py; grep -n "fill_value" sklearn/impute/_base.py | head -30
+imputation process, the neighbor features are not necessarily nearest,
+        but are drawn with probability proportional to correlation for each
+        imputed target feature. Can provide significant speed-up when the
+        number of features is huge. If `None`, all features will be used.
+
+    initial_strategy : {'mean', 'median', 'most_frequent', 'constant'}, \
+            default='mean'
+        Which strategy to use to initialize the missing values. Same as the
+        `strategy` parameter in :class:`~sklearn.impute.SimpleImputer`.
+
+    imputation_order : {'ascending', 'descending', 'roman', 'arabic', \
+            'random'}, default='ascending'
+        The order in which the features will be imputed. Possible values:
+
+        - `'ascending'`: From features with fewest missing values to most.
+        - `'descending'`: From features with most missing values to fewest.
+        the missing indicator even if there are missing values at
+        transform/test time.
+
+    keep_empty_features : bool, default=False
+        If True, features that consist exclusively of missing values when
+        `fit` is called are returned in results when `transform` is called.
+        The imputed value is always `0` except when
+        `initial_strategy="constant"` in which case `fill_value` will be
+        used instead.
+
+        .. versionadded:: 1.2
+
+    Attributes
+    ----------
+    initial_imputer_ : object of type :class:`~sklearn.impute.SimpleImputer`
+        Imputer used to initialize the missing values.
+        **_BaseImputer._parameter_constraints,
+        "estimator": [None, HasMethods(["fit", "predict"])],
+        "sample_posterior": ["boolean"],
+        "max_iter": [Interval(Integral, 0, None, closed="left")],
+        "tol": [Interval(Real, 0, None, closed="left")],
+        "n_nearest_features": [None, Interval(Integral, 1, None, closed="left")],
+        "initial_strategy": [
+            StrOptions({"mean", "median", "most_frequent", "constant"})
+        ],
+        "imputation_order": [
+            StrOptions({"ascending", "descending", "roman", "arabic", "random"})
+        ],
+        "skip_complete": ["boolean"],
+        "min_value": [None, Interval(Real, None, None, closed="both"), "array-like"],
+        "max_value": [None, Interval(Real, None, None, closed="both"), "array-like"],
+        "verbose": ["verbose"],
+        "random_state": ["random_state"],
+    }
+
+    def __init__(
+        self,
+        estimator=None,
+        *,
+        missing_values=np.nan,
+        sample_posterior=False,
+        max_iter=10,
+        tol=1e-3,
+        n_nearest_features=None,
+        initial_strategy="mean",
+        imputation_order="ascending",
+        skip_complete=False,
+        min_value=-np.inf,
+        max_value=np.inf,
+        verbose=0,
+        random_state=None,
+        add_indicator=False,
+        keep_empty_features=False,
+    ):
+        super().__init__(
+            missing_values=missing_values,
+            add_indicator=add_indicator,
+            keep_empty_features=keep_empty_features,
+        )
+
+        self.estimator = estimator
+        self.sample_posterior = sample_posterior
+        self.max_iter = max_iter
+        self.tol = tol
+        self.n_nearest_features = n_nearest_features
+        self.initial_strategy = initial_strategy
+        self.imputation_order = imputation_order
+        self.skip_complete = skip_complete
+        self.min_value = min_value
+        self.max_value = max_value
+        self.verbose = verbose
+        self.random_state = random_state
+
+    def _impute_one_feature(
+        self,
+        X_filled,
+        mask_missing_values,
+        feat_idx,
+        neighbor_feat_idx,
+        estimator=None,
+        fit_mode=True,
+    ):
+
+        X = self._validate_data(
+            X,
+            dtype=FLOAT_DTYPES,
+            order="F",
+            reset=in_fit,
+            force_all_finite=force_all_finite,
+        )
+        _check_inputs_dtype(X, self.missing_values)
+
+        X_missing_mask = _get_mask(X, self.missing_values)
+        mask_missing_values = X_missing_mask.copy()
+        if self.initial_imputer_ is None:
+            self.initial_imputer_ = SimpleImputer(
+                missing_values=self.missing_values,
+                strategy=self.initial_strategy,
+                keep_empty_features=self.keep_empty_features,
+            )
+            X_filled = self.initial_imputer_.fit_transform(X)
+        else:
+            X_filled = self.initial_imputer_.transform(X)
+
+        valid_mask = np.flatnonzero(
+            np.logical_not(np.isnan(self.initial_imputer_.statistics_))
+        )
+
+        if not self.keep_empty_features:
+            # drop empty features
+            Xt = X[:, valid_mask]
+            mask_missing_values = mask_missing_values[:, valid_mask]
+        else:
+172:        - If "constant", then replace missing values with fill_value. Can be
+178:    fill_value : str or numerical value, default=None
+179:        When strategy == "constant", `fill_value` is used to replace all
+181:        `fill_value` must be a string.
+182:        If `None`, `fill_value` will be 0 when imputing numerical
+214:        in which case `fill_value` will be used instead.
+275:        "fill_value": "no_validation",  # any object is valid
+285:        fill_value=None,
+297:        self.fill_value = fill_value
+392:        # default fill_value is 0 for numerical input and "missing_value"
+394:        if self.fill_value is None:
+396:                fill_value = 0
+398:                fill_value = "missing_value"
+400:            fill_value = self.fill_value
+402:        # fill_value should be numerical in case of numerical input
+406:            and not isinstance(fill_value, numbers.Real)
+409:                "'fill_value'={0} is invalid. Expected a "
+411:                "data".format(fill_value)
+425:                    X, self.strategy, self.missing_values, fill_value
+430:                X, self.strategy, self.missing_values, fill_value
+435:    def _sparse_fit(self, X, strategy, missing_values, fill_value):
+445:            # fill_value in each column
+446:            statistics.fill(fill_value)
+477:    def _dense_fit(self, X, strategy, missing_values, fill_value):
+532:            # fill_value in each column
+533:            return np.full(X.shape[1], fill_value, dtype=X.dtype)
+[0m
+[0m$ [0mcd /testbed && sed -n 165,185p sklearn/impute/_base.py; sed -n 385,435p sklearn/impute/_base.py; sed -n 520,540p sklearn/impute/_base.py; sed -n 630,660p sklearn/impute/_iterative.py; grep -n "keep_empty_features\|_validate_input\|def _initial_imputation" sklearn/impute/_iterative.py
+- If "mean", then replace missing values using the mean along
+          each column. Can only be used with numeric data.
+        - If "median", then replace missing values using the median along
+          each column. Can only be used with numeric data.
+        - If "most_frequent", then replace missing using the most frequent
+          value along each column. Can be used with strings or numeric data.
+          If there is more than one such value, only the smallest is returned.
+        - If "constant", then replace missing values with fill_value. Can be
+          used with strings or numeric data.
+
+        .. versionadded:: 0.20
+           strategy="constant" for fixed value imputation.
+
+    fill_value : str or numerical value, default=None
+        When strategy == "constant", `fill_value` is used to replace all
+        occurrences of missing_values. For string or object data types,
+        `fill_value` must be a string.
+        If `None`, `fill_value` will be 0 when imputing numerical
+        data and "missing_value" for strings or object data types.
+
+    verbose : int, default=0
+                "always be raised upon the removal of empty columns "
+                "in the future version.",
+                FutureWarning,
+            )
+
+        X = self._validate_input(X, in_fit=True)
+
+        # default fill_value is 0 for numerical input and "missing_value"
+        # otherwise
+        if self.fill_value is None:
+            if X.dtype.kind in ("i", "u", "f"):
+                fill_value = 0
+            else:
+                fill_value = "missing_value"
+        else:
+            fill_value = self.fill_value
+
+        # fill_value should be numerical in case of numerical input
+        if (
+            self.strategy == "constant"
+            and X.dtype.kind in ("i", "u", "f")
+            and not isinstance(fill_value, numbers.Real)
+        ):
+            raise ValueError(
+                "'fill_value'={0} is invalid. Expected a "
+                "numerical value when imputing numerical "
+                "data".format(fill_value)
+            )
+
+        if sp.issparse(X):
+            # missing_values = 0 not allowed with sparse data as it would
+            # force densification
+            if self.missing_values == 0:
+                raise ValueError(
+                    "Imputation not possible when missing_values "
+                    "== 0 and input is sparse. Provide a dense "
+                    "array instead."
+                )
+            else:
+                self.statistics_ = self._sparse_fit(
+                    X, self.strategy, self.missing_values, fill_value
+                )
+
+        else:
+            self.statistics_ = self._dense_fit(
+                X, self.strategy, self.missing_values, fill_value
+            )
+
+        return self
+
+    def _sparse_fit(self, X, strategy, missing_values, fill_value):
+                row_mask = np.logical_not(row_mask).astype(bool)
+                row = row[row_mask]
+                if len(row) == 0 and self.keep_empty_features:
+                    most_frequent[i] = 0
+                else:
+                    most_frequent[i] = _most_frequent(row, np.nan, 0)
+
+            return most_frequent
+
+        # Constant
+        elif strategy == "constant":
+            # for constant strategy, self.statistcs_ is used to store
+            # fill_value in each column
+            return np.full(X.shape[1], fill_value, dtype=X.dtype)
+
+    def transform(self, X):
+        """Impute all missing values in `X`.
+
+        Parameters
+        ----------
+        X : {array-like, sparse matrix}, shape (n_samples, n_features)
+        else:
+            # mark empty features as not missing and keep the original
+            # imputation
+            mask_missing_values[:, valid_mask] = True
+            Xt = X
+
+        return Xt, X_filled, mask_missing_values, X_missing_mask
+
+    @staticmethod
+    def _validate_limit(limit, limit_type, n_features):
+        """Validate the limits (min/max) of the feature values.
+
+        Converts scalar min/max limits to vectors of shape `(n_features,)`.
+
+        Parameters
+        ----------
+        limit: scalar or array-like
+            The user-specified limit (i.e, min_value or max_value).
+        limit_type: {'max', 'min'}
+            Type of limit to validate.
+        n_features: int
+            Number of features in the dataset.
+
+        Returns
+        -------
+        limit: ndarray, shape(n_features,)
+            Array of limits, one for each feature.
+        """
+        limit_bound = np.inf if limit_type == "max" else -np.inf
+        limit = limit_bound if limit is None else limit
+        if np.isscalar(limit):
+173:    keep_empty_features : bool, default=False
+311:        keep_empty_features=False,
+316:            keep_empty_features=keep_empty_features,
+565:    def _initial_imputation(self, X, in_fit=False):
+616:                keep_empty_features=self.keep_empty_features,
+626:        if not self.keep_empty_features:
+[0m
+[0m$ [0mcd /testbed && grep -n "valid_statistics\|valid_mask\|isnan(self.statistics_)" sklearn/impute/_base.py; sed -n 560,575p sklearn/impute/_base.py; python -c "
+import numpy as np
+from sklearn.impute import SimpleImputer
+X=np.array([[np.nan,1.],[np.nan,np.nan],[np.nan,3.]])
+print(SimpleImputer(strategy='constant',fill_value=np.nan).fit_transform(X))
+print(SimpleImputer(strategy='constant',fill_value=-1).fit_transform(X))
+"
+565:            valid_statistics = statistics
+566:            valid_statistics_indexes = None
+569:            invalid_mask = _get_mask(statistics, np.nan)
+570:            valid_mask = np.logical_not(invalid_mask)
+571:            valid_statistics = statistics[valid_mask]
+572:            valid_statistics_indexes = np.flatnonzero(valid_mask)
+574:            if invalid_mask.any():
+575:                invalid_features = np.arange(X.shape[1])[invalid_mask]
+585:                X = X[:, valid_statistics_indexes]
+598:                if valid_statistics_indexes is None:
+606:                X.data[mask] = valid_statistics[indexes].astype(X.dtype, copy=False)
+609:            if valid_statistics_indexes is None:
+612:                mask_valid_features = missing_mask[:, valid_statistics_indexes]
+614:            values = np.repeat(valid_statistics, n_missing)
+        # compute mask before eliminating invalid features
+        missing_mask = _get_mask(X, self.missing_values)
+
+        # Decide whether to keep missing features
+        if self.strategy == "constant" or self.keep_empty_features:
+            valid_statistics = statistics
+            valid_statistics_indexes = None
+        else:
+            # same as np.isnan but also works for object dtypes
+            invalid_mask = _get_mask(statistics, np.nan)
+            valid_mask = np.logical_not(invalid_mask)
+            valid_statistics = statistics[valid_mask]
+            valid_statistics_indexes = np.flatnonzero(valid_mask)
+
+            if invalid_mask.any():
+                invalid_features = np.arange(X.shape[1])[invalid_mask]
+[[nan  1.]
+ [nan nan]
+ [nan  3.]]
+[[-1.  1.]
+ [-1. -1.]
+ [-1.  3.]]
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+import re
+p='sklearn/impute/_iterative.py'
+s=open(p).read()
+def rep(old,new,count=1):
+    global s
+    assert s.count(old)==count,(s.count(old),old)
+    s=s.replace(old,new)
+
+rep("""        Which strategy to use to initialize the missing values. Same as the
+        `strategy` parameter in :class:`~sklearn.impute.SimpleImputer`.
+""","""        Which strategy to use to initialize the missing values. Same as the
+        `strategy` parameter in :class:`~sklearn.impute.SimpleImputer`.
+
+    fill_value : str or numerical value, default=None
+        When `initial_strategy="constant"`, `fill_value` is used to replace
+        all occurrences of `missing_values` during initialization. For string
+        or object data types, `fill_value` must be a string. If `None`,
+        `fill_value` will be 0 when imputing numerical data and
+        "missing_value" for strings or object data types. `np.nan` is also
+        accepted, which can be useful for tree-based estimators.
+
+        .. versionadded:: 1.6
+""")
+rep("""        "initial_strategy": [
+            StrOptions({"mean", "median", "most_frequent", "constant"})
+        ],
+""","""        "initial_strategy": [
+            StrOptions({"mean", "median", "most_frequent", "constant"})
+        ],
+        "fill_value": "no_validation",  # any object is valid
+""")
+rep("""        initial_strategy="mean",
+        imputation_order="ascending",""","""        initial_strategy="mean",
+        fill_value=None,
+        imputation_order="ascending",""")
+rep("""        self.initial_strategy = initial_strategy
+""","""        self.initial_strategy = initial_strategy
+        self.fill_value = fill_value
+""")
+rep("""                strategy=self.initial_strategy,
+                keep_empty_features=self.keep_empty_features,""","""                strategy=self.initial_strategy,
+                fill_value=self.fill_value,
+                keep_empty_features=self.keep_empty_features,""")
+rep("""        valid_mask = np.flatnonzero(
+            np.logical_not(np.isnan(self.initial_imputer_.statistics_))
+        )
+""","""        if self.initial_strategy == "constant":
+            # With a constant strategy, every feature is imputed with
+            # `fill_value`, which may itself be NaN (e.g. for tree-based
+            # estimators). In that case the statistics cannot be used to
+            # detect invalid features, so all features are kept, consistently
+            # with SimpleImputer.
+            valid_mask = np.arange(X.shape[1])
+        else:
+            valid_mask = np.flatnonzero(
+                np.logical_not(np.isnan(self.initial_imputer_.statistics_))
+            )
+""")
+open(p,'w').write(s)
+EOF
+python -c "
+import numpy as np
+from sklearn.impute import IterativeImputer
+X=np.array([[np.nan,1.,2.],[np.nan,np.nan,3.],[np.nan,4.,np.nan],[np.nan,5.,6.]])
+print(IterativeImputer(initial_strategy='constant',fill_value=np.nan,max_iter=0).fit_transform(X))
+print(IterativeImputer(initial_strategy='constant',fill_value=-1,max_iter=2,random_state=0).fit_transform(X))
+print(IterativeImputer(random_state=0).fit_transform(X))
+print(IterativeImputer(initial_strategy='constant',fill_value=-1,max_iter=2,random_state=0,keep_empty_features=True).fit_transform(X))
+"
+python -m pytest -q sklearn/impute 2>&1 | tail -3
+Traceback (most recent call last):
+  File "<string>", line 3, in <module>
+  File "/testbed/sklearn/impute/__init__.py", line 18, in __getattr__
+    raise ImportError(
+ImportError: IterativeImputer is experimental and the API might change without any deprecation cycle. To use it, you need to explicitly import enable_iterative_imputer:
+from sklearn.experimental import enable_iterative_imputer
+[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[33m [ 95%]
+[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[33m                                                            [100%][0m
+[33m[32m301 passed[0m, [33m[1m487 warnings[0m[33m in 82.31s (0:01:22)[0m[0m
+[0m
+[0m$ [0mcd /testbed && python -c "
+import numpy as np
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import IterativeImputer
+X=np.array([[np.nan,1.,2.],[np.nan,np.nan,3.],[np.nan,4.,np.nan],[np.nan,5.,6.]])
+print(IterativeImputer(initial_strategy='constant',fill_value=np.nan,max_iter=0).fit_transform(X))
+print(IterativeImputer(initial_strategy='constant',fill_value=-1,max_iter=2,random_state=0).fit_transform(X))
+print(IterativeImputer(random_state=0).fit_transform(X))
+"
+Traceback (most recent call last):
+  File "<string>", line 7, in <module>
+  File "/testbed/sklearn/utils/_set_output.py", line 142, in wrapped
+    data_to_wrap = f(self, X, *args, **kwargs)
+  File "/testbed/sklearn/impute/_iterative.py", line 772, in fit_transform
+    Xt, estimator = self._impute_one_feature(
+  File "/testbed/sklearn/impute/_iterative.py", line 414, in _impute_one_feature
+    estimator.fit(X_train, y_train)
+  File "/testbed/sklearn/linear_model/_bayes.py", line 231, in fit
+    X, y = self._validate_data(X, y, dtype=[np.float64, np.float32], y_numeric=True)
+  File "/testbed/sklearn/base.py", line 562, in _validate_data
+    X, y = check_X_y(X, y, **check_params)
+  File "/testbed/sklearn/utils/validation.py", line 1106, in check_X_y
+    X = check_array(
+  File "/testbed/sklearn/utils/validation.py", line 931, in check_array
+    raise ValueError(
+ValueError: Found array with 0 sample(s) (shape=(0, 2)) while a minimum of 1 is required by BayesianRidge.
+[[nan  1.  2.]
+ [nan nan  3.]
+ [nan  4. nan]
+ [nan  5.  6.]]
+[0m
+[0m$ [0mcd /testbed && python -c "
+import numpy as np
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import IterativeImputer
+X=np.array([[np.nan,1.,2.],[7,np.nan,3.],[3,4.,np.nan],[5,5.,6.]])
+print(IterativeImputer(initial_strategy='constant',fill_value=np.nan,max_iter=0).fit_transform(X))
+print(IterativeImputer(initial_strategy='constant',fill_value=-1,max_iter=2,random_state=0).fit_transform(X))
+print(IterativeImputer(initial_strategy='constant',fill_value=np.nan,max_iter=2,random_state=0).fit_transform(X))
+"; git status --short
+Traceback (most recent call last):
+  File "<string>", line 8, in <module>
+  File "/testbed/sklearn/utils/_set_output.py", line 142, in wrapped
+    data_to_wrap = f(self, X, *args, **kwargs)
+  File "/testbed/sklearn/impute/_iterative.py", line 772, in fit_transform
+    Xt, estimator = self._impute_one_feature(
+  File "/testbed/sklearn/impute/_iterative.py", line 414, in _impute_one_feature
+    estimator.fit(X_train, y_train)
+  File "/testbed/sklearn/linear_model/_bayes.py", line 231, in fit
+    X, y = self._validate_data(X, y, dtype=[np.float64, np.float32], y_numeric=True)
+  File "/testbed/sklearn/base.py", line 562, in _validate_data
+    X, y = check_X_y(X, y, **check_params)
+  File "/testbed/sklearn/utils/validation.py", line 1106, in check_X_y
+    X = check_array(
+  File "/testbed/sklearn/utils/validation.py", line 921, in check_array
+    _assert_all_finite(
+  File "/testbed/sklearn/utils/validation.py", line 161, in _assert_all_finite
+    raise ValueError(msg_err)
+ValueError: Input X contains NaN.
+BayesianRidge does not accept missing values encoded as NaN natively. For supervised learning, you might want to consider sklearn.ensemble.HistGradientBoostingClassifier and Regressor which accept missing values encoded as NaNs natively. Alternatively, it is possible to preprocess the data, for instance by using an imputer transformer in a pipeline or drop samples with missing values. See https://scikit-learn.org/stable/modules/impute.html You can find a list of all estimators that handle NaN values at the following page: https://scikit-learn.org/stable/modules/impute.html#estimators-that-handle-nan-values
+[[nan  1.  2.]
+ [ 7. nan  3.]
+ [ 3.  4. nan]
+ [ 5.  5.  6.]]
+[[5.61538437 1.         2.        ]
+ [7.         3.33259353 3.        ]
+ [3.         4.         6.64624926]
+ [5.         5.         6.        ]]
+ M sklearn/impute/_iterative.py
+[0m
+[0m$ [0mcd /testbed && python -c "
+import numpy as np
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import IterativeImputer
+from sklearn.ensemble import HistGradientBoostingRegressor
+X=np.array([[np.nan,1.,2.],[7,np.nan,3.],[3,4.,np.nan],[5,5.,6.]])
+print(IterativeImputer(estimator=HistGradientBoostingRegressor(),initial_strategy='constant',fill_value=np.nan,max_iter=3,random_state=0).fit_transform(X))
+"; git diff --stat
+[[5.         1.         2.        ]
+ [7.         3.33333333 3.        ]
+ [3.         4.         3.66666667]
+ [5.         5.         6.        ]]
+ sklearn/impute/_iterative.py | 28 +++++++++++++++++++++++++---
+ 1 file changed, 25 insertions(+), 3 deletions(-)
+[0m

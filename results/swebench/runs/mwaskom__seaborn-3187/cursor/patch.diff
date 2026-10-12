@@ -1,0 +1,66 @@
+diff --git a/seaborn/_core/plot.py b/seaborn/_core/plot.py
+index 8915616b..377431f9 100644
+--- a/seaborn/_core/plot.py
++++ b/seaborn/_core/plot.py
+@@ -1569,6 +1569,9 @@ class Plotter:
+                         break
+                 else:
+                     title = self._resolve_label(p, var, data.names[var])
++                    offset = scales[var]._legend_offset
++                    if offset:
++                        title = f"{title} ({offset})"
+                     entry = (title, data.ids[var]), [var], (values, labels)
+                     schema.append(entry)
+ 
+diff --git a/seaborn/_core/scales.py b/seaborn/_core/scales.py
+index 55874bf2..4e030eb7 100644
+--- a/seaborn/_core/scales.py
++++ b/seaborn/_core/scales.py
+@@ -61,12 +61,14 @@ class Scale:
+     _matplotlib_scale: ScaleBase
+     _spacer: staticmethod
+     _legend: tuple[list[str], list[Any]] | None
++    _legend_offset: str | None
+ 
+     def __post_init__(self):
+ 
+         self._tick_params = None
+         self._label_params = None
+         self._legend = None
++        self._legend_offset = None
+ 
+     def tick(self):
+         raise NotImplementedError()
+@@ -378,8 +380,13 @@ class ContinuousBase(Scale):
+             axis.set_view_interval(vmin, vmax)
+             locs = axis.major.locator()
+             locs = locs[(vmin <= locs) & (locs <= vmax)]
+-            labels = axis.major.formatter.format_ticks(locs)
++            formatter = axis.major.formatter
++            labels = formatter.format_ticks(locs)
+             new._legend = list(locs), list(labels)
++            # Formatters may factor out a multiplicative offset (e.g. "1e6") that
++            # the labels do not include; it must be surfaced to the legend title.
++            # format_ticks must be called first, as it is what computes the offset.
++            new._legend_offset = formatter.get_offset() or None
+ 
+         return new
+ 
+diff --git a/seaborn/utils.py b/seaborn/utils.py
+index 2407853c..ec8448fb 100644
+--- a/seaborn/utils.py
++++ b/seaborn/utils.py
+@@ -705,6 +705,13 @@ def locator_to_legend_entries(locator, limits, dtype):
+     # once pinned matplotlib>=3.1.0 with:
+     # formatted_levels = formatter.format_ticks(raw_levels)
+     formatter.set_locs(raw_levels)
++    if formatter.get_offset():
++        # An offset (e.g. "1e6") is not shown alongside the legend labels, so the
++        # labels would be wrong. Use the full values instead.
++        formatter = mpl.ticker.ScalarFormatter(useOffset=False)
++        formatter.set_scientific(False)
++        formatter.axis = dummy_axis()
++        formatter.set_locs(raw_levels)
+     formatted_levels = [formatter(x) for x in raw_levels]
+ 
+     return raw_levels, formatted_levels

@@ -1,0 +1,11 @@
+The root cause is in `TemplateView.get()`: it wraps every URL kwarg in a `SimpleLazyObject` before passing them to `get_context_data()`, so user code receives lazy proxies. The existing test only needs the deprecation warning to fire when a template value is accessed, so I'll keep the lazy wrapping for the context entries and pass the real values into `get_context_data()`.
+I changed `TemplateView.get()` so `get_context_data()` receives the real URL kwargs instead of `SimpleLazyObject` proxies. The `generic_views` test suite passes (214 tests).
+
+The fix is in `django/views/generic/base.py`:
+
+- **`get()`** now calls `self.get_context_data(**kwargs)` with the plain values. The issue's `offer_slug` is a real string again, so `get_object_or_404` works without the `str()` workaround.
+- **Deprecation warning:** the lazy wrapping is still applied, but only to entries in the returned context that are the same objects as the URL kwargs. Those entries still warn when accessed, which keeps `test_template_params_warning` passing.
+
+One behaviour change: if a subclass's `get_context_data()` returns a URL kwarg under a new object, that value is no longer wrapped. The default `ContextMixin` behaviour is unchanged.
+
+I did not add or modify any tests, and I did not run the exact `OfferView` reproduction from the issue.

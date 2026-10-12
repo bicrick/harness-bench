@@ -1,0 +1,106 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..92776a53fe 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -550,9 +550,101 @@ class Query(BaseExpression):
+         Perform a COUNT() query using the current filter constraints.
+         """
+         obj = self.clone()
++        obj.strip_unused_annotations()
+         obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+         return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++    def strip_unused_annotations(self):
++        """
++        Remove annotations that cannot change the result of a COUNT(), so the
++        count doesn't need extra joins or a GROUP BY subquery for them.
++
++        An annotation is kept if it is referenced by the WHERE clause (filters
++        on annotations place the annotation expression in the tree), if it is
++        referenced by a kept annotation, or if it is potentially row-changing
++        (multi-hop joins or correlated subqueries).
++        """
++        if not self.annotations:
++            return
++        # Grouping, distinct and sliced queries depend on the row set produced
++        # by annotations, so leave them untouched.
++        if (
++            isinstance(self.group_by, tuple)
++            or self.distinct
++            or self.is_sliced
++            or self.combinator
++        ):
++            return
++        # Subquery annotations can correlate with joins created for other
++        # annotations, and that correlation is hidden inside the nested Query,
++        # so leave the query untouched if any are present.
++        if any(
++            isinstance(node, Query)
++            for node in self._gen_nodes(self.annotations.values())
++        ):
++            return
++
++        referenced = self._referenced_annotation_ids()
++        for alias, annotation in list(self.annotations.items()):
++            if annotation.is_summary or id(annotation) in referenced:
++                continue
++            # Only strip annotations whose joins are a single hop from the
++            # base table. Multi-hop joins (e.g. through a m2m table) can
++            # change the row multiplicity in ways that are not safe to undo.
++            col_aliases = set(self._gen_col_aliases([annotation]))
++            if not all(self._is_single_hop_alias(a) for a in col_aliases):
++                continue
++            del self.annotations[alias]
++            if self.annotation_select_mask is not None:
++                self.annotation_select_mask.discard(alias)
++            # Release the joins the removed annotation depended on so the
++            # compiler stops emitting them.
++            for col_alias in col_aliases:
++                if self.alias_refcount.get(col_alias, 0) > 0:
++                    self.unref_alias(col_alias)
++        self._annotation_select_cache = None
++
++    def _referenced_annotation_ids(self):
++        """
++        Return the ids of annotations referenced by the WHERE clause, plus
++        those transitively referenced by such annotations.
++        """
++        annotations_by_id = {id(a): a for a in self.annotations.values()}
++        referenced = {
++            id(node)
++            for node in self._gen_nodes(self.where.children)
++            if id(node) in annotations_by_id
++        }
++        # Propagate references through kept annotations until stable.
++        pending = list(referenced)
++        while pending:
++            annotation = annotations_by_id[pending.pop()]
++            for node in self._gen_nodes(annotation.get_source_expressions()):
++                if id(node) in annotations_by_id and id(node) not in referenced:
++                    referenced.add(id(node))
++                    pending.append(id(node))
++        return referenced
++
++    def _is_single_hop_alias(self, alias):
++        """
++        Return True if alias is the base table or a join directly off it.
++        """
++        if alias == self.base_table:
++            return True
++        join = self.alias_map.get(alias)
++        return isinstance(join, Join) and join.parent_alias == self.base_table
++
++    @classmethod
++    def _gen_nodes(cls, exprs):
++        """Yield every expression node reachable from exprs (depth-first)."""
++        stack = list(exprs)
++        while stack:
++            node = stack.pop()
++            yield node
++            get_source = getattr(node, "get_source_expressions", None)
++            if callable(get_source):
++                stack.extend(get_source())
++
+     def has_filters(self):
+         return self.where
+ 

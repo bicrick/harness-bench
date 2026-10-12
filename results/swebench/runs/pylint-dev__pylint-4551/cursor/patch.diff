@@ -1,0 +1,123 @@
+diff --git a/pylint/pyreverse/inspector.py b/pylint/pyreverse/inspector.py
+index 8fa12202..8f6d9370 100644
+--- a/pylint/pyreverse/inspector.py
++++ b/pylint/pyreverse/inspector.py
+@@ -60,6 +60,100 @@ def interfaces(node, herited=True, handler_func=_iface_hdlr):
+         raise astroid.exceptions.InferenceError()
+ 
+ 
++def _argument_annotation(arguments, name_node):
++    """Return the annotation declared for an argument name, or None."""
++    groups = (
++        (arguments.posonlyargs, arguments.posonlyargs_annotations),
++        (arguments.args, arguments.annotations),
++        (arguments.kwonlyargs, arguments.kwonlyargs_annotations),
++    )
++    for args, annotations in groups:
++        for arg, annotation in zip(args or (), annotations or ()):
++            if arg is name_node:
++                return annotation
++    return None
++
++
++def _declared_annotation(name_node):
++    """Return the annotation declared on the name definition, or None."""
++    parent = name_node.parent
++    if isinstance(parent, astroid.AnnAssign):
++        return parent.annotation
++    if isinstance(parent, astroid.Arguments):
++        return _argument_annotation(parent, name_node)
++    return None
++
++
++def get_annotation(target):
++    """Return the type annotation applying to an assignment target, or None.
++
++    Covers `x: T = ...`, annotated arguments and assignments of an annotated
++    name, e.g. `self.a = a` where `a: str = None`.
++    """
++    parent = target.parent
++    if isinstance(parent, astroid.AnnAssign):
++        return parent.annotation
++    if isinstance(parent, astroid.Arguments):
++        return _argument_annotation(parent, target)
++    if isinstance(parent, astroid.Assign) and isinstance(parent.value, astroid.Name):
++        _, assignments = parent.value.lookup(parent.value.name)
++        for assignment in assignments:
++            annotation = _declared_annotation(assignment)
++            if annotation is not None:
++                return annotation
++    return None
++
++
++def _base_name(node):
++    """Return the name of a (possibly qualified) reference, or None."""
++    if isinstance(node, astroid.Name):
++        return node.name
++    if isinstance(node, astroid.Attribute):
++        return node.attrname
++    return None
++
++
++def _annotation_classes(annotation):
++    """Return the class nodes denoted by a type annotation.
++
++    `Optional[X]`, `Union[X, Y]` and `X | Y` are unwrapped so that their
++    members are reported instead of the typing construct itself.
++    """
++    if isinstance(annotation, astroid.BinOp) and annotation.op == "|":
++        return _annotation_classes(annotation.left) + _annotation_classes(
++            annotation.right
++        )
++    if isinstance(annotation, astroid.Subscript) and _base_name(
++        annotation.value
++    ) in ("Optional", "Union"):
++        members = annotation.slice
++        if isinstance(members, astroid.Tuple):
++            members = members.elts
++        else:
++            members = [members]
++        return [cls for member in members for cls in _annotation_classes(member)]
++    try:
++        inferred = list(annotation.infer())
++    except astroid.InferenceError:
++        return []
++    return [node for node in inferred if isinstance(node, astroid.ClassDef)]
++
++
++def infer_target_types(target):
++    """Return the set of types of an assignment target.
++
++    A type annotation takes precedence over the inferred value, so that
++    `a: str = None` is typed `str` rather than `NoneType`. The inferred value
++    is used when no annotation applies or the annotation cannot be resolved.
++    """
++    annotation = get_annotation(target)
++    if annotation is not None:
++        classes = set(_annotation_classes(annotation))
++        if classes:
++            return classes
++    return set(target.infer())
++
++
+ class IdGeneratorMixIn:
+     """Mixin adding the ability to generate integer uid."""
+ 
+@@ -218,7 +312,7 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+                     self.visit_module(frame)
+ 
+             current = frame.locals_type[node.name]
+-            values = set(node.infer())
++            values = infer_target_types(node)
+             frame.locals_type[node.name] = list(set(current) | values)
+         except astroid.InferenceError:
+             pass
+@@ -230,7 +324,7 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+         handle instance_attrs_type
+         """
+         try:
+-            values = set(node.infer())
++            values = infer_target_types(node)
+             current = set(parent.instance_attrs_type[node.attrname])
+             parent.instance_attrs_type[node.attrname] = list(current | values)
+         except astroid.InferenceError:

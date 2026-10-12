@@ -1,0 +1,43 @@
+diff --git a/sphinx/extension.py b/sphinx/extension.py
+index 7ec6c8518..650fa941f 100644
+--- a/sphinx/extension.py
++++ b/sphinx/extension.py
+@@ -10,6 +10,8 @@
+ 
+ from typing import TYPE_CHECKING, Any, Dict
+ 
++from packaging.version import InvalidVersion, Version
++
+ from sphinx.config import Config
+ from sphinx.errors import VersionRequirementError
+ from sphinx.locale import __
+@@ -21,6 +23,19 @@ if TYPE_CHECKING:
+ logger = logging.getLogger(__name__)
+ 
+ 
++def _is_version_older(required: str, actual: str) -> bool:
++    """Return True if *actual* is older than *required*.
++
++    Versions are compared as PEP 440 versions so that e.g. ``0.10`` is newer
++    than ``0.6``.  If either side cannot be parsed (e.g. the built-in
++    ``'builtin'`` marker), fall back to a plain string comparison.
++    """
++    try:
++        return Version(required) > Version(actual)
++    except InvalidVersion:
++        return required > actual
++
++
+ class Extension:
+     def __init__(self, name: str, module: Any, **kwargs: Any) -> None:
+         self.name = name
+@@ -51,7 +66,8 @@ def verify_needs_extensions(app: "Sphinx", config: Config) -> None:
+                               'but it is not loaded.'), extname)
+             continue
+ 
+-        if extension.version == 'unknown version' or reqversion > extension.version:
++        if extension.version == 'unknown version' or _is_version_older(str(reqversion),
++                                                                       str(extension.version)):
+             raise VersionRequirementError(__('This project needs the extension %s at least in '
+                                              'version %s and therefore cannot be built with '
+                                              'the loaded version (%s).') %

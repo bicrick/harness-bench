@@ -1,0 +1,10 @@
+I'll look at how pytest collects marks from classes.
+The marks come from `getattr(obj, "pytestmark")`, which only sees the MRO-winning attribute. The fix is to walk the MRO for classes and merge their `pytestmark` lists. Let me check how `get_unpacked_marks` is used for classes (e.g. in `python.py`'s `get_unpacked_marks` call sites).
+The `python.py` call sites use `get_unpacked_marks(self.obj)` for Class (line 314) and Function/Module. The cleanest fix is to have `get_unpacked_marks` merge marks across the MRO for classes, so that `Class` collection picks up base-class marks.
+Imports are present. One concern: `mark not in mark_list` compares `Mark` objects by attrs equality, which would dedupe identical marks from different classes (e.g. two `@mark.foo` on different bases). That's reasonable, but I'll keep it simple and avoid dedup by identity-less equality to preserve all marks. Let me reconsider: the `store_mark` path for a class already reads `obj.pytestmark` (MRO-winning), so `store_mark` on a subclass still only sees its own chain — fine. I'll drop the dedup so distinct marks aren't lost, and verify with the issue's scenario.
+Both marks (`foo` and `bar`) now reach `TestDings`, and the existing mark tests pass. Now I'll add the changelog entry the repo requires.
+I fixed the issue in `src/_pytest/mark/structures.py`. When a class is passed to `get_unpacked_marks`, it now collects `pytestmark` from every class in its MRO (base-most first), instead of only reading the single attribute that wins by MRO. In the issue's scenario, `TestDings(Foo, Bar)` now gets both `foo` and `bar`.
+
+I checked this with a small reproduction (both marks show up) and ran `testing/test_mark.py` and `testing/test_mark_expression.py`, which pass (172 passed, 1 xfailed). I didn't run the full test suite.
+
+I also added `changelog/8016.bugfix.rst`. The issue number is a guess, since no number was given, so rename it to the real issue number if it differs.

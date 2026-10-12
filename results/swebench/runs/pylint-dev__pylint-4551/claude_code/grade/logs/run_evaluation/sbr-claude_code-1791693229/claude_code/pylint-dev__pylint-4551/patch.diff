@@ -1,0 +1,39 @@
+diff --git a/pylint/pyreverse/inspector.py b/pylint/pyreverse/inspector.py
+index 8fa12202..be0860b9 100644
+--- a/pylint/pyreverse/inspector.py
++++ b/pylint/pyreverse/inspector.py
+@@ -39,6 +39,25 @@ def _astroid_wrapper(func, modname):
+     return None
+ 
+ 
++def _infer_annotated_argument(node):
++    """return the inferred type annotation of the argument assigned to an
++    attribute, e.g. `self.a = a` with `def __init__(self, a: str = None)`
++
++    return None if the assigned value is not an annotated argument
++    """
++    value = getattr(node.parent, "value", None)
++    if not isinstance(value, astroid.Name):
++        return None
++    _, assigns = value.lookup(value.name)
++    for assign in assigns:
++        arguments = assign.parent
++        if isinstance(arguments, astroid.Arguments) and assign in arguments.args:
++            annotation = arguments.annotations[arguments.args.index(assign)]
++            if annotation is not None:
++                return set(annotation.infer())
++    return None
++
++
+ def interfaces(node, herited=True, handler_func=_iface_hdlr):
+     """Return an iterator on interfaces implemented by the given class node."""
+     try:
+@@ -230,7 +249,7 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+         handle instance_attrs_type
+         """
+         try:
+-            values = set(node.infer())
++            values = _infer_annotated_argument(node) or set(node.infer())
+             current = set(parent.instance_attrs_type[node.attrname])
+             parent.instance_attrs_type[node.attrname] = list(current | values)
+         except astroid.InferenceError:

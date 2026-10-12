@@ -1,0 +1,53 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..cb77a1fa8c 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -550,9 +550,48 @@ class Query(BaseExpression):
+         Perform a COUNT() query using the current filter constraints.
+         """
+         obj = self.clone()
++        if not (obj.distinct or obj.is_sliced or obj.combinator):
++            obj.strip_unused_annotations()
+         obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+         return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++    def strip_unused_annotations(self):
++        """
++        Remove annotations that are not referenced by the WHERE clause, other
++        annotations, or ordering. Such annotations cannot affect the row count.
++        """
++        if not self.annotations:
++            return
++        referenced = set()
++        for expr in chain(self.where.children, self.order_by):
++            if isinstance(expr, str):
++                referenced.add(expr.lstrip("-"))
++            elif hasattr(expr, "flatten"):
++                for node in expr.flatten():
++                    if isinstance(node, Ref):
++                        referenced.add(node.refs)
++            else:
++                for node in self._gen_cols([expr]):
++                    pass
++        # Iterate to a fixed point, since kept annotations may reference others.
++        changed = True
++        while changed:
++            changed = False
++            for alias, annotation in self.annotations.items():
++                if alias in referenced:
++                    for node in annotation.flatten():
++                        if isinstance(node, Ref) and node.refs not in referenced:
++                            referenced.add(node.refs)
++                            changed = True
++                        elif isinstance(node, Ref):
++                            continue
++        for alias in list(self.annotations):
++            if alias not in referenced:
++                del self.annotations[alias]
++                if self.annotation_select_mask is not None:
++                    self.annotation_select_mask.discard(alias)
++        self._annotation_select_cache = None
++
+     def has_filters(self):
+         return self.where
+ 

@@ -1,0 +1,94 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "locations" sphinx/builders/gettext.py | head -50
+33:    def __init__(self, text: str, locations: List[Tuple[str, int]], uuids: List[str]):
+35:        self.locations = locations
+[0m
+[0m$ [0mcd /testbed && sed -n 20,80p sphinx/builders/gettext.py
+from sphinx.util import logging, split_index_msg, status_iterator
+from sphinx.util.console import bold  # type: ignore
+from sphinx.util.i18n import CatalogInfo, docname_to_domain
+from sphinx.util.nodes import extract_messages, traverse_translatable_index
+from sphinx.util.osutil import canon_path, ensuredir, relpath
+from sphinx.util.tags import Tags
+from sphinx.util.template import SphinxRenderer
+
+logger = logging.getLogger(__name__)
+
+
+class Message:
+    """An entry of translatable message."""
+    def __init__(self, text: str, locations: List[Tuple[str, int]], uuids: List[str]):
+        self.text = text
+        self.locations = locations
+        self.uuids = uuids
+
+
+class Catalog:
+    """Catalog of translatable messages."""
+
+    def __init__(self) -> None:
+        self.messages: List[str] = []  # retain insertion order, a la OrderedDict
+
+        # msgid -> file, line, uid
+        self.metadata: Dict[str, List[Tuple[str, int, str]]] = OrderedDict()
+
+    def add(self, msg: str, origin: Union[Element, "MsgOrigin"]) -> None:
+        if not hasattr(origin, 'uid'):
+            # Nodes that are replicated like todo don't have a uid,
+            # however i18n is also unnecessary.
+            return
+        if msg not in self.metadata:  # faster lookup in hash
+            self.messages.append(msg)
+            self.metadata[msg] = []
+        self.metadata[msg].append((origin.source, origin.line, origin.uid))  # type: ignore
+
+    def __iter__(self) -> Generator[Message, None, None]:
+        for message in self.messages:
+            positions = [(source, line) for source, line, uuid in self.metadata[message]]
+            uuids = [uuid for source, line, uuid in self.metadata[message]]
+            yield Message(message, positions, uuids)
+
+
+class MsgOrigin:
+    """
+    Origin holder for Catalog message origin.
+    """
+
+    def __init__(self, source: str, line: int) -> None:
+        self.source = source
+        self.line = line
+        self.uid = uuid4().hex
+
+
+class GettextRenderer(SphinxRenderer):
+    def __init__(self, template_path: str = None, outdir: str = None) -> None:
+        self.outdir = outdir
+        if template_path is None:
+            template_path = path.join(package_dir, 'templates', 'gettext')
+[0m
+[0m← [0mEdit sphinx/builders/gettext.py
+Index: /testbed/sphinx/builders/gettext.py
+===================================================================
+--- /testbed/sphinx/builders/gettext.py
++++ /testbed/sphinx/builders/gettext.py
+@@ -56,9 +56,11 @@
+     self.metadata[msg].append((origin.source, origin.line, origin.uid))  # type: ignore
+ 
+ def __iter__(self) -> Generator[Message, None, None]:
+     for message in self.messages:
+-        positions = [(source, line) for source, line, uuid in self.metadata[message]]
++        # remove duplicated (source, line) pairs while keeping their order
++        positions = list(dict.fromkeys((source, line) for source, line, uuid
++                                       in self.metadata[message]))
+         uuids = [uuid for source, line, uuid in self.metadata[message]]
+         yield Message(message, positions, uuids)
+ 
+ 
+
+[0m
+[0m$ [0mcd /testbed && python -m pytest tests/test_build_gettext.py -q 2>&1 | tail -5
+.s.....                                                                  [100%]
+6 passed, 1 skipped in 2.73s
+[0m

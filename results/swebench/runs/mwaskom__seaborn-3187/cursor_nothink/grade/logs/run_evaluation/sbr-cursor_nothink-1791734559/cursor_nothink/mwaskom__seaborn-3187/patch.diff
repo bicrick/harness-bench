@@ -1,0 +1,62 @@
+diff --git a/seaborn/_core/plot.py b/seaborn/_core/plot.py
+index 8915616b..ccab93dc 100644
+--- a/seaborn/_core/plot.py
++++ b/seaborn/_core/plot.py
+@@ -1561,7 +1561,7 @@ class Plotter:
+         for var in legend_vars:
+             var_legend = scales[var]._legend
+             if var_legend is not None:
+-                values, labels = var_legend
++                values, labels, offset = var_legend
+                 for (_, part_id), part_vars, _ in schema:
+                     if data.ids[var] == part_id:
+                         # Allow multiple plot semantics to represent same data variable
+@@ -1569,6 +1569,10 @@ class Plotter:
+                         break
+                 else:
+                     title = self._resolve_label(p, var, data.names[var])
++                    if offset:
++                        # Show multiplicative offset (e.g. "1e6") with the title
++                        # since it is not included in the individual tick labels
++                        title = f"{title} ({offset.strip()})"
+                     entry = (title, data.ids[var]), [var], (values, labels)
+                     schema.append(entry)
+ 
+diff --git a/seaborn/_core/scales.py b/seaborn/_core/scales.py
+index 55874bf2..c0d8f2bc 100644
+--- a/seaborn/_core/scales.py
++++ b/seaborn/_core/scales.py
+@@ -60,7 +60,7 @@ class Scale:
+     _pipeline: Pipeline
+     _matplotlib_scale: ScaleBase
+     _spacer: staticmethod
+-    _legend: tuple[list[str], list[Any]] | None
++    _legend: tuple[list[str], list[Any], str] | None
+ 
+     def __post_init__(self):
+ 
+@@ -229,7 +229,7 @@ class Nominal(Scale):
+         new._spacer = spacer
+ 
+         if prop.legend:
+-            new._legend = units_seed, list(stringify(units_seed))
++            new._legend = units_seed, list(stringify(units_seed)), ""
+ 
+         return new
+ 
+@@ -378,8 +378,13 @@ class ContinuousBase(Scale):
+             axis.set_view_interval(vmin, vmax)
+             locs = axis.major.locator()
+             locs = locs[(vmin <= locs) & (locs <= vmax)]
+-            labels = axis.major.formatter.format_ticks(locs)
+-            new._legend = list(locs), list(labels)
++            formatter = axis.major.formatter
++            labels = formatter.format_ticks(locs)
++            # Formatters with an offset/multiplier (e.g. ScalarFormatter for
++            # large values) store that text separately from the tick labels;
++            # capture it so it can be shown alongside the legend title.
++            offset = formatter.get_offset()
++            new._legend = list(locs), list(labels), offset
+ 
+         return new
+ 

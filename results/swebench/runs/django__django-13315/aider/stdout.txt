@@ -1,0 +1,82 @@
+Detected dumb terminal, disabling fancy input and pretty output.
+
+Update git name with: git config user.name "Your Name"
+Update git email with: git config user.email "you@example.com"
+Aider v0.86.2
+Model: anthropic/claude-haiku-5-5 with diff edit format, prompt cache
+Git repo: .git with 6,412 files
+Warning: For large repos, consider using --subtree-only and .aiderignore
+See: https://aider.chat/docs/faq.html#can-i-use-aider-in-a-large-mono-repo
+Repo-map: using 4096 tokens, files refresh
+
+
+https://aider.chat/HISTORY.html#release-notes
+
+Initial repo scan can be slow in larger repos, but only happens once.
+The duplicates most likely come from `apply_limit_choices_to_to_formfield` in 
+`django/forms/models.py`. When a `Q` object spans a join, `complex_filter()` can
+return the same row more than once. The fix is probably to call `.distinct()` on
+the filtered queryset there.
+
+I can't edit that file yet because it isn't in the chat. Please add this file so
+I can make the change:
+
+- `django/forms/models.py`
+
+Once it's added, I'll make the fix. I'll also keep 
+`django/db/models/fields/related.py` in mind as a possible second location, in 
+case the duplication comes from how `ForeignKey.formfield` builds its queryset. 
+If that turns out to be needed, I'll ask you to add it too.
+
+Tokens: 27k sent, 12k cache write, 2.4k cache hit, 962 received.
+Cost: $0.0021 message, $0.0021 session.
+
+django/db/models/fields/related.py
+
+django/forms/models.py
+The duplicates come from `apply_limit_choices_to_to_formfield` in 
+`django/forms/models.py`. It applies `limit_choices_to` with `complex_filter()`,
+which joins across relations and can return the same row more than once. I'll 
+replace that join with an `Exists()` subquery that matches each row's primary 
+key, so each option appears once. `related.py` doesn't need changes for this. 
+Its `formfield()` only passes `limit_choices_to` through, and the filtering 
+happens in the forms helper.
+
+django/forms/models.py
+```python
+<<<<<<< SEARCH
+def apply_limit_choices_to_to_formfield(formfield):
+    """Apply limit_choices_to to the formfield's queryset if needed."""
+    if hasattr(formfield, 'queryset') and hasattr(formfield, 
+'get_limit_choices_to'):
+        limit_choices_to = formfield.get_limit_choices_to()
+        if limit_choices_to is not None:
+            formfield.queryset = 
+formfield.queryset.complex_filter(limit_choices_to)
+=======
+def apply_limit_choices_to_to_formfield(formfield):
+    """Apply limit_choices_to to the formfield's queryset if needed."""
+    from django.db.models import Exists, OuterRef, Q
+    if hasattr(formfield, 'queryset') and hasattr(formfield, 
+'get_limit_choices_to'):
+        limit_choices_to = formfield.get_limit_choices_to()
+        if limit_choices_to is not None:
+            complex_filter = limit_choices_to
+            if not isinstance(complex_filter, Q):
+                complex_filter = Q(**limit_choices_to)
+            complex_filter &= Q(pk=OuterRef('pk'))
+            # Use Exists() instead of joining directly, so that joins across
+            # relations can't produce duplicate options.
+            formfield.queryset = formfield.queryset.filter(
+                Exists(formfield.queryset.model._base_manager.filter(complex_fil
+ter)),
+            )
+>>>>>>> REPLACE
+```
+
+No shell commands are needed. You can run the existing forms and model-form test
+suites afterward to check for regressions.
+
+Tokens: 101k sent, 48k cache write, 2.4k cache hit, 1.9k received.
+Cost: $0.0072 message, $0.0093 session.
+Applied edit to django/forms/models.py

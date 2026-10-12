@@ -1,0 +1,47 @@
+diff --git a/pylint/pyreverse/inspector.py b/pylint/pyreverse/inspector.py
+index 8fa12202..aef73c21 100644
+--- a/pylint/pyreverse/inspector.py
++++ b/pylint/pyreverse/inspector.py
+@@ -60,6 +60,31 @@ def interfaces(node, herited=True, handler_func=_iface_hdlr):
+         raise astroid.exceptions.InferenceError()
+ 
+ 
++def _annotation_types(node):
++    """Return the inferred types of the annotation of the argument assigned to
++    an astroid.AssignAttr node, or None if it does not apply.
++
++    Handles code like `def __init__(self, a: str = None): self.a = a`.
++    """
++    value = getattr(node.parent, "value", None)
++    if not isinstance(value, astroid.Name):
++        return None
++    func = value.frame()
++    if not isinstance(func, astroid.FunctionDef):
++        return None
++    arg_names = [arg.name for arg in func.args.args or []]
++    if value.name not in arg_names:
++        return None
++    index = arg_names.index(value.name)
++    annotations = func.args.annotations or []
++    if index >= len(annotations) or annotations[index] is None:
++        return None
++    try:
++        return set(annotations[index].infer())
++    except astroid.InferenceError:
++        return None
++
++
+ class IdGeneratorMixIn:
+     """Mixin adding the ability to generate integer uid."""
+ 
+@@ -230,7 +255,9 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+         handle instance_attrs_type
+         """
+         try:
+-            values = set(node.infer())
++            values = _annotation_types(node)
++            if values is None:
++                values = set(node.infer())
+             current = set(parent.instance_attrs_type[node.attrname])
+             parent.instance_attrs_type[node.attrname] = list(current | values)
+         except astroid.InferenceError:

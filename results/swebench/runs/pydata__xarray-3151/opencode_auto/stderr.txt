@@ -1,0 +1,154 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "def _infer_concat_order_from_coords" -A60 xarray/core/combine.py
+51:def _infer_concat_order_from_coords(datasets):
+52-
+53-    concat_dims = []
+54-    tile_ids = [() for ds in datasets]
+55-
+56-    # All datasets have same variables because they've been grouped as such
+57-    ds0 = datasets[0]
+58-    for dim in ds0.dims:
+59-
+60-        # Check if dim is a coordinate dimension
+61-        if dim in ds0:
+62-
+63-            # Need to read coordinate values to do ordering
+64-            indexes = [ds.indexes.get(dim) for ds in datasets]
+65-            if any(index is None for index in indexes):
+66-                raise ValueError("Every dimension needs a coordinate for "
+67-                                 "inferring concatenation order")
+68-
+69-            # If dimension coordinate values are same on every dataset then
+70-            # should be leaving this dimension alone (it's just a "bystander")
+71-            if not all(index.equals(indexes[0]) for index in indexes[1:]):
+72-
+73-                # Infer order datasets should be arranged in along this dim
+74-                concat_dims.append(dim)
+75-
+76-                if all(index.is_monotonic_increasing for index in indexes):
+77-                    ascending = True
+78-                elif all(index.is_monotonic_decreasing for index in indexes):
+79-                    ascending = False
+80-                else:
+81-                    raise ValueError("Coordinate variable {} is neither "
+82-                                     "monotonically increasing nor "
+83-                                     "monotonically decreasing on all datasets"
+84-                                     .format(dim))
+85-
+86-                # Assume that any two datasets whose coord along dim starts
+87-                # with the same value have the same coord values throughout.
+88-                if any(index.size == 0 for index in indexes):
+89-                    raise ValueError('Cannot handle size zero dimensions')
+90-                first_items = pd.Index([index.take([0])
+91-                                        for index in indexes])
+92-
+93-                # Sort datasets along dim
+94-                # We want rank but with identical elements given identical
+95-                # position indices - they should be concatenated along another
+96-                # dimension, not along this one
+97-                series = first_items.to_series()
+98-                rank = series.rank(method='dense', ascending=ascending)
+99-                order = rank.astype(int).values - 1
+100-
+101-                # Append positions along extra dimension to structure which
+102-                # encodes the multi-dimensional concatentation order
+103-                tile_ids = [tile_id + (position,) for tile_id, position
+104-                            in zip(tile_ids, order)]
+105-
+106-    if len(datasets) > 1 and not concat_dims:
+107-        raise ValueError("Could not find any dimension coordinates to use to "
+108-                         "order the datasets for concatenation")
+109-
+110-    combined_ids = OrderedDict(zip(tile_ids, datasets))
+111-
+[0m
+[0m$ [0mcd /testbed && grep -n "monotonic" -n xarray/core/combine.py | head -50
+76:                if all(index.is_monotonic_increasing for index in indexes):
+78:                elif all(index.is_monotonic_decreasing for index in indexes):
+82:                                     "monotonically increasing nor "
+83:                                     "monotonically decreasing on all datasets"
+404:    coordinates are monotonic along all dimensions. If it cannot determine the
+503:        # Check the overall coordinates are monotonically increasing
+507:                if not (indexes.is_monotonic_increasing
+508:                        or indexes.is_monotonic_decreasing):
+509:                    raise ValueError("Resulting object does not have monotonic"
+[0m
+[0m$ [0mcd /testbed && sed -n 480,520p xarray/core/combine.py
+* position        (x) int64   0 1 2 3 4 5
+    Data variables:
+        temperature     (x) float64 11.04 23.57 20.77 ...
+    """
+
+    # Group by data vars
+    sorted_datasets = sorted(datasets, key=vars_as_keys)
+    grouped_by_vars = itertools.groupby(sorted_datasets, key=vars_as_keys)
+
+    # Perform the multidimensional combine on each group of data variables
+    # before merging back together
+    concatenated_grouped_by_data_vars = []
+    for vars, datasets_with_same_vars in grouped_by_vars:
+        combined_ids, concat_dims = _infer_concat_order_from_coords(
+            list(datasets_with_same_vars))
+
+        _check_shape_tile_ids(combined_ids)
+
+        # Concatenate along all of concat_dims one by one to create single ds
+        concatenated = _combine_nd(combined_ids, concat_dims=concat_dims,
+                                   data_vars=data_vars, coords=coords,
+                                   fill_value=fill_value)
+
+        # Check the overall coordinates are monotonically increasing
+        for dim in concatenated.dims:
+            if dim in concatenated:
+                indexes = concatenated.indexes.get(dim)
+                if not (indexes.is_monotonic_increasing
+                        or indexes.is_monotonic_decreasing):
+                    raise ValueError("Resulting object does not have monotonic"
+                                     " global indexes along dimension {}"
+                                     .format(dim))
+        concatenated_grouped_by_data_vars.append(concatenated)
+
+    return merge(concatenated_grouped_by_data_vars, compat=compat,
+                 fill_value=fill_value)
+
+
+# Everything beyond here is only needed until the deprecation cycle in #2616
+# is completed
+[0m
+[0m← [0mEdit xarray/core/combine.py
+Index: /testbed/xarray/core/combine.py
+===================================================================
+--- /testbed/xarray/core/combine.py
++++ /testbed/xarray/core/combine.py
+@@ -500,9 +500,11 @@
+                            data_vars=data_vars, coords=coords,
+                            fill_value=fill_value)
+ 
+ # Check the overall coordinates are monotonically increasing
+-for dim in concatenated.dims:
++# Only dimensions along which datasets were concatenated need to be
++# monotonic; bystander coordinates are left untouched.
++for dim in concat_dims:
+     if dim in concatenated:
+         indexes = concatenated.indexes.get(dim)
+         if not (indexes.is_monotonic_increasing
+                 or indexes.is_monotonic_decreasing):
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+import xarray as xr, numpy as np
+for yc in (['a','b','c'], ['a','c','b']):
+    ds1 = xr.Dataset({'data': (['x','y'], np.random.rand(3,3))}, coords=dict(x=[1,2,3], y=yc))
+    ds2 = xr.Dataset({'data': (['x','y'], np.random.rand(4,3))}, coords=dict(x=[4,5,6,7], y=yc))
+    print(xr.combine_by_coords((ds1, ds2)).sizes)
+" && python -m pytest -q xarray/tests/test_combine.py 2>&1 | tail -3
+/testbed/xarray/plot/plot.py:243: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if args is ():
+Frozen(SortedKeysDict({'y': 3, 'x': 7}))
+Frozen(SortedKeysDict({'y': 3, 'x': 7}))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+66 passed, 1 xfailed, 40 warnings in 10.18s
+[0m

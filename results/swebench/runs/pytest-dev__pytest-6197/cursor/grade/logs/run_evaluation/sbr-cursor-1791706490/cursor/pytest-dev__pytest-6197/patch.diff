@@ -1,0 +1,25 @@
+diff --git a/src/_pytest/python.py b/src/_pytest/python.py
+index 306e5f217..3ce99e179 100644
+--- a/src/_pytest/python.py
++++ b/src/_pytest/python.py
+@@ -639,7 +639,19 @@ class Package(Module):
+         return path in self.session._initialpaths
+ 
+     def collect(self):
+-        self._mount_obj_if_needed()
++        # The package's __init__.py is only imported once a child is actually
++        # collected: its module-level markers (e.g. ``pytestmark``) must be
++        # applied before the children run, but packages without collectable
++        # children (such as platform-specific packages that cannot be imported
++        # on the current platform) must not be imported at all.
++        mounted = False
++        for child in self._iter_children():
++            if not mounted:
++                self._mount_obj_if_needed()
++                mounted = True
++            yield child
++
++    def _iter_children(self):
+         this_path = self.fspath.dirpath()
+         init_module = this_path.join("__init__.py")
+         if init_module.check(file=1) and path_matches_patterns(

@@ -1,0 +1,15 @@
+I'll look at the relevant code in `django/forms/models.py`.
+The problem: `modelform_factory` sets `formfield_callback` on the new class's attrs to `None`, which the metaclass pops and uses instead of the Meta's callback. Also, the metaclass only looks at `formfield_callback` as a class attribute, not in `Meta`. The fix is to check `Meta.formfield_callback` on the new class itself, and only override it in the factory when a callback is given.
+
+I'll make the metaclass prefer an explicit class attribute, then the `Meta` callback, then base classes' Meta callbacks; and have the factory only set attrs when provided.
+Now I'll verify the issue scenario and run the existing model form tests.
+The repro now shows the factory form inherits the required callback. The test run failed on settings; I'll run the tests with the runtests harness.
+The fix is in `django/forms/models.py`, and the related test suites pass (326 tests).
+
+**Root cause:** `modelform_factory` always put `"formfield_callback": None` into the new class's attributes. `ModelFormMetaclass` pops that attribute and uses it in preference to anything in `Meta`, so the callback from the user's `Meta` was silently discarded.
+
+**Changes:**
+- `ModelFormMetaclass.__new__` now resolves the callback in this order: an explicit `formfield_callback` class attribute, then the `Meta.formfield_callback` of the class being created, then the base classes' `Meta.formfield_callback`.
+- `modelform_factory` only sets `formfield_callback` on the new class when one is actually passed in, so it no longer overrides the inherited value with `None`.
+
+I checked the example from the issue: with `form=MyForm`, the factory-generated form's fields are now `required=True`, matching `MyForm`. I did not add or modify any tests.

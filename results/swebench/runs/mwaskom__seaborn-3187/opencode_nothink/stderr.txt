@@ -1,0 +1,84 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m→ [0mRead seaborn/_core/scales.py[90m [offset=340, limit=80][0m
+[0m✱ [0mGrep "format_ticks|get_offset|_legend"[90m in seaborn · 100 matches[0m
+[0m→ [0mRead seaborn/utils.py[90m [offset=685, limit=40][0m
+[0m
+[0m← [0mEdit seaborn/utils.py
+Index: /testbed/seaborn/utils.py
+===================================================================
+--- /testbed/seaborn/utils.py
++++ /testbed/seaborn/utils.py
+@@ -706,8 +706,14 @@
+     # formatted_levels = formatter.format_ticks(raw_levels)
+     formatter.set_locs(raw_levels)
+     formatted_levels = [formatter(x) for x in raw_levels]
+ 
++    # Include the multiplicative offset (e.g. "1e6") used by ScalarFormatter
++    offset = formatter.get_offset() if hasattr(formatter, "get_offset") else ""
++    if offset:
++        formatted_levels = [f"{f} {offset}" if f else offset
++                            for f in formatted_levels]
++
+     return raw_levels, formatted_levels
+ 
+ 
+ def relative_luminance(color):
+
+[0m
+[0m← [0mEdit seaborn/_core/scales.py
+Index: /testbed/seaborn/_core/scales.py
+===================================================================
+--- /testbed/seaborn/_core/scales.py
++++ /testbed/seaborn/_core/scales.py
+@@ -377,9 +377,13 @@
+ if prop.legend:
+     axis.set_view_interval(vmin, vmax)
+     locs = axis.major.locator()
+     locs = locs[(vmin <= locs) & (locs <= vmax)]
+-    labels = axis.major.formatter.format_ticks(locs)
++    formatter = axis.major.formatter
++    labels = formatter.format_ticks(locs)
++    offset = formatter.get_offset()
++    if offset:
++        labels = [f"{lab} {offset}" if lab else offset for lab in labels]
+     new._legend = list(locs), list(labels)
+ 
+ return new
+ 
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+import seaborn as sns, seaborn.objects as so, matplotlib as mpl
+import matplotlib.pyplot as plt
+penguins = sns.load_dataset('penguins')
+penguins['body_mass_mg'] = penguins['body_mass_g']*1000
+p = so.Plot(penguins, x='bill_length_mm', y='bill_depth_mm', color='species', pointsize='body_mass_mg').add(so.Dot())
+p.plot()
+print(p._figure.legends[0].get_texts() and [t.get_text() for t in p._figure.legends[0].get_texts()])
+ax = sns.scatterplot(data=penguins, x='bill_length_mm', y='bill_depth_mm', size='body_mass_mg')
+print([t.get_text() for t in ax.get_legend().get_texts()])
+" 2>&1 | tail -5 && python -m pytest tests/test_utils.py tests/_core/test_scales.py tests/test_relational.py -q 2>&1 | tail -5
+Traceback (most recent call last):
+  File "<string>", line 8, in <module>
+AttributeError: 'Plot' object has no attribute '_figure'
+  /testbed/tests/test_relational.py:1744: MatplotlibDeprecationWarning: The legendHandles attribute was deprecated in Matplotlib 3.7 and will be removed two minor releases later. Use legend_handles instead.
+    for label, handle in zip(legend.get_texts(), legend.legendHandles)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+204 passed, 1 xfailed, 451 warnings in 64.37s (0:01:04)
+[0m
+[0m$ [0mcd /testbed && python -c "
+import seaborn as sns, seaborn.objects as so
+penguins = sns.load_dataset('penguins')
+penguins['body_mass_mg'] = penguins['body_mass_g']*1000
+p = so.Plot(penguins, x='bill_length_mm', y='bill_depth_mm', pointsize='body_mass_mg').add(so.Dot())
+fig = p.plot()._figure
+print([t.get_text() for t in fig.legends[0].get_texts()])
+ax = sns.scatterplot(data=penguins, x='bill_length_mm', y='bill_depth_mm', size='body_mass_mg')
+print([t.get_text() for t in ax.get_legend().get_texts()])
+" 2>&1 | tail -4
+['3 1e6', '4 1e6', '5 1e6', '6 1e6']
+['3.0 1e6', '3.6 1e6', '4.2 1e6', '4.8 1e6', '5.4 1e6', '6.0 1e6']
+[0m

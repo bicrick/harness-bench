@@ -1,0 +1,288 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && git log --oneline -1 && grep -n "kwargs" django/views/generic/base.py | head -40
+8b27eb2da1 SWE-bench
+26:    def get_context_data(self, **kwargs):
+27:        kwargs.setdefault('view', self)
+29:            kwargs.update(self.extra_context)
+30:        return kwargs
+41:    def __init__(self, **kwargs):
+48:        for key, value in kwargs.items():
+52:    def as_view(cls, **initkwargs):
+54:        for key in initkwargs:
+65:        def view(request, *args, **kwargs):
+66:            self = cls(**initkwargs)
+67:            self.setup(request, *args, **kwargs)
+73:            return self.dispatch(request, *args, **kwargs)
+75:        view.view_initkwargs = initkwargs
+85:    def setup(self, request, *args, **kwargs):
+91:        self.kwargs = kwargs
+93:    def dispatch(self, request, *args, **kwargs):
+101:        return handler(request, *args, **kwargs)
+103:    def http_method_not_allowed(self, request, *args, **kwargs):
+110:    def options(self, request, *args, **kwargs):
+128:    def render_to_response(self, context, **response_kwargs):
+133:        Pass response_kwargs to the constructor of the response class.
+135:        response_kwargs.setdefault('content_type', self.content_type)
+141:            **response_kwargs
+159:    def get(self, request, *args, **kwargs):
+162:        context_kwargs = _wrap_url_kwargs_with_deprecation_warning(kwargs)
+163:        context = self.get_context_data(**context_kwargs)
+168:def _wrap_url_kwargs_with_deprecation_warning(url_kwargs):
+169:    context_kwargs = {}
+170:    for key, value in url_kwargs.items():
+175:                'TemplateView passing URL kwargs to the context is '
+177:                'view.kwargs instead.' % key,
+181:        context_kwargs[key] = access_value
+182:    return context_kwargs
+192:    def get_redirect_url(self, *args, **kwargs):
+195:        match generating the redirect request are provided as kwargs to this
+199:            url = self.url % kwargs
+201:            url = reverse(self.pattern_name, args=args, kwargs=kwargs)
+210:    def get(self, request, *args, **kwargs):
+211:        url = self.get_redirect_url(*args, **kwargs)
+224:    def head(self, request, *args, **kwargs):
+[0m
+[0m$ [0mcd /testbed && grep -rn "SimpleLazyObject" django/views/ | head; sed -n 1,20p django/views/generic/base.py
+django/views/generic/base.py:14:from django.utils.functional import SimpleLazyObject
+django/views/generic/base.py:172:        @SimpleLazyObject
+import logging
+import warnings
+from functools import update_wrapper
+
+from django.core.exceptions import ImproperlyConfigured
+from django.http import (
+    HttpResponse, HttpResponseGone, HttpResponseNotAllowed,
+    HttpResponsePermanentRedirect, HttpResponseRedirect,
+)
+from django.template.response import TemplateResponse
+from django.urls import reverse
+from django.utils.decorators import classonlymethod
+from django.utils.deprecation import RemovedInDjango40Warning
+from django.utils.functional import SimpleLazyObject
+
+logger = logging.getLogger('django.request')
+
+
+class ContextMixin:
+    """
+[0m
+[0m$ [0mcd /testbed && sed -n 157,185p django/views/generic/base.py
+class TemplateView(TemplateResponseMixin, ContextMixin, View):
+    """Render a template."""
+    def get(self, request, *args, **kwargs):
+        # RemovedInDjango40Warning: when the deprecation ends, replace with:
+        #   context = self.get_context_data()
+        context_kwargs = _wrap_url_kwargs_with_deprecation_warning(kwargs)
+        context = self.get_context_data(**context_kwargs)
+        return self.render_to_response(context)
+
+
+# RemovedInDjango40Warning
+def _wrap_url_kwargs_with_deprecation_warning(url_kwargs):
+    context_kwargs = {}
+    for key, value in url_kwargs.items():
+        # Bind into function closure.
+        @SimpleLazyObject
+        def access_value(key=key, value=value):
+            warnings.warn(
+                'TemplateView passing URL kwargs to the context is '
+                'deprecated. Reference %s in your template through '
+                'view.kwargs instead.' % key,
+                RemovedInDjango40Warning, stacklevel=2,
+            )
+            return value
+        context_kwargs[key] = access_value
+    return context_kwargs
+
+
+class RedirectView(View):
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+import re
+p='django/views/generic/base.py'
+s=open(p).read()
+old=s[s.index("    def get(self, request, *args, **kwargs):\n        # RemovedInDjango40Warning"):s.index("class RedirectView")]
+new='''    def get(self, request, *args, **kwargs):
+        # RemovedInDjango40Warning: when the deprecation ends, replace with:
+        #   context = self.get_context_data()
+        context_kwargs = _wrap_url_kwargs_with_deprecation_warning(kwargs)
+        context = self.get_context_data(**context_kwargs)
+        return self.render_to_response(context)
+
+
+# RemovedInDjango40Warning
+def _wrap_url_kwargs_with_deprecation_warning(url_kwargs):
+    """
+    Return the URL kwargs unchanged, so that get_context_data() receives
+    real values. Values added to the template context from URL kwargs are
+    wrapped with a deprecation warning in ``_warn_on_access`` below.
+    """
+    return dict(url_kwargs)
+
+
+'''
+s=s.replace(old,new)
+open(p,'w').write(s)
+EOF
+grep -n "_warn_on_access" django/views/generic/base.py
+172:    wrapped with a deprecation warning in ``_warn_on_access`` below.
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+p='django/views/generic/base.py'
+s=open(p).read()
+start=s.index("    def get(self, request, *args, **kwargs):\n        # RemovedInDjango40Warning")
+end=s.index("class RedirectView")
+new='''    def get(self, request, *args, **kwargs):
+        # RemovedInDjango40Warning: when the deprecation ends, replace with:
+        #   context = self.get_context_data()
+        context = self.get_context_data(**kwargs)
+        context = _wrap_url_kwargs_with_deprecation_warning(context, kwargs)
+        return self.render_to_response(context)
+
+
+# RemovedInDjango40Warning
+def _wrap_url_kwargs_with_deprecation_warning(context, url_kwargs):
+    """
+    Wrap URL kwargs placed in the template context with a lazy object that
+    emits a deprecation warning when accessed. The values passed to
+    get_context_data() are left untouched so they are real, usable values.
+    """
+    for key, value in url_kwargs.items():
+        if key not in context or context[key] is not value:
+            continue
+
+        # Bind into function closure.
+        @SimpleLazyObject
+        def access_value(key=key, value=value):
+            warnings.warn(
+                'TemplateView passing URL kwargs to the context is '
+                'deprecated. Reference %s in your template through '
+                'view.kwargs instead.' % key,
+                RemovedInDjango40Warning, stacklevel=2,
+            )
+            return value
+        context[key] = access_value
+    return context
+
+
+'''
+s=s[:start]+new+s[end:]
+open(p,'w').write(s)
+EOF
+python -m pytest tests/generic_views -q 2>&1 | tail -15
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py generic_views 2>&1 | tail -15
+Cloning test database for alias 'default'...
+......................................................................................................................................................................................................................
+----------------------------------------------------------------------
+Ran 214 tests in 3.773s
+
+OK
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+[0m
+[0m$ [0mcd /testbed && git diff && cd tests && python runtests.py generic_views template_tests 2>&1 | grep -E "^(Ran|OK|FAILED)"
+diff --git a/django/views/generic/base.py b/django/views/generic/base.py
+index ea5baca08d..3caaea5ed2 100644
+--- a/django/views/generic/base.py
++++ b/django/views/generic/base.py
+@@ -159,15 +159,22 @@ class TemplateView(TemplateResponseMixin, ContextMixin, View):
+     def get(self, request, *args, **kwargs):
+         # RemovedInDjango40Warning: when the deprecation ends, replace with:
+         #   context = self.get_context_data()
+-        context_kwargs = _wrap_url_kwargs_with_deprecation_warning(kwargs)
+-        context = self.get_context_data(**context_kwargs)
++        context = self.get_context_data(**kwargs)
++        context = _wrap_url_kwargs_with_deprecation_warning(context, kwargs)
+         return self.render_to_response(context)
+ 
+ 
+ # RemovedInDjango40Warning
+-def _wrap_url_kwargs_with_deprecation_warning(url_kwargs):
+-    context_kwargs = {}
++def _wrap_url_kwargs_with_deprecation_warning(context, url_kwargs):
++    """
++    Wrap URL kwargs placed in the template context with a lazy object that
++    emits a deprecation warning when accessed. The values passed to
++    get_context_data() are left untouched so they are real, usable values.
++    """
+     for key, value in url_kwargs.items():
++        if key not in context or context[key] is not value:
++            continue
++
+         # Bind into function closure.
+         @SimpleLazyObject
+         def access_value(key=key, value=value):
+@@ -178,8 +185,8 @@ def _wrap_url_kwargs_with_deprecation_warning(url_kwargs):
+                 RemovedInDjango40Warning, stacklevel=2,
+             )
+             return value
+-        context_kwargs[key] = access_value
+-    return context_kwargs
++        context[key] = access_value
++    return context
+ 
+ 
+ class RedirectView(View):
+Ran 1609 tests in 4.389s
+FAILED (failures=1, skipped=1)
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py generic_views template_tests 2>&1 | grep -A25 "^FAIL:" | head -40
+FAIL: test_permissions_error (template_tests.test_loaders.FileSystemLoaderTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/miniconda3/envs/testbed/lib/python3.6/unittest/case.py", line 59, in testPartExecutor
+    yield
+  File "/opt/miniconda3/envs/testbed/lib/python3.6/unittest/case.py", line 605, in run
+    testMethod()
+  File "/testbed/tests/template_tests/test_loaders.py", line 195, in test_permissions_error
+    self.engine.get_template(tmpfile.name)
+  File "/opt/miniconda3/envs/testbed/lib/python3.6/contextlib.py", line 88, in __exit__
+    next(self.gen)
+  File "/testbed/django/test/testcases.py", line 693, in _assert_raises_or_warns_cm
+    yield cm
+  File "/opt/miniconda3/envs/testbed/lib/python3.6/unittest/case.py", line 203, in __exit__
+    self._raiseFailure("{} not raised".format(exc_name))
+  File "/opt/miniconda3/envs/testbed/lib/python3.6/unittest/case.py", line 135, in _raiseFailure
+    raise self.test_case.failureException(msg)
+AssertionError: PermissionError not raised
+
+----------------------------------------------------------------------
+Ran 1609 tests in 4.553s
+
+FAILED (failures=1, skipped=1)
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+import django
+from django.conf import settings
+settings.configure(ROOT_URLCONF=__name__, ALLOWED_HOSTS=['*'], TEMPLATES=[{'BACKEND':'django.template.backends.django.DjangoTemplates','DIRS':[]}])
+django.setup()
+from django.test import RequestFactory
+from django.views.generic import TemplateView
+from django.template import engines
+from django.http import HttpResponse
+class V(TemplateView):
+    template_name=None
+    def get_context_data(self, **kwargs):
+        s=kwargs.get("offer_slug","")
+        print("type:", type(s).__name__, repr(str(s)))
+        return {"offer_slug": s}
+    def render_to_response(self, context, **kw):
+        return HttpResponse("ok")
+V.as_view()(RequestFactory().get('/'), offer_slug='abc')
+EOF
+type: str 'abc'
+[0m

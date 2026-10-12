@@ -1,0 +1,16 @@
+Pyreverse now uses PEP 484 annotations when it builds attribute types, so `self.a = a` with `a: str = None` shows as `a : str` instead of `a : NoneType`.
+
+The change is in `pylint/pyreverse/inspector.py`:
+
+- **New helper `get_annotated_types`**: returns the types from an annotation in two cases:
+  - `self.attr: T = ...` and `name: T = ...`, using the annotation.
+  - `self.attr = arg`, where `arg` is an annotated parameter of the enclosing method (positional, positional-only, or keyword-only).
+- **`handle_assignattr_type` and `visit_assignname`** prefer these annotated types and fall back to inference when there is no usable annotation.
+
+I checked this on a small module. Before the change, the attributes showed as `NoneType`. After it, `a` shows as `str`, and `d`/`f` get association arrows to class `D`. The 23 existing pyreverse tests still pass. I did not add tests, as requested.
+
+Two things to be aware of:
+- When an annotation is present, it takes precedence over the inferred value, so `e: D = D()` now produces the same association as the annotation.
+- Subscripted annotations such as `Optional[D]` are not unwrapped. Inferring them yields the `Optional` class itself, so they will not produce an association to `D`.
+
+Black isn't usable in this environment (a click import error), so I wrapped the one long line by hand.

@@ -1,0 +1,94 @@
+diff --git a/django/db/migrations/executor.py b/django/db/migrations/executor.py
+index aa2fe0883b..6eda3d0c57 100755
+--- a/django/db/migrations/executor.py
++++ b/django/db/migrations/executor.py
+@@ -1,5 +1,6 @@
+ from django.apps.registry import apps as global_apps
+ from django.db import migrations, router
++from django.utils.functional import cached_property
+ 
+ from .exceptions import InvalidMigrationPlan
+ from .loader import MigrationLoader
+@@ -19,6 +20,36 @@ class MigrationExecutor:
+         self.recorder = MigrationRecorder(self.connection)
+         self.progress_callback = progress_callback
+ 
++    @cached_property
++    def recording_allowed(self):
++        """
++        Return whether the django_migrations table may be created and written
++        to on this connection.
++
++        The db_router is consulted for every operation of the migrations on
++        disk. If it allows none of them on this connection, nothing gets
++        migrated there, so the migration history table must not be created
++        either. This mirrors the check done by makemigrations.
++        """
++        if not router.routers:
++            return True
++        alias = self.connection.alias
++        operations = [
++            (migration.app_label, operation)
++            for migration in self.loader.disk_migrations.values()
++            for operation in migration.operations
++        ]
++        if not operations:
++            return True
++        for app_label, operation in operations:
++            model_name = (
++                getattr(operation, 'model_name_lower', None) or
++                getattr(operation, 'name_lower', None)
++            )
++            if router.allow_migrate(alias, app_label, model_name=model_name):
++                return True
++        return False
++
+     def migration_plan(self, targets, clean_start=False):
+         """
+         Given a set of targets, return a list of (Migration instance, backwards?).
+@@ -97,7 +128,8 @@ class MigrationExecutor:
+         """
+         # The django_migrations table must be present to record applied
+         # migrations.
+-        self.recorder.ensure_schema()
++        if self.recording_allowed:
++            self.recorder.ensure_schema()
+ 
+         if plan is None:
+             plan = self.migration_plan(targets)
+@@ -245,6 +277,8 @@ class MigrationExecutor:
+         return state
+ 
+     def record_migration(self, migration):
++        if not self.recording_allowed:
++            return
+         # For replacement migrations, record individual statuses
+         if migration.replaces:
+             for app_label, name in migration.replaces:
+@@ -259,11 +293,12 @@ class MigrationExecutor:
+         if not fake:
+             with self.connection.schema_editor(atomic=migration.atomic) as schema_editor:
+                 state = migration.unapply(state, schema_editor)
+-        # For replacement migrations, also record individual statuses.
+-        if migration.replaces:
+-            for app_label, name in migration.replaces:
+-                self.recorder.record_unapplied(app_label, name)
+-        self.recorder.record_unapplied(migration.app_label, migration.name)
++        if self.recording_allowed:
++            # For replacement migrations, also record individual statuses.
++            if migration.replaces:
++                for app_label, name in migration.replaces:
++                    self.recorder.record_unapplied(app_label, name)
++            self.recorder.record_unapplied(migration.app_label, migration.name)
+         # Report progress
+         if self.progress_callback:
+             self.progress_callback("unapply_success", migration, fake)
+@@ -280,6 +315,8 @@ class MigrationExecutor:
+         be applied, but the applied state of the squashed migration must be
+         maintained.
+         """
++        if not self.recording_allowed:
++            return
+         applied = self.recorder.applied_migrations()
+         for key, migration in self.loader.replacements.items():
+             all_applied = all(m in applied for m in migration.replaces)

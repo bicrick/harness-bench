@@ -10,6 +10,19 @@ def load():
     from datasets import load_dataset
     return list(load_dataset(DATASET, split="test"))
 
+# Verified instances whose gold patch fails in the official harness (SWE-bench issue #267).
+# Excluded picks are swapped for another task from the same repo; the rest of the draw is unchanged.
+EXCLUDE = {"django__django-10097", "astropy__astropy-7606", "astropy__astropy-8707",
+           "astropy__astropy-8872", "matplotlib__matplotlib-20488",
+           # Grader tests call the live http://httpbin.org, which this box can't reach, so they can't be graded
+           # here (2026-10-11). 2317 was the original pick; the same-repo swap rule then drew 1724, 1766 and 1921,
+           # which use the same live-httpbin test suite, so they are excluded too. Next came 2931, but its gold patch
+           # fails here (pytest-httpbin fixture recursion error in the image, plus connect-timeout tests that need a
+           # routable network), so it is excluded as well. The rule lands on psf__requests-1142, whose 6 tests are
+           # offline and whose gold patch resolves. No other pick changes.
+           "psf__requests-2317", "psf__requests-1724", "psf__requests-1766", "psf__requests-1921",
+           "psf__requests-2931"}
+
 def pick(rows, n=SUBSET_SIZE, seed=SUBSET_SEED):
     by_repo = defaultdict(list)
     for r in sorted(rows, key=lambda r: r["instance_id"]):
@@ -26,7 +39,10 @@ def pick(rows, n=SUBSET_SIZE, seed=SUBSET_SEED):
         k = max(quota, key=quota.get); quota[k] -= 1
     picked = []
     for k in sorted(by_repo):
-        picked += rng.sample(by_repo[k], quota[k])
+        got = rng.sample(by_repo[k], quota[k])
+        spare = [r for r in by_repo[k] if r not in got and r["instance_id"] not in EXCLUDE]
+        swap = random.Random(f"{seed}-{k}")
+        picked += [spare.pop(swap.randrange(len(spare))) if r["instance_id"] in EXCLUDE else r for r in got]
     return sorted(picked, key=lambda r: r["instance_id"])
 
 def files_touched(patch):

@@ -1,0 +1,51 @@
+diff --git a/lib/matplotlib/figure.py b/lib/matplotlib/figure.py
+index dab2bc4a5a..a6172c7e10 100644
+--- a/lib/matplotlib/figure.py
++++ b/lib/matplotlib/figure.py
+@@ -2273,18 +2273,39 @@ class SubFigure(FigureBase):
+             self.bbox_relative.p1 = bbox.p1
+             return
+         # need to figure out *where* this subplotspec is.
+-        gs = self._subplotspec.get_gridspec()
++        ss = self._subplotspec
++        gs = ss.get_gridspec()
++        nrows, ncols = gs.get_geometry()
+         wr = np.asarray(gs.get_width_ratios())
+         hr = np.asarray(gs.get_height_ratios())
+-        dx = wr[self._subplotspec.colspan].sum() / wr.sum()
+-        dy = hr[self._subplotspec.rowspan].sum() / hr.sum()
+-        x0 = wr[:self._subplotspec.colspan.start].sum() / wr.sum()
+-        y0 = 1 - hr[:self._subplotspec.rowspan.stop].sum() / hr.sum()
++        # The subfigure grid spans the whole parent, and the spacing between
++        # subfigures is taken from the gridspec (None means no spacing).
++        if isinstance(gs, GridSpec):
++            wspace, hspace = gs.wspace, gs.hspace
++        else:
++            wspace, hspace = gs._wspace, gs._hspace
++        wspace = 0. if wspace is None else wspace
++        hspace = 0. if hspace is None else hspace
++        # Same layout as `GridSpecBase.get_grid_positions`, on the unit square.
++        cell_w = 1 / (ncols + wspace * (ncols - 1))
++        sep_w = wspace * cell_w
++        norm_w = cell_w * ncols / wr.sum()
++        col_edges = np.concatenate(
++            [[0], np.cumsum(wr * norm_w + sep_w)])
++        cell_h = 1 / (nrows + hspace * (nrows - 1))
++        sep_h = hspace * cell_h
++        norm_h = cell_h * nrows / hr.sum()
++        row_edges = np.concatenate(
++            [[0], np.cumsum(hr * norm_h + sep_h)])
++        x0 = col_edges[ss.colspan.start]
++        x1 = col_edges[ss.colspan.stop] - sep_w
++        y1 = 1 - row_edges[ss.rowspan.start]
++        y0 = 1 - (row_edges[ss.rowspan.stop] - sep_h)
+         if self.bbox_relative is None:
+-            self.bbox_relative = Bbox.from_bounds(x0, y0, dx, dy)
++            self.bbox_relative = Bbox.from_extents(x0, y0, x1, y1)
+         else:
+             self.bbox_relative.p0 = (x0, y0)
+-            self.bbox_relative.p1 = (x0 + dx, y0 + dy)
++            self.bbox_relative.p1 = (x1, y1)
+ 
+     def get_constrained_layout(self):
+         """

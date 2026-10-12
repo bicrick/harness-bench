@@ -1,0 +1,376 @@
+2026-10-11 15:49:45,021 - INFO - rex-deploy - Building image docker.io/swebench/sweb.eval.x86_64.django_1776_django-12713:latest to install a standalone python to /root. This might take a while (but you only have to do it once). To skip this step, set `python_standalone_dir` to None.
+2026-10-11 15:50:33,579 - INFO - rex-deploy - Starting container docker.ioswebenchsweb.eval.x86_64.django_1776_django-12713latest-1434db3b-022a-49ff-8078-16083bc3c1dc with image docker.io/swebench/sweb.eval.x86_64.django_1776_django-12713:latest serving on port 45461
+2026-10-11 15:50:33,585 - INFO - rex-deploy - Starting runtime at 45461
+2026-10-11 15:50:34,637 - INFO - rex-deploy - Runtime started in 1.05s
+2026-10-11 15:50:35,539 - INFO - swea-env - Environment Initialized
+2026-10-11 15:50:37,152 - INFO - swea-agent - Setting up agent for instance django__django-12713
+2026-10-11 15:50:37,154 - INFO - swea-agent - Trajectory will be saved to /home/box/context-shaping/results/swebench/runs/django__django-12713/swe_agent_nothink/out/django__django-12713/django__django-12713.traj
+2026-10-11 15:50:40,607 - INFO - swea-tools - Resetting tools
+2026-10-11 15:50:40,990 - INFO - swea-agent - SYSTEM (main)
+You are a helpful assistant that can interact with a computer to solve tasks.
+2026-10-11 15:50:41,152 - INFO - swea-agent - 🤖 MODEL INPUT
+<uploaded_files>
+/testbed
+</uploaded_files>
+I've uploaded a python code repository in the directory /testbed. Consider the following PR description:
+
+<pr_description>
+Allow overridding widget in formfield_for_manytomany().
+Description
+	 
+		(last modified by Mariusz Felisiak)
+	 
+It does not work when I set widget param to function formfield_for_manytomany().
+This is different from the formfield_for_foreignkey() function.
+
+</pr_description>
+
+Can you help me implement the necessary changes to the repository so that the requirements specified in the <pr_description> are met?
+I've already taken care of all changes to any of the test files described in the <pr_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!
+Your task is to make the minimal changes to non-tests files in the /testbed directory to ensure the <pr_description> is satisfied.
+Follow these steps to resolve the issue:
+1. As a first step, it might be a good idea to find and read code relevant to the <pr_description>
+2. Create a script to reproduce the error and execute it with `python <filename.py>` using the bash tool, to confirm the error
+3. Edit the sourcecode of the repo to resolve the issue
+4. Rerun your reproduce script and confirm that the error is fixed!
+5. Think about edgecases and make sure your fix handles them as well
+Your thinking should be thorough and so it's fine if it's very long.
+2026-10-11 15:50:41,155 - INFO - swea-agent - ========================= STEP 1 =========================
+2026-10-11 15:50:41,282 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:50:42,487 - INFO - swea-agent - 💭 THOUGHT
+I'll look at the relevant code in `ModelAdmin.formfield_for_manytomany`.
+
+🎬 ACTION
+cd /testbed && grep -n "def formfield_for_manytomany" -A 40 django/contrib/admin/options.py; echo ----; grep -n "def formfield_for_foreignkey" -A 25 django/contrib/admin/options.py
+2026-10-11 15:50:42,798 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+242:    def formfield_for_manytomany(self, db_field, request, **kwargs):
+243-        """
+244-        Get a form Field for a ManyToManyField.
+245-        """
+246-        # If it uses an intermediary model that isn't auto created, don't show
+247-        # a field in admin.
+248-        if not db_field.remote_field.through._meta.auto_created:
+249-            return None
+250-        db = kwargs.get('using')
+251-
+252-        autocomplete_fields = self.get_autocomplete_fields(request)
+253-        if db_field.name in autocomplete_fields:
+254-            kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
+255-        elif db_field.name in self.raw_id_fields:
+256-            kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
+257-        elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
+258-            kwargs['widget'] = widgets.FilteredSelectMultiple(
+259-                db_field.verbose_name,
+260-                db_field.name in self.filter_vertical
+261-            )
+262-
+263-        if 'queryset' not in kwargs:
+264-            queryset = self.get_field_queryset(db, db_field, request)
+265-            if queryset is not None:
+266-                kwargs['queryset'] = queryset
+267-
+268-        form_field = db_field.formfield(**kwargs)
+269-        if (isinstance(form_field.widget, SelectMultiple) and
+270-                not isinstance(form_field.widget, (CheckboxSelectMultiple, AutocompleteSelectMultiple))):
+271-            msg = _('Hold down “Control”, or “Command” on a Mac, to select more than one.')
+272-            help_text = form_field.help_text
+273-            form_field.help_text = format_lazy('{} {}', help_text, msg) if help_text else msg
+274-        return form_field
+275-
+276-    def get_autocomplete_fields(self, request):
+277-        """
+278-        Return a list of ForeignKey and/or ManyToMany fields which should use
+279-        an autocomplete widget.
+280-        """
+281-        return self.autocomplete_fields
+282-
+----
+218:    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+219-        """
+220-        Get a form Field for a ForeignKey.
+221-        """
+222-        db = kwargs.get('using')
+223-
+224-        if 'widget' not in kwargs:
+225-            if db_field.name in self.get_autocomplete_fields(request):
+226-                kwargs['widget'] = AutocompleteSelect(db_field.remote_field, self.admin_site, using=db)
+227-            elif db_field.name in self.raw_id_fields:
+228-                kwargs['widget'] = widgets.ForeignKeyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
+229-            elif db_field.name in self.radio_fields:
+230-                kwargs['widget'] = widgets.AdminRadioSelect(attrs={
+231-                    'class': get_ul_class(self.radio_fields[db_field.name]),
+232-                })
+233-                kwargs['empty_label'] = _('None') if db_field.blank else None
+234-
+235-        if 'queryset' not in kwargs:
+236-            queryset = self.get_field_queryset(db, db_field, request)
+237-            if queryset is not None:
+238-                kwargs['queryset'] = queryset
+239-
+240-        return db_field.formfield(**kwargs)
+241-
+242-    def formfield_for_manytomany(self, db_field, request, **kwargs):
+243-        """
+
+2026-10-11 15:50:42,810 - INFO - swea-agent - ========================= STEP 2 =========================
+2026-10-11 15:50:42,819 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:50:46,777 - INFO - swea-agent - 💭 THOUGHT
+The foreign key version respects a caller-supplied `widget` in kwargs, but the many-to-many version unconditionally overwrites it. I'll make the many-to-many version match by only setting a widget when none was passed in.
+
+🎬 ACTION
+cd /testbed && python - <<'EOF'
+import re
+p='django/contrib/admin/options.py'
+s=open(p).read()
+old="""        autocomplete_fields = self.get_autocomplete_fields(request)
+        if db_field.name in autocomplete_fields:
+            kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
+        elif db_field.name in self.raw_id_fields:
+            kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
+        elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
+            kwargs['widget'] = widgets.FilteredSelectMultiple(
+                db_field.verbose_name,
+                db_field.name in self.filter_vertical
+            )
+"""
+new="""        if 'widget' not in kwargs:
+            autocomplete_fields = self.get_autocomplete_fields(request)
+            if db_field.name in autocomplete_fields:
+                kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
+            elif db_field.name in self.raw_id_fields:
+                kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
+            elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
+                kwargs['widget'] = widgets.FilteredSelectMultiple(
+                    db_field.verbose_name,
+                    db_field.name in self.filter_vertical
+                )
+"""
+assert s.count(old)==1
+open(p,'w').write(s.replace(old,new))
+EOF
+cat > /tmp/repro.py <<'EOF'
+import django
+from django.conf import settings
+settings.configure(INSTALLED_APPS=['django.contrib.admin','django.contrib.auth','django.contrib.contenttypes','django.contrib.sessions','django.contrib.messages'],
+    DATABASES={'default':{'ENGINE':'django.db.backends.sqlite3','NAME':':memory:'}})
+django.setup()
+from django import forms
+from django.contrib import admin
+from django.contrib.auth.models import User, Group
+from django.contrib.admin.sites import AdminSite
+class W(forms.SelectMultiple): pass
+class MA(admin.ModelAdmin):
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        kwargs['widget'] = W
+        return super().formfield_for_manytomany(db_field, request, **kwargs)
+ma = MA(User, AdminSite())
+ff = ma.formfield_for_manytomany(User._meta.get_field('groups'), None)
+print(type(ff.widget))
+assert isinstance(ff.widget, W)
+print("OK")
+EOF
+python /tmp/repro.py && python -m pytest tests/admin_widgets -q 2>&1 | tail -3
+2026-10-11 15:50:47,904 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+<class '__main__.W'>
+OK
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+
+2026-10-11 15:50:47,908 - INFO - swea-agent - ========================= STEP 3 =========================
+2026-10-11 15:50:47,914 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:50:48,926 - INFO - swea-agent - 💭 THOUGHT
+The reproduction passes. Let me run the existing admin widget tests with Django's own runner.
+
+🎬 ACTION
+cd /testbed/tests && python runtests.py admin_widgets admin_views -q 2>&1 | tail -3
+2026-10-11 15:50:49,506 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+                   [-b]
+                   [module [module ...]]
+runtests.py: error: unrecognized arguments: -q
+
+2026-10-11 15:50:49,509 - INFO - swea-agent - ========================= STEP 4 =========================
+2026-10-11 15:50:49,514 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:50:50,379 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+cd /testbed/tests && python runtests.py admin_widgets admin_views 2>&1 | tail -3
+2026-10-11 15:51:10,804 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+
+2026-10-11 15:51:10,808 - INFO - swea-agent - ========================= STEP 5 =========================
+2026-10-11 15:51:10,815 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:51:11,722 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+cd /testbed/tests && python runtests.py admin_widgets admin_views 2>&1 | grep -E "^(Ran|OK|FAILED)"
+2026-10-11 15:51:32,912 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+Ran 443 tests in 19.528s
+OK (skipped=29)
+
+2026-10-11 15:51:32,918 - INFO - swea-agent - ========================= STEP 6 =========================
+2026-10-11 15:51:32,927 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:51:35,166 - WARNING - swea-agent - Requerying model after FunctionCallingFormatError (1th requery)
+2026-10-11 15:51:35,172 - WARNING - swea-agent - Your last output did not use any tool calls!
+Please make sure your output includes exactly _ONE_ function call!
+You must invoke the function directly using the function call format.
+You cannot invoke commands with ```, you have to use the function call format.
+If you think you have already resolved the issue, please submit your changes by running the `submit` command.
+If you think you cannot solve the problem, please run `exit_forfeit` (if available) or `submit`.
+Else, please continue with a new tool call!
+2026-10-11 15:51:35,178 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:51:36,243 - INFO - swea-agent - 💭 THOUGHT
+The fix is in place and verified, so I'll submit it now.
+
+🎬 ACTION
+submit
+2026-10-11 15:51:36,662 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+Thank you for your work on this issue. Please carefully follow the steps below to help review your changes.
+
+1. If you made any changes to your code after running the reproduction script, please run the reproduction script again.
+  If the reproduction script is failing, please revisit your changes and make sure they are correct.
+  If you have already removed your reproduction script, please ignore this step.
+2. Remove your reproduction script (if you haven't done so already).
+3. If you have modified any TEST files, please revert them to the state they had before you started fixing the issue.
+  You can do this with `git checkout -- /path/to/test/file.py`. Use below <diff> to find the files you need to revert.
+4. Run the submit command again to confirm.
+
+Here is a list of all of your changes:
+
+<diff>
+diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py
+index 69a5fbf389..db7df891e3 100644
+--- a/django/contrib/admin/options.py
++++ b/django/contrib/admin/options.py
+@@ -249,16 +249,17 @@ class BaseModelAdmin(metaclass=forms.MediaDefiningClass):
+             return None
+         db = kwargs.get('using')
+ 
+-        autocomplete_fields = self.get_autocomplete_fields(request)
+-        if db_field.name in autocomplete_fields:
+-            kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
+-        elif db_field.name in self.raw_id_fields:
+-            kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
+-        elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
+-            kwargs['widget'] = widgets.FilteredSelectMultiple(
+-                db_field.verbose_name,
+-                db_field.name in self.filter_vertical
+-            )
++        if 'widget' not in kwargs:
++            autocomplete_fields = self.get_autocomplete_fields(request)
++            if db_field.name in autocomplete_fields:
++                kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
++            elif db_field.name in self.raw_id_fields:
++                kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
++            elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
++                kwargs['widget'] = widgets.FilteredSelectMultiple(
++                    db_field.verbose_name,
++                    db_field.name in self.filter_vertical
++                )
+ 
+         if 'queryset' not in kwargs:
+             queryset = self.get_field_queryset(db, db_field, request)
+
+</diff>
+
+
+2026-10-11 15:51:36,671 - INFO - swea-agent - ========================= STEP 8 =========================
+2026-10-11 15:51:36,678 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:51:37,711 - WARNING - swea-agent - Requerying model after FunctionCallingFormatError (1th requery)
+2026-10-11 15:51:37,715 - WARNING - swea-agent - Your last output included multiple tool calls!
+Please make sure your output includes a thought and exactly _ONE_ function call.
+2026-10-11 15:51:37,721 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:51:38,957 - INFO - swea-agent - 💭 THOUGHT
+Understood, one call per turn from here. Cleaning up the reproduction script:
+
+🎬 ACTION
+rm -f /tmp/repro.py && git -C /testbed status --short
+2026-10-11 15:51:39,293 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+M  django/contrib/admin/options.py
+
+2026-10-11 15:51:39,299 - INFO - swea-agent - ========================= STEP 10 =========================
+2026-10-11 15:51:39,306 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 15:51:40,215 - INFO - swea-agent - 💭 THOUGHT
+The only change is to `django/contrib/admin/options.py`, and no test files were modified. I'm submitting now.
+
+🎬 ACTION
+submit
+2026-10-11 15:51:40,602 - INFO - swea-agent - Found submission: diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py
+index 69a5fbf389..db7df891e3 100644
+--- a/django/contrib/admin/options.py
++++ b/django/contrib/admin/options.py
+@@ -249,16 +249,17 @@ class BaseModelAdmin(metaclass=forms.MediaDefiningClass):
+             return None
+         db = kwargs.get('using')
+ 
+-        autocomplete_fields = self.get_autocomplete_fields(request)
+-        if db_field.name in autocomplete_fields:
+-            kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
+-        elif db_field.name in self.raw_id_fields:
+-            kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
+-        elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
+-            kwargs['widget'] = widgets.FilteredSelectMultiple(
+-                db_field.verbose_name,
+-                db_field.name in self.filter_vertical
+-            )
++        if 'widget' not in kwargs:
++            autocomplete_fields = self.get_autocomplete_fields(request)
++            if db_field.name in autocomplete_fields:
++                kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
++            elif db_field.name in self.raw_id_fields:
++                kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
++            elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
++                kwargs['widget'] = widgets.FilteredSelectMultiple(
++                    db_field.verbose_name,
++                    db_field.name in self.filter_vertical
++                )
+ 
+         if 'queryset' not in kwargs:
+             queryset = self.get_field_queryset(db, db_field, request)
+
+2026-10-11 15:51:40,607 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py
+index 69a5fbf389..db7df891e3 100644
+--- a/django/contrib/admin/options.py
++++ b/django/contrib/admin/options.py
+@@ -249,16 +249,17 @@ class BaseModelAdmin(metaclass=forms.MediaDefiningClass):
+             return None
+         db = kwargs.get('using')
+ 
+-        autocomplete_fields = self.get_autocomplete_fields(request)
+-        if db_field.name in autocomplete_fields:
+-            kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
+-        elif db_field.name in self.raw_id_fields:
+-            kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
+-        elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
+-            kwargs['widget'] = widgets.FilteredSelectMultiple(
+-                db_field.verbose_name,
+-                db_field.name in self.filter_vertical
+-            )
++        if 'widget' not in kwargs:
++            autocomplete_fields = self.get_autocomplete_fields(request)
++            if db_field.name in autocomplete_fields:
++                kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
++            elif db_field.name in self.raw_id_fields:
++                kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
++            elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
++                kwargs['widget'] = widgets.FilteredSelectMultiple(
++                    db_field.verbose_name,
++                    db_field.name in self.filter_vertical
++                )
+ 
+         if 'queryset' not in kwargs:
+             queryset = self.get_field_queryset(db, db_field, request)
+
+2026-10-11 15:51:40,621 - INFO - swea-agent - Trajectory saved to /home/box/context-shaping/results/swebench/runs/django__django-12713/swe_agent_nothink/out/django__django-12713/django__django-12713.traj
+2026-10-11 15:51:40,625 - INFO - swea-env - Beginning environment shutdown...

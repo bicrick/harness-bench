@@ -1,0 +1,325 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && cat astropy/io/ascii/cds.py | head -120 && grep -n "def p_\|division\|/" astropy/units/format/cds.py | head -80
+# Licensed under a 3-clause BSD style license - see LICENSE.rst
+"""An extensible ASCII table reader and writer.
+
+cds.py:
+  Classes to read CDS / Vizier table format
+
+:Copyright: Smithsonian Astrophysical Observatory (2011)
+:Author: Tom Aldcroft (aldcroft@head.cfa.harvard.edu)
+"""
+
+
+import fnmatch
+import itertools
+import os
+import re
+from contextlib import suppress
+
+from astropy.units import Unit
+
+from . import core, fixedwidth
+
+__doctest_skip__ = ["*"]
+
+
+class CdsHeader(core.BaseHeader):
+    _subfmt = "CDS"
+
+    col_type_map = {
+        "e": core.FloatType,
+        "f": core.FloatType,
+        "i": core.IntType,
+        "a": core.StrType,
+    }
+
+    "The ReadMe file to construct header from."
+    readme = None
+
+    def get_type_map_key(self, col):
+        match = re.match(r"\d*(\S)", col.raw_type.lower())
+        if not match:
+            raise ValueError(
+                f'Unrecognized {self._subfmt} format "{col.raw_type}" for column'
+                f'"{col.name}"'
+            )
+        return match.group(1)
+
+    def get_cols(self, lines):
+        """
+        Initialize the header Column objects from the table ``lines`` for a CDS/MRT
+        header.
+
+        Parameters
+        ----------
+        lines : list
+            List of table lines
+
+        """
+        # Read header block for the table ``self.data.table_name`` from the read
+        # me file ``self.readme``.
+        if self.readme and self.data.table_name:
+            in_header = False
+            readme_inputter = core.BaseInputter()
+            f = readme_inputter.get_lines(self.readme)
+            # Header info is not in data lines but in a separate file.
+            lines = []
+            comment_lines = 0
+            for line in f:
+                line = line.strip()
+                if in_header:
+                    lines.append(line)
+                    if line.startswith(("------", "=======")):
+                        comment_lines += 1
+                        if comment_lines == 3:
+                            break
+                else:
+                    match = re.match(
+                        r"Byte-by-byte Description of file: (?P<name>.+)$",
+                        line,
+                        re.IGNORECASE,
+                    )
+                    if match:
+                        # Split 'name' in case in contains multiple files
+                        names = [s for s in re.split("[, ]+", match.group("name")) if s]
+                        # Iterate on names to find if one matches the tablename
+                        # including wildcards.
+                        for pattern in names:
+                            if fnmatch.fnmatch(self.data.table_name, pattern):
+                                in_header = True
+                                lines.append(line)
+                                break
+
+            else:
+                raise core.InconsistentTableError(
+                    f"Can't find table {self.data.table_name} in {self.readme}"
+                )
+
+        found_line = False
+
+        for i_col_def, line in enumerate(lines):
+            if re.match(r"Byte-by-byte Description", line, re.IGNORECASE):
+                found_line = True
+            elif found_line:  # First line after list of file descriptions
+                i_col_def -= 1  # Set i_col_def to last description line
+                break
+        else:
+            raise ValueError('no line with "Byte-by-byte Description" found')
+
+        re_col_def = re.compile(
+            r"""\s*
+                (?P<start> \d+ \s* -)? \s*
+                (?P<end>   \d+)        \s+
+                (?P<format> [\w.]+)     \s+
+                (?P<units> \S+)        \s+
+                (?P<name>  \S+)
+                (\s+ (?P<descr> \S.*))?""",
+            re.VERBOSE,
+        )
+
+        cols = []
+        for line in itertools.islice(lines, i_col_def + 4, None):
+8:#   pytest astropy/units
+29:    <http://cds.u-strasbg.fr/>`_ `Standards for Astronomical
+30:    Catalogues 2.0 <http://vizier.u-strasbg.fr/vizier/doc/catstd-3.2.htx>`_
+32:    <https://vizier.u-strasbg.fr/viz-bin/Unit>`_.  This format is used
+81:        t_DIVISION = r"/"
+131:            lextab="cds_lextab", package="astropy/units", reflags=int(re.UNICODE)
+139:        <http://vizier.u-strasbg.fr/vizier/doc/catstd-3.2.htx>`_, which is not
+142:        <https://bitbucket.org/nxg/unity/>`_.
+146:        def p_main(p):
+165:        def p_combined_units(p):
+168:                           | division_of_units
+172:        def p_product_of_units(p):
+182:        def p_division_of_units(p):
+184:            division_of_units : DIVISION unit_expression
+190:                p[0] = p[1] / p[3]
+192:        def p_unit_expression(p):
+202:        def p_factor(p):
+221:        def p_unit_with_power(p):
+231:        def p_numeric_power(p):
+237:        def p_sign(p):
+247:        def p_signed_int(p):
+253:        def p_signed_float(p):
+260:        def p_error(p):
+263:        return parsing.yacc(tabmodule="cds_parsetab", package="astropy/units")
+[0m
+[0m$ [0mcd /testbed && sed -n 140,200p astropy/units/format/cds.py
+terribly precise.  The exact grammar is here is based on the
+        YACC grammar in the `unity library
+        <https://bitbucket.org/nxg/unity/>`_.
+        """
+        tokens = cls._tokens
+
+        def p_main(p):
+            """
+            main : factor combined_units
+                 | combined_units
+                 | DIMENSIONLESS
+                 | OPEN_BRACKET combined_units CLOSE_BRACKET
+                 | OPEN_BRACKET DIMENSIONLESS CLOSE_BRACKET
+                 | factor
+            """
+            from astropy.units import dex
+            from astropy.units.core import Unit
+
+            if len(p) == 3:
+                p[0] = Unit(p[1] * p[2])
+            elif len(p) == 4:
+                p[0] = dex(p[2])
+            else:
+                p[0] = Unit(p[1])
+
+        def p_combined_units(p):
+            """
+            combined_units : product_of_units
+                           | division_of_units
+            """
+            p[0] = p[1]
+
+        def p_product_of_units(p):
+            """
+            product_of_units : unit_expression PRODUCT combined_units
+                             | unit_expression
+            """
+            if len(p) == 4:
+                p[0] = p[1] * p[3]
+            else:
+                p[0] = p[1]
+
+        def p_division_of_units(p):
+            """
+            division_of_units : DIVISION unit_expression
+                              | unit_expression DIVISION combined_units
+            """
+            if len(p) == 3:
+                p[0] = p[2] ** -1
+            else:
+                p[0] = p[1] / p[3]
+
+        def p_unit_expression(p):
+            """
+            unit_expression : unit_with_power
+                            | OPEN_PAREN combined_units CLOSE_PAREN
+            """
+            if len(p) == 2:
+                p[0] = p[1]
+            else:
+                p[0] = p[2]
+[0m
+[0m← [0mEdit astropy/units/format/cds.py
+Index: /testbed/astropy/units/format/cds.py
+===================================================================
+--- /testbed/astropy/units/format/cds.py
++++ /testbed/astropy/units/format/cds.py
+@@ -183,8 +183,10 @@
+ """
+ division_of_units : DIVISION unit_expression
+                   | unit_expression DIVISION combined_units
+ """
++# In CDS format, all units following a division sign are in the
++# denominator, e.g. "J/m/s/kpc2" == "J / (m s kpc2)".
+ if len(p) == 3:
+     p[0] = p[2] ** -1
+ else:
+     p[0] = p[1] / p[3]
+
+[0m
+[0m← [0mEdit astropy/units/format/cds.py
+Index: /testbed/astropy/units/format/cds.py
+===================================================================
+--- /testbed/astropy/units/format/cds.py
++++ /testbed/astropy/units/format/cds.py
+@@ -181,17 +181,28 @@
+ 
+ def p_division_of_units(p):
+     """
+     division_of_units : DIVISION unit_expression
+-                      | unit_expression DIVISION combined_units
++                      | unit_expression DIVISION denominator_of_units
+     """
+-    # In CDS format, all units following a division sign are in the
+-    # denominator, e.g. "J/m/s/kpc2" == "J / (m s kpc2)".
+     if len(p) == 3:
+         p[0] = p[2] ** -1
+     else:
+         p[0] = p[1] / p[3]
+ 
++def p_denominator_of_units(p):
++    """
++    denominator_of_units : unit_expression DIVISION denominator_of_units
++                         | unit_expression PRODUCT denominator_of_units
++                         | unit_expression
++    """
++    # Every unit after the first division sign is part of the
++    # denominator, so "a/b/c" is "a / (b c)".
++    if len(p) == 4:
++        p[0] = p[1] * p[3]
++    else:
++        p[0] = p[1]
++
+ def p_unit_expression(p):
+     """
+     unit_expression : unit_with_power
+                     | OPEN_PAREN combined_units CLOSE_PAREN
+
+[0m
+[0m$ [0mcd /testbed && find astropy/units -name "cds_parsetab*" -o -name "cds_lextab*" | xargs rm -f; python -c "
+from astropy.units import Unit
+for s in ['10+3J/m/s/kpc2','10-7J/s/kpc2','J/m/s/kpc2','erg/AA/s/kpc2','m/s','km/s/kpc','J/(m s)']:
+    print(s, '->', Unit(s, format='cds'))
+" 2>&1 | tail -20
+Traceback (most recent call last):
+  File "/testbed/astropy/units/core.py", line 2066, in __call__
+    return f.parse(s)
+  File "/testbed/astropy/units/format/cds.py", line 306, in parse
+    raise ValueError("CDS unit must not contain whitespace")
+ValueError: CDS unit must not contain whitespace
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<string>", line 4, in <module>
+  File "/testbed/astropy/units/core.py", line 2089, in __call__
+    raise ValueError(msg)
+ValueError: 'J/(m s)' did not parse as cds unit: CDS unit must not contain whitespace If this is meant to be a custom unit, define it with 'u.def_unit'. To have it recognized inside a file reader or other code, enable it with 'u.add_enabled_units'. For details, see https://docs.astropy.org/en/latest/units/combining_and_defining.html
+10+3J/m/s/kpc2 -> 1000 J / (kpc2 m s)
+10-7J/s/kpc2 -> 1e-07 J / (kpc2 s)
+J/m/s/kpc2 -> J / (kpc2 m s)
+erg/AA/s/kpc2 -> erg / (AA kpc2 s)
+m/s -> m / s
+km/s/kpc -> km / (kpc s)
+[0m
+[0m$ [0mcd /testbed && python -m pytest -q astropy/units/tests/test_format.py astropy/io/ascii/tests/test_cds.py 2>&1 | tail -5; git status --short
+[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m [ 77%]
+[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m [ 87%]
+[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m [ 96%]
+[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m                                                 [100%][0m
+[32m[32m[1m744 passed[0m[32m in 1.53s[0m[0m
+ M astropy/units/format/cds.py
+ M astropy/units/format/cds_parsetab.py
+[0m
+[0m$ [0mcd /testbed && ls CHANGES.rst changelog 2>/dev/null; ls docs/changes 2>/dev/null | head
+CHANGES.rst
+13985.other.rst
+14252.other.rst
+14311.other.rst
+14321.other.rst
+14349.other.rst
+README.rst
+config
+constants
+convolution
+coordinates
+[0m
+[0m$ [0mcd /testbed && cat > docs/io/ascii/14369.bugfix.rst <<'EOF'
+Fixed the parsing of composite units with multiple divisions (e.g. ``J/m/s/kpc2``) in the CDS format, so that all units after the first division sign are correctly placed in the denominator.
+EOF
+git status --short
+M astropy/units/format/cds.py
+ M astropy/units/format/cds_parsetab.py
+?? docs/io/ascii/14369.bugfix.rst
+[0m

@@ -1,0 +1,100 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..05ffa2829 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -570,6 +570,45 @@ class Documenter:
+ 
+             yield from docstringlines
+ 
++    def find_attr_doc(self, namespace: str, attrname: str) -> Optional[List[str]]:
++        """Find the attribute documentation of *attrname* defined in *namespace*.
++
++        The documentation is searched in the analyzer of the current module first.
++        If the attribute is not found there and the target is a class member,
++        the base classes of the target class are searched as well, so that
++        inherited attributes are documented correctly (refs: #741).
++        """
++        if self.analyzer:
++            attr_docs = self.analyzer.find_attr_docs()
++            if (namespace, attrname) in attr_docs:
++                return list(attr_docs[(namespace, attrname)])
++
++        # the class which the attribute is looked up from (the documented class
++        # for ClassDocumenter, the owner class for AttributeDocumenter, etc.)
++        if inspect.isclass(self.object):
++            subject = self.object
++        elif inspect.isclass(self.parent):
++            subject = self.parent
++        else:
++            subject = None
++
++        if self.objpath and subject is not None:
++            for cls in subject.__mro__[1:]:
++                try:
++                    module = safe_getattr(cls, '__module__')
++                    qualname = safe_getattr(cls, '__qualname__')
++                    if not module or not qualname:
++                        continue
++                    analyzer = ModuleAnalyzer.for_module(module)
++                    analyzer.analyze()
++                    key = (qualname, attrname)
++                    if key in analyzer.attr_docs:
++                        return list(analyzer.attr_docs[key])
++                except (AttributeError, PycodeError):
++                    pass
++
++        return None
++
+     def get_sourcename(self) -> str:
+         if (getattr(self.object, '__module__', None) and
+                 getattr(self.object, '__qualname__', None)):
+@@ -594,18 +633,17 @@ class Documenter:
+ 
+         # set sourcename and add content from attribute documentation
+         sourcename = self.get_sourcename()
+-        if self.analyzer:
+-            attr_docs = self.analyzer.find_attr_docs()
+-            if self.objpath:
+-                key = ('.'.join(self.objpath[:-1]), self.objpath[-1])
+-                if key in attr_docs:
+-                    no_docstring = True
+-                    # make a copy of docstring for attributes to avoid cache
+-                    # the change of autodoc-process-docstring event.
+-                    docstrings = [list(attr_docs[key])]
++        if self.objpath:
++            namespace = '.'.join(self.objpath[:-1])
++            attr_doc = self.find_attr_doc(namespace, self.objpath[-1])
++            if attr_doc is not None:
++                no_docstring = True
++                # make a copy of docstring for attributes to avoid cache
++                # the change of autodoc-process-docstring event.
++                docstrings = [attr_doc]
+ 
+-                    for i, line in enumerate(self.process_doc(docstrings)):
+-                        self.add_line(line, sourcename, i)
++                for i, line in enumerate(self.process_doc(docstrings)):
++                    self.add_line(line, sourcename, i)
+ 
+         # add content from docstrings
+         if not no_docstring:
+@@ -684,11 +722,6 @@ class Documenter:
+         # search for members in source code too
+         namespace = '.'.join(self.objpath)  # will be empty for modules
+ 
+-        if self.analyzer:
+-            attr_docs = self.analyzer.find_attr_docs()
+-        else:
+-            attr_docs = {}
+-
+         # process members and determine which to skip
+         for obj in members:
+             membername, member = obj
+@@ -746,7 +779,7 @@ class Documenter:
+                         keep = has_doc or self.options.undoc_members
+                 else:
+                     keep = False
+-            elif (namespace, membername) in attr_docs:
++            elif self.find_attr_doc(namespace, membername) is not None:
+                 if want_all and isprivate:
+                     if self.options.private_members is None:
+                         keep = False

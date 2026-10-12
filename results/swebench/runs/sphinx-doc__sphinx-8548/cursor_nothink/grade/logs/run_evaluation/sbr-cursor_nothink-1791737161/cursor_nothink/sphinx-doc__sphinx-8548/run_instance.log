@@ -1,0 +1,328 @@
+2026-10-11 11:46:03,876 - INFO - Creating container for sphinx-doc__sphinx-8548...
+2026-10-11 11:46:03,911 - INFO - Container for sphinx-doc__sphinx-8548 created: 02dd4b6437ba43603bbeaeb4fbfab5cf5f294c1e29a4312b1ea900e9577864f5
+2026-10-11 11:46:04,233 - INFO - Container for sphinx-doc__sphinx-8548 started: 02dd4b6437ba43603bbeaeb4fbfab5cf5f294c1e29a4312b1ea900e9577864f5
+2026-10-11 11:46:04,233 - INFO - Intermediate patch for sphinx-doc__sphinx-8548 written to logs/run_evaluation/sbr-cursor_nothink-1791737161/cursor_nothink/sphinx-doc__sphinx-8548/patch.diff, now applying to container...
+2026-10-11 11:46:04,556 - INFO - >>>>> Applied Patch:
+Checking patch sphinx/ext/autodoc/__init__.py...
+Checking patch sphinx/ext/autodoc/importer.py...
+Applied patch sphinx/ext/autodoc/__init__.py cleanly.
+Applied patch sphinx/ext/autodoc/importer.py cleanly.
+
+2026-10-11 11:46:05,091 - INFO - Git diff before:
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..7937fe82f 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -584,6 +584,40 @@ class Documenter:
+         else:
+             return 'docstring of %s' % fullname
+ 
++    def _get_inherited_attr_doc(self, attr_docs: Dict[Tuple[str, str], List[str]]
++                                ) -> Optional[List[str]]:
++        """Find attribute documentation of an inherited attribute.
++
++        The module analyzer stores attribute docstrings under the qualified
++        name of the class which defines them, so look for the defining class
++        in the MRO of the parent object.
++        """
++        parent = self.parent
++        name = self.objpath[-1]
++        if parent is None or not inspect.isclass(parent):
++            return None
++
++        for cls in inspect.getmro(parent)[1:]:
++            qualname = safe_getattr(cls, '__qualname__', None)
++            module = safe_getattr(cls, '__module__', None)
++            if not qualname:
++                continue
++
++            if module == self.modname and (qualname, name) in attr_docs:
++                return attr_docs[(qualname, name)]
++
++            # defined in another module: consult that module's analyzer
++            if module and module != self.modname:
++                try:
++                    analyzer = ModuleAnalyzer.for_module(module)
++                    analyzer.analyze()
++                except PycodeError:
++                    continue
++                if analyzer.attr_docs and (qualname, name) in analyzer.attr_docs:
++                    return analyzer.attr_docs[(qualname, name)]
++
++        return None
++
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         """Add content from docstrings, attribute documentation and user."""
+@@ -606,6 +640,16 @@ class Documenter:
+ 
+                     for i, line in enumerate(self.process_doc(docstrings)):
+                         self.add_line(line, sourcename, i)
++                else:
++                    # the attribute may be inherited: its docstring is stored
++                    # under the namespace of the base class which defines it
++                    inherited_doc = self._get_inherited_attr_doc(attr_docs)
++                    if inherited_doc is not None:
++                        no_docstring = True
++                        docstrings = [list(inherited_doc)]
++
++                        for i, line in enumerate(self.process_doc(docstrings)):
++                            self.add_line(line, sourcename, i)
+ 
+         # add content from docstrings
+         if not no_docstring:
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index d6e73d36a..5927ab148 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -14,7 +14,7 @@ import warnings
+ from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
+ 
+ from sphinx.deprecation import RemovedInSphinx40Warning, deprecated_alias
+-from sphinx.pycode import ModuleAnalyzer
++from sphinx.pycode import ModuleAnalyzer, PycodeError
+ from sphinx.util import logging
+ from sphinx.util.inspect import (getannotations, getmro, getslots, isclass, isenumclass,
+                                  safe_getattr)
+@@ -315,9 +315,44 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable,
+                 members[name] = ClassAttribute(subject, name, INSTANCEATTR,
+                                                '\n'.join(docstring))
+ 
++        # attribute docstrings of inherited members are stored under the
++        # namespace of the base class which defines them.
++        for name, member in members.items():
++            if member.docstring is None:
++                member.docstring = _find_inherited_attr_doc(subject, name)
++
+     return members
+ 
+ 
++def _find_inherited_attr_doc(subject: Any, name: str) -> Optional[str]:
++    """Find the attribute docstring of *name* defined in a base class of *subject*.
++
++    Attribute docstrings are stored by the module analyzer keyed by
++    ``(namespace, attrname)``, where *namespace* is the qualified name of the
++    class which defines the attribute.  For an inherited member that namespace
++    differs from the one of *subject*, so walk the MRO and consult the analyzer
++    of each base class's module.
++    """
++    for cls in getmro(subject)[1:]:
++        try:
++            module = safe_getattr(cls, '__module__')
++            qualname = safe_getattr(cls, '__qualname__')
++            if not module or not qualname:
++                continue
++
++            base_analyzer = ModuleAnalyzer.for_module(module)
++            base_analyzer.analyze()
++            attr_docs = base_analyzer.attr_docs or {}
++        except (AttributeError, PycodeError):
++            continue
++
++        key = (qualname, name)
++        if key in attr_docs:
++            return '\n'.join(attr_docs[key])
++
++    return None
++
++
+ from sphinx.ext.autodoc.mock import (MockFinder, MockLoader, _MockModule, _MockObject,  # NOQA
+                                      mock)
+2026-10-11 11:46:05,091 - INFO - Eval script for sphinx-doc__sphinx-8548 written to logs/run_evaluation/sbr-cursor_nothink-1791737161/cursor_nothink/sphinx-doc__sphinx-8548/eval.sh; copying to container...
+2026-10-11 11:46:10,931 - INFO - Test runtime: 5.74 seconds
+2026-10-11 11:46:10,932 - INFO - Test output for sphinx-doc__sphinx-8548 written to logs/run_evaluation/sbr-cursor_nothink-1791737161/cursor_nothink/sphinx-doc__sphinx-8548/test_output.txt
+2026-10-11 11:46:11,014 - INFO - Git diff after:
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..7937fe82f 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -584,6 +584,40 @@ class Documenter:
+         else:
+             return 'docstring of %s' % fullname
+ 
++    def _get_inherited_attr_doc(self, attr_docs: Dict[Tuple[str, str], List[str]]
++                                ) -> Optional[List[str]]:
++        """Find attribute documentation of an inherited attribute.
++
++        The module analyzer stores attribute docstrings under the qualified
++        name of the class which defines them, so look for the defining class
++        in the MRO of the parent object.
++        """
++        parent = self.parent
++        name = self.objpath[-1]
++        if parent is None or not inspect.isclass(parent):
++            return None
++
++        for cls in inspect.getmro(parent)[1:]:
++            qualname = safe_getattr(cls, '__qualname__', None)
++            module = safe_getattr(cls, '__module__', None)
++            if not qualname:
++                continue
++
++            if module == self.modname and (qualname, name) in attr_docs:
++                return attr_docs[(qualname, name)]
++
++            # defined in another module: consult that module's analyzer
++            if module and module != self.modname:
++                try:
++                    analyzer = ModuleAnalyzer.for_module(module)
++                    analyzer.analyze()
++                except PycodeError:
++                    continue
++                if analyzer.attr_docs and (qualname, name) in analyzer.attr_docs:
++                    return analyzer.attr_docs[(qualname, name)]
++
++        return None
++
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         """Add content from docstrings, attribute documentation and user."""
+@@ -606,6 +640,16 @@ class Documenter:
+ 
+                     for i, line in enumerate(self.process_doc(docstrings)):
+                         self.add_line(line, sourcename, i)
++                else:
++                    # the attribute may be inherited: its docstring is stored
++                    # under the namespace of the base class which defines it
++                    inherited_doc = self._get_inherited_attr_doc(attr_docs)
++                    if inherited_doc is not None:
++                        no_docstring = True
++                        docstrings = [list(inherited_doc)]
++
++                        for i, line in enumerate(self.process_doc(docstrings)):
++                            self.add_line(line, sourcename, i)
+ 
+         # add content from docstrings
+         if not no_docstring:
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index d6e73d36a..5927ab148 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -14,7 +14,7 @@ import warnings
+ from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
+ 
+ from sphinx.deprecation import RemovedInSphinx40Warning, deprecated_alias
+-from sphinx.pycode import ModuleAnalyzer
++from sphinx.pycode import ModuleAnalyzer, PycodeError
+ from sphinx.util import logging
+ from sphinx.util.inspect import (getannotations, getmro, getslots, isclass, isenumclass,
+                                  safe_getattr)
+@@ -315,9 +315,44 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable,
+                 members[name] = ClassAttribute(subject, name, INSTANCEATTR,
+                                                '\n'.join(docstring))
+ 
++        # attribute docstrings of inherited members are stored under the
++        # namespace of the base class which defines them.
++        for name, member in members.items():
++            if member.docstring is None:
++                member.docstring = _find_inherited_attr_doc(subject, name)
++
+     return members
+ 
+ 
++def _find_inherited_attr_doc(subject: Any, name: str) -> Optional[str]:
++    """Find the attribute docstring of *name* defined in a base class of *subject*.
++
++    Attribute docstrings are stored by the module analyzer keyed by
++    ``(namespace, attrname)``, where *namespace* is the qualified name of the
++    class which defines the attribute.  For an inherited member that namespace
++    differs from the one of *subject*, so walk the MRO and consult the analyzer
++    of each base class's module.
++    """
++    for cls in getmro(subject)[1:]:
++        try:
++            module = safe_getattr(cls, '__module__')
++            qualname = safe_getattr(cls, '__qualname__')
++            if not module or not qualname:
++                continue
++
++            base_analyzer = ModuleAnalyzer.for_module(module)
++            base_analyzer.analyze()
++            attr_docs = base_analyzer.attr_docs or {}
++        except (AttributeError, PycodeError):
++            continue
++
++        key = (qualname, name)
++        if key in attr_docs:
++            return '\n'.join(attr_docs[key])
++
++    return None
++
++
+ from sphinx.ext.autodoc.mock import (MockFinder, MockLoader, _MockModule, _MockObject,  # NOQA
+                                      mock)
+ 
+diff --git a/tests/test_ext_autodoc_autoclass.py b/tests/test_ext_autodoc_autoclass.py
+index c36305de3..6130f233a 100644
+--- a/tests/test_ext_autodoc_autoclass.py
++++ b/tests/test_ext_autodoc_autoclass.py
+@@ -51,6 +51,61 @@ def test_classes(app):
+     ]
+ 
+ 
++@pytest.mark.sphinx('html', testroot='ext-autodoc')
++def test_instance_variable(app):
++    options = {'members': True}
++    actual = do_autodoc(app, 'class', 'target.instance_variable.Bar', options)
++    assert list(actual) == [
++        '',
++        '.. py:class:: Bar()',
++        '   :module: target.instance_variable',
++        '',
++        '',
++        '   .. py:attribute:: Bar.attr2',
++        '      :module: target.instance_variable',
++        '',
++        '      docstring bar',
++        '',
++        '',
++        '   .. py:attribute:: Bar.attr3',
++        '      :module: target.instance_variable',
++        '',
++        '      docstring bar',
++        '',
++    ]
++
++
++@pytest.mark.sphinx('html', testroot='ext-autodoc')
++def test_inherited_instance_variable(app):
++    options = {'members': True,
++               'inherited-members': True}
++    actual = do_autodoc(app, 'class', 'target.instance_variable.Bar', options)
++    assert list(actual) == [
++        '',
++        '.. py:class:: Bar()',
++        '   :module: target.instance_variable',
++        '',
++        '',
++        '   .. py:attribute:: Bar.attr1',
++        '      :module: target.instance_variable',
++        '',
++        '      docstring foo',
++        '',
++        '',
++        '   .. py:attribute:: Bar.attr2',
++        '      :module: target.instance_variable',
++        '',
++        '      docstring bar',
++        '',
++        '',
++        '   .. py:attribute:: Bar.attr3',
++        '      :module: target.instance_variable',
++        '',
++        '      docstring bar',
++        '',
++    ]
++
++
+ def test_decorators(app):
+     actual = do_autodoc(app, 'class', 'target.decorator.Baz')
+     assert list(actual) == [
+2026-10-11 11:46:11,014 - INFO - Git diff changed after running eval script
+2026-10-11 11:46:11,014 - INFO - Grading answer for sphinx-doc__sphinx-8548...
+2026-10-11 11:46:11,015 - INFO - report: {'sphinx-doc__sphinx-8548': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'infra_failure': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['tests/test_ext_autodoc_autoclass.py::test_inherited_instance_variable']}, 'PASS_TO_PASS': {'success': ['tests/test_ext_autodoc_autoclass.py::test_classes', 'tests/test_ext_autodoc_autoclass.py::test_instance_variable', 'tests/test_ext_autodoc_autoclass.py::test_decorators', 'tests/test_ext_autodoc_autoclass.py::test_slots_attribute', 'tests/test_ext_autodoc_autoclass.py::test_show_inheritance_for_subclass_of_generic_type'], 'failure': []}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for sphinx-doc__sphinx-8548: resolved: False
+2026-10-11 11:46:11,016 - INFO - Attempting to stop container sweb.eval.sphinx-doc__sphinx-8548.sbr-cursor_nothink-1791737161...
+2026-10-11 11:46:26,304 - INFO - Container sweb.eval.sphinx-doc__sphinx-8548.sbr-cursor_nothink-1791737161 stopped successfully.
+2026-10-11 11:46:26,304 - INFO - Attempting to remove container sweb.eval.sphinx-doc__sphinx-8548.sbr-cursor_nothink-1791737161...
+2026-10-11 11:46:26,345 - INFO - Container sweb.eval.sphinx-doc__sphinx-8548.sbr-cursor_nothink-1791737161 removed successfully.

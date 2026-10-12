@@ -1,0 +1,11 @@
+The presentation generators are kept in the same order as `domain.generators` (`simplify_presentation` defaults to `change_gens=False`), so I can remap the images onto the presentation's free generators once, and drop the buggy `r[i] in gens` lookup.
+My test script imported a name that doesn't exist; removing it and rerunning.
+The `DihedralGroup(3)` case from the issue now works. `homomorphism(D3, D3, D3.generators, D3.generators)` returns an isomorphism instead of raising, and the existing homomorphism tests pass.
+
+The cause was in `_check_homomorphism` in `sympy/combinatorics/homomorphisms.py`. For a `PermutationGroup` domain, `_image` tried to look up presentation letters (free-group elements) in the list of permutation generators, so an inverted generator never matched.
+
+The fix:
+- **Re-key the images once:** for permutation-group domains, the images are mapped onto the presentation's free generators by position. This relies on `presentation()` keeping generators in the same order as `domain.generators`, which holds because `simplify_presentation` defaults to `change_gens=False`.
+- **Simplify `_image`:** removed the permutation-specific branch and the `gens` lookup, so each letter is looked up directly, inverses included.
+
+I checked that a non-homomorphism still raises `ValueError` for `DihedralGroup(4)`, `SymmetricGroup(4)` and `AlternatingGroup(4)`, and that identity maps on those groups are accepted. I did not add or change any tests.

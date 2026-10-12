@@ -1,0 +1,24 @@
+I'll look at the CDS unit parser.
+The issue is in the grammar's division handling. Let me view it.
+The bug: `a / b / c` parses as `a / (b / c)` = `a * c / b`, so `c` gets the wrong side. The fix is to make division left-associative: `division_of_units : unit_expression DIVISION combined_units` should be treated as `a / b / c` = `(a/b)/c`. The simplest correct approach is to handle the chain of divisors by dividing by everything after the first `/` as a product of the denominator terms, i.e. `a / (b * c)`. Per CDS, `J/m/s/kpc2` means `J / (m * s * kpc2)`, so the denominator terms all multiply together.
+
+I'll restructure the grammar so that after a division, the rest is a product of units to be divided out.
+That comment alone doesn't change behavior, so I need to actually fix the parse. Currently `a / b / c` gives `a / (b / c)`. I'll make the denominator a flat product of the remaining terms.
+Now let me verify with the issue's examples and clear the cached parse tables so the grammar regenerates.
+The whitespace error is expected (CDS disallows spaces; my test string was invalid). The parses are now correct: `10+3J/m/s/kpc2` → `1000 J/(kpc2 m s)`, and `10-7J/s/kpc2` → `1e-7 J/(kpc2 s)`. Let me run the existing unit and ascii CDS tests to check for regressions.
+All 744 tests pass. The regenerated `cds_parsetab.py` is tracked in git, so I'll keep it updated to match the new grammar. Let me also add a changelog entry.
+Fixed. CDS units with multiple divisions now parse correctly.
+
+**Root cause:** The CDS grammar in `astropy/units/format/cds.py` parsed `a/b/c` right-recursively as `a / (b / c)`, which evaluates to `a·c/b`. So every unit after the second `/` landed on the wrong side.
+
+**Fix:** I added a `denominator_of_units` production so that everything after the first `/` is multiplied together and divided out once, giving `a / (b·c)`. That matches the CDS convention, where `J/m/s/kpc2` means `J / (m s kpc2)`.
+
+**Verification:**
+- `10+3J/m/s/kpc2` → `1000 J / (kpc2 m s)`
+- `10-7J/s/kpc2` → `1e-07 J / (kpc2 s)`
+- `erg/AA/s/kpc2` → `erg / (AA kpc2 s)`
+- `astropy/units/tests/test_format.py` and `astropy/io/ascii/tests/test_cds.py` pass (744 tests).
+
+**Other changes:**
+- Regenerated `astropy/units/format/cds_parsetab.py`, since it is tracked and must match the new grammar.
+- Added a changelog entry at `docs/io/ascii/14369.bugfix.rst`. The number `14369` is a placeholder; rename it to the actual PR number.

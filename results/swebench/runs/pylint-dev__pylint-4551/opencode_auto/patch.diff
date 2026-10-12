@@ -1,0 +1,75 @@
+diff --git a/pylint/pyreverse/inspector.py b/pylint/pyreverse/inspector.py
+index 8fa12202..fca073b2 100644
+--- a/pylint/pyreverse/inspector.py
++++ b/pylint/pyreverse/inspector.py
+@@ -60,6 +60,52 @@ def interfaces(node, herited=True, handler_func=_iface_hdlr):
+         raise astroid.exceptions.InferenceError()
+ 
+ 
++def _infer_annotation(annotation):
++    """return the set of values inferred from a type annotation node"""
++    try:
++        return set(annotation.infer())
++    except astroid.exceptions.InferenceError:
++        return set()
++
++
++def _get_argument_annotation(func, name):
++    """return the annotation node of the argument `name` of `func`, or None"""
++    args = func.args
++    groups = (
++        (
++            getattr(args, "posonlyargs", []),
++            getattr(args, "posonlyargs_annotations", []),
++        ),
++        (args.args, args.annotations),
++        (args.kwonlyargs, args.kwonlyargs_annotations),
++    )
++    for arg_nodes, annotations in groups:
++        for arg_node, annotation in zip(arg_nodes or [], annotations or []):
++            if arg_node.name == name:
++                return annotation
++    return None
++
++
++def get_annotated_types(node):
++    """return the values given by PEP 484 type hints for an AssignAttr or
++    AssignName node, or an empty set if no usable annotation is found
++
++    Handles the following cases:
++    * `self.attr: Type = value` and `name: Type = value`
++    * `self.attr = arg` where `arg` is an annotated argument of the method
++    """
++    parent = node.parent
++    if isinstance(parent, astroid.AnnAssign) and parent.target is node:
++        return _infer_annotation(parent.annotation)
++    if isinstance(parent, astroid.Assign) and isinstance(parent.value, astroid.Name):
++        func = node.frame()
++        if isinstance(func, astroid.FunctionDef):
++            annotation = _get_argument_annotation(func, parent.value.name)
++            if annotation is not None:
++                return _infer_annotation(annotation)
++    return set()
++
++
+ class IdGeneratorMixIn:
+     """Mixin adding the ability to generate integer uid."""
+ 
+@@ -218,7 +264,7 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+                     self.visit_module(frame)
+ 
+             current = frame.locals_type[node.name]
+-            values = set(node.infer())
++            values = set(get_annotated_types(node) or node.infer())
+             frame.locals_type[node.name] = list(set(current) | values)
+         except astroid.InferenceError:
+             pass
+@@ -230,7 +276,7 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+         handle instance_attrs_type
+         """
+         try:
+-            values = set(node.infer())
++            values = set(get_annotated_types(node) or node.infer())
+             current = set(parent.instance_attrs_type[node.attrname])
+             parent.instance_attrs_type[node.attrname] = list(current | values)
+         except astroid.InferenceError:

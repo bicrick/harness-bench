@@ -1,0 +1,18 @@
+I'll look at how requests prepares the body and Content-Length header.
+The header is set to `'0'` unconditionally, even when there is no body. The fix is to only add Content-Length when there is a body, and to leave it out for GET-style requests with no body.
+Next I'll check that `self.method` is set before `prepare_body` runs, and that the streamed-body path is unaffected.
+The method is prepared before the body, so `self.method` is available. Now I'll run the existing test suite to confirm nothing regressed.
+Many tests fail with a `strict` keyword error from the test HTTP server, which is an environment problem unrelated to my change. I'll confirm that these failures also happen without my edit.
+The same 21 tests fail before and after my change, so the failures are pre-existing (the `strict` error comes from the Python version in this environment). Let me verify the behavior directly.
+The fix is in `requests/models.py`, in `PreparedRequest.prepare_content_length`.
+
+**Cause:** when a request had no body, the code always set `Content-Length: 0`, including for GET requests. Some servers, such as the amazon.com example in the issue, reject GET requests that carry this header.
+
+**Change:** `Content-Length` is now only set when there is a body. With no body, it is set to `0` only for methods other than GET and HEAD, where a zero length is still expected (POST and PUT with empty bodies behave as before).
+
+Verified results:
+- GET and HEAD: no `Content-Length` header
+- POST and PUT with no body: `Content-Length: 0`
+- POST with data: correct length (3 for `'abc'`)
+
+The test suite shows 21 failures both before and after this change. They come from a `strict` keyword error in the test server, which is an environment incompatibility and unrelated to this fix. I did not add or modify any tests.

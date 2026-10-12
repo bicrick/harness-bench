@@ -1,0 +1,12 @@
+Dataset.quantile passes `keep_attrs` through, but `Variable.quantile` doesn't accept it. Let me look at the rest of the Variable method and the Dataset call site.
+The root cause: `Variable.quantile` has no `keep_attrs` parameter and always returns attrs-less variables, and `Dataset.quantile` only applies `keep_attrs` to dataset-level attrs, not per-variable attrs. I'll add the parameter to `Variable.quantile` and thread it through `Dataset.quantile`.
+The `keep_attrs` resolution in Dataset must happen before the loop now, since it's used there. I'll add it at the top of the method.
+`DataArray.quantile(..., keep_attrs=True)` now preserves the array's attributes. The issue's example returns `OrderedDict([('units', 'K')])`, and the default (no `keep_attrs`) still returns empty attrs.
+
+The cause was that `Variable.quantile` had no `keep_attrs` parameter and always built its result without attributes. `Dataset.quantile` also only applied `keep_attrs` to dataset-level attrs, not to each variable.
+
+Changes:
+- **`xarray/core/variable.py`**: `Variable.quantile` takes `keep_attrs` (defaulting to the global option, which is `False`) and copies `self._attrs` into the result when it is set.
+- **`xarray/core/dataset.py`**: `Dataset.quantile` resolves `keep_attrs` up front and passes it to each variable's `quantile`, so per-variable attrs are kept. Dataset-level attrs still follow the same flag.
+
+I checked the single-quantile and multi-quantile cases, the default behavior, and dataset-level attrs. The existing quantile tests in `test_dataarray.py`, `test_dataset.py`, and `test_variable.py` pass (4 selected). I did not run the full test suite.

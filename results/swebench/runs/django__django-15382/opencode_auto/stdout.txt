@@ -1,0 +1,13 @@
+The negated `Exists` over an empty queryset raises `EmptyResultSet` from inside the subquery, and `WhereNode` then drops the whole branch. The fix is to catch that in `Exists.as_sql` and, when negated, render a constant TRUE instead.
+The negated case now produces `WHERE (True AND name = test)`. The non-negated case still raises `EmptyResultSet`, which is correct since that query matches nothing. Running the relevant Django test suites next, since pytest isn't installed.
+Fixed in `django/db/models/expressions.py`.
+
+**Cause:** For a negated `Exists` over an empty queryset, the inner subquery raises `EmptyResultSet`. `WhereNode` treats that as "this branch matches nothing" and drops the whole branch, including `name='test'`. Since `NOT EXISTS(empty)` is always true, that reasoning was wrong for the negated case.
+
+**Change:** `Exists.as_sql` now catches `EmptyResultSet`. If the expression is negated, it returns a constant TRUE (`compiler.compile(Value(True))`, or `1=1` on backends that don't allow boolean expressions in the SELECT clause). Non-negated empty `Exists` still raises, so `filter(Exists(empty))` still correctly matches nothing.
+
+**Verification:**
+- The issue's query now compiles to `WHERE (True AND "auth_m"."name" = test)` instead of losing the WHERE clause.
+- `expressions`, `expressions_case`, `queries`, and `lookup` test suites: 770 tests, OK.
+
+I did not add or modify any tests.

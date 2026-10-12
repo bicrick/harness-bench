@@ -1,0 +1,75 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "locations" sphinx/builders/gettext.py
+33:    def __init__(self, text: str, locations: List[Tuple[str, int]], uuids: List[str]):
+35:        self.locations = locations
+[0m
+[0m$ [0mcd /testbed && sed -n 25,60p sphinx/builders/gettext.py && grep -n "Message(\|positions\|unique" sphinx/builders/gettext.py
+from sphinx.util.tags import Tags
+from sphinx.util.template import SphinxRenderer
+
+logger = logging.getLogger(__name__)
+
+
+class Message:
+    """An entry of translatable message."""
+    def __init__(self, text: str, locations: List[Tuple[str, int]], uuids: List[str]):
+        self.text = text
+        self.locations = locations
+        self.uuids = uuids
+
+
+class Catalog:
+    """Catalog of translatable messages."""
+
+    def __init__(self) -> None:
+        self.messages: List[str] = []  # retain insertion order, a la OrderedDict
+
+        # msgid -> file, line, uid
+        self.metadata: Dict[str, List[Tuple[str, int, str]]] = OrderedDict()
+
+    def add(self, msg: str, origin: Union[Element, "MsgOrigin"]) -> None:
+        if not hasattr(origin, 'uid'):
+            # Nodes that are replicated like todo don't have a uid,
+            # however i18n is also unnecessary.
+            return
+        if msg not in self.metadata:  # faster lookup in hash
+            self.messages.append(msg)
+            self.metadata[msg] = []
+        self.metadata[msg].append((origin.source, origin.line, origin.uid))  # type: ignore
+
+    def __iter__(self) -> Generator[Message, None, None]:
+        for message in self.messages:
+            positions = [(source, line) for source, line, uuid in self.metadata[message]]
+60:            positions = [(source, line) for source, line, uuid in self.metadata[message]]
+62:            yield Message(message, positions, uuids)
+[0m
+[0m$ [0mcd /testbed && python - <<'EOF'
+p='sphinx/builders/gettext.py'
+s=open(p).read()
+old="""            positions = [(source, line) for source, line, uuid in self.metadata[message]]
+"""
+new="""            # deduplicate positions while keeping their first-seen order
+            positions = list(OrderedDict.fromkeys(
+                (source, line) for source, line, uuid in self.metadata[message]))
+"""
+assert s.count(old)==1
+open(p,'w').write(s.replace(old,new))
+EOF
+sed -n 55,66p sphinx/builders/gettext.py; python -m pytest tests/test_build_gettext.py -q 2>&1 | tail -3
+self.metadata[msg] = []
+        self.metadata[msg].append((origin.source, origin.line, origin.uid))  # type: ignore
+
+    def __iter__(self) -> Generator[Message, None, None]:
+        for message in self.messages:
+            # deduplicate positions while keeping their first-seen order
+            positions = list(OrderedDict.fromkeys(
+                (source, line) for source, line, uuid in self.metadata[message]))
+            uuids = [uuid for source, line, uuid in self.metadata[message]]
+            yield Message(message, positions, uuids)
+
+
+.s.....                                                                  [100%]
+6 passed, 1 skipped in 3.47s
+[0m

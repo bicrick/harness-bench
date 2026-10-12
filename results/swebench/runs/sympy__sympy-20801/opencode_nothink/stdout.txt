@@ -1,0 +1,17 @@
+I'll look at how `BooleanFalse` and `Float` handle equality.
+Let me look at `Float.__eq__` and the `BooleanFalse` class.
+The bug is in `Float.__eq__`: `if not self: return not other` returns `True` for a zero float compared to `S.false` (since `not S.false` is `True`). The fix is to check for `Boolean` before the zero shortcut, matching the non-zero path.
+Now I'll verify the fix, including the zero-valued cases that `not other` previously affected.
+Both orderings now return `False`, consistent with `S(0) == S.false`. The zero-float comparisons to `S(0)` still hold. Pytest isn't installed, so I'll run the test modules through the sympy test runner.
+I fixed the inconsistency in `Float.__eq__` in `/testbed/sympy/core/numbers.py`.
+
+**Cause:** the zero shortcut `if not self: return not other` ran before the `Boolean` check. For `S(0.0)`, `not other` is `True` when `other` is `S.false`, so `S(0.0) == S.false` returned `True`. The reverse order went through `BooleanFalse.__eq__` and correctly returned `False`.
+
+**Fix:** I moved the `isinstance(other, Boolean)` check above the zero shortcut so booleans always compare unequal to floats.
+
+**Result:**
+- `S(0.0) == S.false` → `False`
+- `S.false == S(0.0)` → `False`
+- `S(0.0) == S(0)` still `True`, and `S(0) == S(0.0)` still `True`.
+
+The existing `test_numbers.py` and `test_boolalg.py` suites pass (69 passed, 1 skipped, 1 expected failure). No tests were added or changed.

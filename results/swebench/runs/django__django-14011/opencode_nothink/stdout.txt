@@ -1,0 +1,11 @@
+I'll look at the relevant code in Django's LiveServerTestCase.
+The upstream fix (Django ticket #32416) adds a `ThreadedWSGIServer.process_request_thread` override that closes DB connections at the end of each request thread. Let me check the current `ThreadedWSGIServer` definition.
+Let me find where `ThreadedWSGIServer` is imported in testcases.py.
+The fix belongs in `django/core/servers/basehttp.py`, where `ThreadedWSGIServer` is defined.
+I'll add a `process_request_thread` override that closes the thread's DB connections when each request thread finishes, mirroring the upstream fix. I'll also make the server join threads on close so connections aren't left open at teardown.
+Now I'll verify the module still imports and the server tests pass.
+One error — let me check whether it's related to my change.
+The error is only from my mistyped module name (`liveserver_tests` doesn't exist; the correct one is `servers`, which already covers LiveServerTestCase). It fails identically without my change, so it's unrelated. Let me confirm with the correct module name.
+I fixed the issue in `django/core/servers/basehttp.py`. `ThreadedWSGIServer` now overrides `process_request_thread` so that each request-handling thread calls `connections.close_all()` when it finishes. Previously, connections opened in those threads could outlive them and cause the "database is being accessed by other users" error during `destroy_test_db()`.
+
+The `servers` test suite passes (`OK, skipped=1`). The one skipped test was already skipped before my change. I did not add or modify any tests. I didn't add a regression test for the race itself, since it's nondeterministic and you asked for no test changes.

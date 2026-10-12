@@ -1,0 +1,178 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mgrep -n "def reduce" -A 25 /testbed/django/db/migrations/operations/fields.py | head -150
+69:    def reduce(self, operation, app_label):
+70-        return super().reduce(operation, app_label) or not operation.references_field(
+71-            self.model_name, self.name, app_label
+72-        )
+73-
+74-
+75-class AddField(FieldOperation):
+76-    """Add a field to a model."""
+77-
+78-    def __init__(self, model_name, name, field, preserve_default=True):
+79-        self.preserve_default = preserve_default
+80-        super().__init__(model_name, name, field)
+81-
+82-    def deconstruct(self):
+83-        kwargs = {
+84-            "model_name": self.model_name,
+85-            "name": self.name,
+86-            "field": self.field,
+87-        }
+88-        if self.preserve_default is not True:
+89-            kwargs["preserve_default"] = self.preserve_default
+90-        return (self.__class__.__name__, [], kwargs)
+91-
+92-    def state_forwards(self, app_label, state):
+93-        state.add_field(
+94-            app_label,
+--
+129:    def reduce(self, operation, app_label):
+130-        if isinstance(operation, FieldOperation) and self.is_same_field_operation(
+131-            operation
+132-        ):
+133-            if isinstance(operation, AlterField):
+134-                return [
+135-                    AddField(
+136-                        model_name=self.model_name,
+137-                        name=operation.name,
+138-                        field=operation.field,
+139-                    ),
+140-                ]
+141-            elif isinstance(operation, RemoveField):
+142-                return []
+143-            elif isinstance(operation, RenameField):
+144-                return [
+145-                    AddField(
+146-                        model_name=self.model_name,
+147-                        name=operation.new_name,
+148-                        field=self.field,
+149-                    ),
+150-                ]
+151-        return super().reduce(operation, app_label)
+152-
+153-
+154-class RemoveField(FieldOperation):
+--
+187:    def reduce(self, operation, app_label):
+188-        from .models import DeleteModel
+189-
+190-        if (
+191-            isinstance(operation, DeleteModel)
+192-            and operation.name_lower == self.model_name_lower
+193-        ):
+194-            return [operation]
+195-        return super().reduce(operation, app_label)
+196-
+197-
+198-class AlterField(FieldOperation):
+199-    """
+200-    Alter a field's database column (e.g. null, max_length) to the provided
+201-    new field.
+202-    """
+203-
+204-    def __init__(self, model_name, name, field, preserve_default=True):
+205-        self.preserve_default = preserve_default
+206-        super().__init__(model_name, name, field)
+207-
+208-    def deconstruct(self):
+209-        kwargs = {
+210-            "model_name": self.model_name,
+211-            "name": self.name,
+212-            "field": self.field,
+--
+249:    def reduce(self, operation, app_label):
+250-        if isinstance(operation, RemoveField) and self.is_same_field_operation(
+251-            operation
+252-        ):
+253-            return [operation]
+254-        elif (
+255-            isinstance(operation, RenameField)
+256-            and self.is_same_field_operation(operation)
+257-            and self.field.db_column is None
+258-        ):
+259-            return [
+260-                operation,
+261-                AlterField(
+262-                    model_name=self.model_name,
+263-                    name=operation.new_name,
+264-                    field=self.field,
+265-                ),
+266-            ]
+267-        return super().reduce(operation, app_label)
+268-
+269-
+270-class RenameField(FieldOperation):
+271-    """Rename a field on the model. Might affect db_column too."""
+272-
+273-    def __init__(self, model_name, old_name, new_name):
+274-        self.old_name = old_name
+--
+339:    def reduce(self, operation, app_label):
+340-        if (
+341-            isinstance(operation, RenameField)
+342-            and self.is_same_model_operation(operation)
+343-            and self.new_name_lower == operation.old_name_lower
+344-        ):
+345-            return [
+346-                RenameField(
+347-                    self.model_name,
+348-                    self.old_name,
+349-                    operation.new_name,
+350-                ),
+351-            ]
+352-        # Skip `FieldOperation.reduce` as we want to run `references_field`
+353-        # against self.old_name and self.new_name.
+354-        return super(FieldOperation, self).reduce(operation, app_label) or not (
+355-            operation.references_field(self.model_name, self.old_name, app_label)
+356-            or operation.references_field(self.model_name, self.new_name, app_label)
+357-        )
+[0m
+[0m← [0mEdit django/db/migrations/operations/fields.py
+Index: /testbed/django/db/migrations/operations/fields.py
+===================================================================
+--- /testbed/django/db/migrations/operations/fields.py
++++ /testbed/django/db/migrations/operations/fields.py
+@@ -250,8 +250,12 @@
+ if isinstance(operation, RemoveField) and self.is_same_field_operation(
+     operation
+ ):
+     return [operation]
++elif isinstance(operation, AlterField) and self.is_same_field_operation(
++    operation
++):
++    return [operation]
+ elif (
+     isinstance(operation, RenameField)
+     and self.is_same_field_operation(operation)
+     and self.field.db_column is None
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+import django
+from django.conf import settings
+settings.configure()
+django.setup()
+from django.db import migrations, models
+from django.db.migrations.optimizer import MigrationOptimizer
+ops = [
+    migrations.AlterField('book','title',models.CharField(max_length=128,null=True)),
+    migrations.AlterField('book','title',models.CharField(max_length=128,null=True,help_text='help')),
+    migrations.AlterField('book','title',models.CharField(max_length=128,null=True,help_text='help',default=None)),
+]
+print(MigrationOptimizer().optimize(ops,'books'))
+" && python -m pytest tests/migrations/test_optimizer.py -q 2>&1 | tail -3
+[<AlterField 'book', 'title', <django.db.models.fields.CharField>>]
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py migrations.test_optimizer migrations.test_operations 2>&1 | tail -3
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py migrations.test_optimizer migrations.test_operations 2>&1 | grep -E "^(Ran|OK|FAILED)"
+Ran 175 tests in 1.055s
+OK (skipped=2)
+[0m

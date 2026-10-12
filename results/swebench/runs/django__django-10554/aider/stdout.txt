@@ -1,0 +1,138 @@
+Detected dumb terminal, disabling fancy input and pretty output.
+
+Update git name with: git config user.name "Your Name"
+Update git email with: git config user.email "you@example.com"
+Aider v0.86.2
+Model: anthropic/claude-haiku-5-5 with diff edit format, prompt cache
+Git repo: .git with 6,079 files
+Warning: For large repos, consider using --subtree-only and .aiderignore
+See: https://aider.chat/docs/faq.html#can-i-use-aider-in-a-large-mono-repo
+Repo-map: using 4096 tokens, files refresh
+
+
+https://aider.chat/HISTORY.html#release-notes
+
+Initial repo scan can be slow in larger repos, but only happens once.
+The bug is in `QuerySet._combinator_query()`. It stores the original querysets' 
+`Query` objects in `combined_queries` without copying them. When the union is 
+compiled, the ordering of a member queryset (`order_by('order')`) is emitted as 
+`ORDER BY (4)` in the combined SQL. A later `order_by().values_list(...)` 
+changes the outer select list, so that position no longer exists.
+
+The fix is to clone each member query and clear its ordering before storing it. 
+Ordering for the union should come only from the outer queryset. This also 
+prevents the original `qs` from being affected by later chaining.
+
+I haven't seen the current contents of `django/db/models/query.py`, so the 
+SEARCH block below is based on my knowledge of Django's code and may need 
+adjustment to match your checkout exactly.
+
+django/db/models/query.py
+```python
+<<<<<<< SEARCH
+        clone.query.combined_queries = (self.query,) + tuple(qs.query for qs in 
+other_qs)
+=======
+        # Member queries are cloned so that their ordering can be cleared
+        # without affecting the originals. Ordering of a compound query is
+        # defined only by the outer queryset.
+        combined_queries = []
+        for qs in (self, *other_qs):
+            query = qs.query.clone()
+            query.clear_ordering(True)
+            combined_queries.append(query)
+        clone.query.combined_queries = tuple(combined_queries)
+>>>>>>> REPLACE
+```
+
+After applying the change, run the combinator tests to check for regressions:
+
+```bash
+python tests/runtests.py queries.test_qs_combinators
+```
+
+Tokens: 32k sent, 15k cache write, 5.7k received. Cost: $0.0049 message, $0.0049
+session.
+
+django/db/models/query.py
+
+tests/runtests.py
+Only `django/db/models/query.py` needs editing. The fix is in 
+`_combinator_query()`, and `tests/runtests.py` doesn't need changes. You don't 
+need to add `django/db/models/sql/compiler.py` or 
+`django/db/models/sql/query.py`, since `Query.clone()` and `clear_ordering()` 
+already exist and the change only calls them.
+
+Your copy of `query.py` matches the `_combinator_query()` text I searched for, 
+so this is the same edit as before. It gives each member query its own copy with
+ordering cleared, so the outer queryset's `values_list()` no longer affects the 
+stored union members.
+
+django/db/models/query.py
+```python
+<<<<<<< SEARCH
+        clone.query.combined_queries = (self.query,) + tuple(qs.query for qs in 
+other_qs)
+=======
+        # Member queries are cloned so that their ordering can be cleared
+        # without affecting the originals. Ordering of a compound query is
+        # defined only by the outer queryset.
+        combined_queries = []
+        for qs in (self, *other_qs):
+            query = qs.query.clone()
+            query.clear_ordering(True)
+            combined_queries.append(query)
+        clone.query.combined_queries = tuple(combined_queries)
+>>>>>>> REPLACE
+```
+
+After applying the change, run the combinator tests:
+
+```bash
+python tests/runtests.py queries.test_qs_combinators
+```
+
+Tokens: 87k sent, 41k cache write, 2.4k cache hit, 1.5k received.
+Cost: $0.0062 message, $0.01 session.
+
+django/db/models/sql/compiler.py
+
+django/db/models/sql/query.py
+Warning: it's best to only add files that need changes to the chat.
+https://aider.chat/docs/troubleshooting/edit-errors.html
+Thanks, but `django/db/models/query.py` is the file that holds the fix, and it's
+already in the chat, so no further files are needed. `compiler.py` and 
+`query.py` (sql) don't need changes for this approach.
+
+The previous SEARCH/REPLACE block for `_combinator_query()` was never applied in
+the chat, so I'm reissuing it. Only `django/db/models/query.py` is edited.
+
+django/db/models/query.py
+```python
+<<<<<<< SEARCH
+        clone.query.combined_queries = (self.query,) + tuple(qs.query for qs in 
+other_qs)
+=======
+        # Member queries are cloned so that their ordering can be cleared
+        # without affecting the originals. Ordering of a compound query is
+        # defined only by the outer queryset.
+        combined_queries = []
+        for qs in (self, *other_qs):
+            query = qs.query.clone()
+            query.clear_ordering(True)
+            combined_queries.append(query)
+        clone.query.combined_queries = tuple(combined_queries)
+>>>>>>> REPLACE
+```
+
+After applying it, run the combinator tests:
+
+```bash
+python tests/runtests.py queries.test_qs_combinators
+```
+
+Tokens: 198k sent, 96k cache write, 2.4k cache hit, 398 received.
+Cost: $0.01 message, $0.02 session.
+Applied edit to django/db/models/query.py
+
+python tests/runtests.py queries.test_qs_combinators

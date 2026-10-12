@@ -1,0 +1,16 @@
+I'll look at how patch linestyles are handled.
+The patch's `_dash_pattern` is set, but line 552 uses it in `gc.set_dashes`. Let me look at the relevant sections of patches.py.
+The cause is in `draw()`: it explicitly forces the dash offset to 0 ("Patch has traditionally ignored the dashoffset"). Removing that override lets the offset take effect. I'll make the change.
+Now I'll check whether `cbook` is still used in patches.py so I don't leave an unused import.
+That grep was too broad, but it shows `cbook` is still used across patches.py generally. Let me check the specific file, since `cbook` may have been used only in the removed block.
+The search is still matching the whole repo, so it isn't useful here. I'll check the import line in patches.py directly.
+`cbook` is imported and used elsewhere in patches.py (the import is a module-level import used by many other functions), so no import change is needed. Now I'll verify the fix with the issue's reproduction, saving the output to a file so I can check it.
+The fix works: the patch's draw now passes the dash offset through (`(40.0, [40.0, 40.0])` for the offset-10, 10-on/10-off style, scaled by linewidth 4), and the existing patch tests pass.
+
+## Summary
+
+**Root cause:** `Patch.draw()` in `lib/matplotlib/patches.py` temporarily overwrote `_dash_pattern` with a zero offset (with the comment "Patch has traditionally ignored the dashoffset"). So any offset in a dash tuple was discarded at draw time, and both patch edges drew from the same start point, overlapping as in the report.
+
+**Fix:** I removed that override in `Patch.draw()` so the stored dash pattern, including its offset, is used. The now-unneeded `cbook._setattr_cm` wrapper went with it; `cbook` remains imported because other code in the module uses it.
+
+**Verification:** Running the issue's example, the graphics context now receives the offset (`40.0` for `ls=(10,(10,10))` at linewidth 4) instead of `0`. `lib/matplotlib/tests/test_patches.py` passes (46 passed, 8 skipped). I did not add or modify any tests.

@@ -1,0 +1,426 @@
+2026-10-11 16:44:17,018 - INFO - rex-deploy - Building image docker.io/swebench/sweb.eval.x86_64.psf_1776_requests-1142:latest to install a standalone python to /root. This might take a while (but you only have to do it once). To skip this step, set `python_standalone_dir` to None.
+2026-10-11 16:44:57,246 - INFO - rex-deploy - Starting container docker.ioswebenchsweb.eval.x86_64.psf_1776_requests-1142latest-af1ea8e6-96a5-42e9-80dc-378e656061a6 with image docker.io/swebench/sweb.eval.x86_64.psf_1776_requests-1142:latest serving on port 46239
+2026-10-11 16:44:57,250 - INFO - rex-deploy - Starting runtime at 46239
+2026-10-11 16:44:58,432 - INFO - rex-deploy - Runtime started in 1.18s
+2026-10-11 16:44:59,330 - INFO - swea-env - Environment Initialized
+2026-10-11 16:44:59,777 - INFO - swea-agent - Setting up agent for instance psf__requests-1142
+2026-10-11 16:44:59,780 - INFO - swea-agent - Trajectory will be saved to /home/box/context-shaping/results/swebench/runs/psf__requests-1142/swe_agent_nothink/out/psf__requests-1142/psf__requests-1142.traj
+2026-10-11 16:45:03,055 - INFO - swea-tools - Resetting tools
+2026-10-11 16:45:03,398 - INFO - swea-agent - SYSTEM (main)
+You are a helpful assistant that can interact with a computer to solve tasks.
+2026-10-11 16:45:03,553 - INFO - swea-agent - 🤖 MODEL INPUT
+<uploaded_files>
+/testbed
+</uploaded_files>
+I've uploaded a python code repository in the directory /testbed. Consider the following PR description:
+
+<pr_description>
+requests.get is ALWAYS sending content length
+Hi,
+
+It seems like that request.get always adds 'content-length' header to the request.
+I think that the right behavior is not to add this header automatically in GET requests or add the possibility to not send it.
+
+For example http://amazon.com returns 503 for every get request that contains 'content-length' header.
+
+Thanks,
+
+Oren
+
+
+</pr_description>
+
+Can you help me implement the necessary changes to the repository so that the requirements specified in the <pr_description> are met?
+I've already taken care of all changes to any of the test files described in the <pr_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!
+Your task is to make the minimal changes to non-tests files in the /testbed directory to ensure the <pr_description> is satisfied.
+Follow these steps to resolve the issue:
+1. As a first step, it might be a good idea to find and read code relevant to the <pr_description>
+2. Create a script to reproduce the error and execute it with `python <filename.py>` using the bash tool, to confirm the error
+3. Edit the sourcecode of the repo to resolve the issue
+4. Rerun your reproduce script and confirm that the error is fixed!
+5. Think about edgecases and make sure your fix handles them as well
+Your thinking should be thorough and so it's fine if it's very long.
+2026-10-11 16:45:03,556 - INFO - swea-agent - ========================= STEP 1 =========================
+2026-10-11 16:45:03,665 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:45:04,842 - INFO - swea-agent - 💭 THOUGHT
+I'll start by looking at where the content-length header is set in the repository.
+
+🎬 ACTION
+cd /testbed && git log --oneline -1 && ls && grep -rn -i "content-length\|content_length\|Content-Length" --include=*.py . | grep -v test
+2026-10-11 16:45:05,116 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+22623bd (HEAD) Merge pull request #1099 from sprt/master
+AUTHORS.rst  MANIFEST.in  README.rst  requests		 setup.py
+HISTORY.rst  Makefile	  docs	      requests.egg-info  test_requests.py
+LICENSE      NOTICE	  ext	      requirements.txt
+./requests/models.py:362:                self.headers['Content-Length'] = length
+./requests/models.py:380:            self.prepare_content_length(body)
+./requests/models.py:388:    def prepare_content_length(self, body):
+./requests/models.py:389:        self.headers['Content-Length'] = '0'
+./requests/models.py:392:            self.headers['Content-Length'] = str(body.tell())
+./requests/models.py:395:            self.headers['Content-Length'] = str(len(body))
+./requests/models.py:410:            # Recompute Content-Length
+./requests/models.py:411:            self.prepare_content_length(self.body)
+./requests/adapters.py:157:        chunked = not (request.body is None or 'Content-Length' in request.headers)
+
+2026-10-11 16:45:05,121 - INFO - swea-agent - ========================= STEP 2 =========================
+2026-10-11 16:45:05,127 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:45:05,863 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+cd /testbed && sed -n 340,420p requests/models.py
+2026-10-11 16:45:06,123 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+        content_type = None
+        length = None
+        is_stream = False
+
+        is_stream = all([
+            hasattr(data, '__iter__'),
+            not isinstance(data, basestring),
+            not isinstance(data, dict)
+        ])
+
+        try:
+            length = str(super_len(data))
+        except (TypeError, AttributeError):
+            length = False
+
+        if is_stream:
+            body = data
+
+            if files:
+                raise NotImplementedError('Streamed bodies and files are mutually exclusive.')
+
+            if length:
+                self.headers['Content-Length'] = length
+            else:
+                self.headers['Transfer-Encoding'] = 'chunked'
+        # Check if file, fo, generator, iterator.
+        # If not, run through normal process.
+
+        else:
+            # Multi-part file uploads.
+            if files:
+                (body, content_type) = self._encode_files(files, data)
+            else:
+                if data:
+                    body = self._encode_params(data)
+                    if isinstance(data, str) or isinstance(data, builtin_str) or hasattr(data, 'read'):
+                        content_type = None
+                    else:
+                        content_type = 'application/x-www-form-urlencoded'
+
+            self.prepare_content_length(body)
+
+            # Add content-type if it wasn't explicitly provided.
+            if (content_type) and (not 'content-type' in self.headers):
+                self.headers['Content-Type'] = content_type
+
+        self.body = body
+
+    def prepare_content_length(self, body):
+        self.headers['Content-Length'] = '0'
+        if hasattr(body, 'seek') and hasattr(body, 'tell'):
+            body.seek(0, 2)
+            self.headers['Content-Length'] = str(body.tell())
+            body.seek(0, 0)
+        elif body is not None:
+            self.headers['Content-Length'] = str(len(body))
+
+    def prepare_auth(self, auth):
+        """Prepares the given HTTP auth data."""
+        if auth:
+            if isinstance(auth, tuple) and len(auth) == 2:
+                # special-case basic HTTP auth
+                auth = HTTPBasicAuth(*auth)
+
+            # Allow auth to make its changes.
+            r = auth(self)
+
+            # Update self to reflect the auth changes.
+            self.__dict__.update(r.__dict__)
+
+            # Recompute Content-Length
+            self.prepare_content_length(self.body)
+
+    def prepare_cookies(self, cookies):
+        """Prepares the given HTTP cookie data."""
+
+        if isinstance(cookies, cookielib.CookieJar):
+            cookies = cookies
+        else:
+            cookies = cookiejar_from_dict(cookies)
+
+
+2026-10-11 16:45:06,129 - INFO - swea-agent - ========================= STEP 3 =========================
+2026-10-11 16:45:06,134 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:00:35,142 - WARNING - swea-lm - Retrying LM query: attempt 1 (slept for 10.00s) due to InternalServerError: litellm.InternalServerError: AnthropicException - Server disconnected without sending a response.. Handle with `litellm.InternalServerError`.
+2026-10-11 17:00:45,157 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:00:46,956 - INFO - swea-agent - 💭 THOUGHT
+The bug is that `prepare_body` calls `prepare_content_length(body)` unconditionally, so a body-less GET gets `Content-Length: 0`. The fix is to only set the header when there is a body, while still recomputing for `prepare_auth` when a body exists. Let me reproduce first.
+
+🎬 ACTION
+cd /testbed && cat > /tmp/repro.py <<'EOF'
+import requests
+from requests import Request, Session
+p = Request('GET', 'http://example.com').prepare()
+print('GET headers:', dict(p.headers), 'Content-Length' in p.headers)
+p = Request('POST', 'http://example.com', data={'a': 1}).prepare()
+print('POST headers:', p.headers.get('Content-Length'))
+p = Request('POST', 'http://example.com').prepare()
+print('POST no body:', p.headers.get('Content-Length'))
+EOF
+python /tmp/repro.py
+2026-10-11 17:00:47,714 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+GET headers: {'Content-Length': '0'} True
+POST headers: 3
+POST no body: 0
+
+2026-10-11 17:00:47,720 - INFO - swea-agent - ========================= STEP 4 =========================
+2026-10-11 17:00:47,726 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:00:50,431 - INFO - swea-agent - 💭 THOUGHT
+Reproduced. Now I'll make the fix: skip setting Content-Length when there is no body (GET/HEAD/etc.), and keep the existing behaviour for requests that do have a body (including `POST` with no body, which still gets `0` — that's the current, expected behaviour for methods that carry a body).
+
+Since `prepare_body` is only reached for methods that get a body, I'll gate the header on `body is not None` in `prepare_content_length`, and make the `'0'` default only apply when a body exists.
+
+🎬 ACTION
+str_replace_editor str_replace /testbed/requests/models.py   --old_str '    def prepare_content_length(self, body):
+        self.headers['"'"'Content-Length'"'"'] = '"'"'0'"'"'
+        if hasattr(body, '"'"'seek'"'"') and hasattr(body, '"'"'tell'"'"'):
+            body.seek(0, 2)
+            self.headers['"'"'Content-Length'"'"'] = str(body.tell())
+            body.seek(0, 0)
+        elif body is not None:
+            self.headers['"'"'Content-Length'"'"'] = str(len(body))' --new_str '    def prepare_content_length(self, body):
+        if hasattr(body, '"'"'seek'"'"') and hasattr(body, '"'"'tell'"'"'):
+            body.seek(0, 2)
+            self.headers['"'"'Content-Length'"'"'] = str(body.tell())
+            body.seek(0, 0)
+        elif body is not None:
+            self.headers['"'"'Content-Length'"'"'] = str(len(body))
+        elif self.method not in ('"'"'GET'"'"', '"'"'HEAD'"'"'):
+            # Only send an explicit zero length for methods that may carry a
+            # body; GET/HEAD requests without a body must not advertise one.
+            self.headers['"'"'Content-Length'"'"'] = '"'"'0'"'"''
+2026-10-11 17:00:50,862 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+The file /testbed/requests/models.py has been edited. Here's the result of running `cat -n` on a snippet of /testbed/requests/models.py:
+   383	            if (content_type) and (not 'content-type' in self.headers):
+   384	                self.headers['Content-Type'] = content_type
+   385	
+   386	        self.body = body
+   387	
+   388	    def prepare_content_length(self, body):
+   389	        if hasattr(body, 'seek') and hasattr(body, 'tell'):
+   390	            body.seek(0, 2)
+   391	            self.headers['Content-Length'] = str(body.tell())
+   392	            body.seek(0, 0)
+   393	        elif body is not None:
+   394	            self.headers['Content-Length'] = str(len(body))
+   395	        elif self.method not in ('GET', 'HEAD'):
+   396	            # Only send an explicit zero length for methods that may carry a
+   397	            # body; GET/HEAD requests without a body must not advertise one.
+   398	            self.headers['Content-Length'] = '0'
+   399	
+   400	    def prepare_auth(self, auth):
+   401	        """Prepares the given HTTP auth data."""
+Review the changes and make sure they are as expected. Edit the file again if necessary.
+
+2026-10-11 17:00:50,867 - INFO - swea-agent - ========================= STEP 5 =========================
+2026-10-11 17:00:50,875 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:00:52,191 - INFO - swea-agent - 💭 THOUGHT
+One concern: `self.method` may be `None` or lowercase at that point. Let me check how method is normalized and then re-run the repro plus the test suite.
+
+🎬 ACTION
+cd /testbed && grep -n "self.method" requests/models.py | head; python /tmp/repro.py; python -c "
+from requests import Request
+print(Request('get','http://e.com').prepare().headers.get('Content-Length'))
+print(Request('post','http://e.com').prepare().headers.get('Content-Length'))"
+2026-10-11 17:00:52,637 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+203:        self.method = method
+214:        return '<Request [%s]>' % (self.method)
+220:        p.prepare_method(self.method)
+255:        self.method = None
+266:        return '<PreparedRequest [%s]>' % (self.method)
+270:        self.method = method
+271:        if self.method is not None:
+272:            self.method = self.method.upper()
+395:        elif self.method not in ('GET', 'HEAD'):
+/testbed/requests/models.py:563: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if self.status_code is 0:
+GET headers: {} False
+POST headers: 3
+POST no body: 0
+None
+0
+
+2026-10-11 17:00:52,642 - INFO - swea-agent - ========================= STEP 6 =========================
+2026-10-11 17:00:52,653 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:00:53,888 - INFO - swea-agent - 💭 THOUGHT
+Method is uppercased in `prepare_method`, which runs before `prepare_body`, so the comparison is safe. GET no longer sends the header, and POST behaviour is unchanged. Now the test suite:
+
+🎬 ACTION
+cd /testbed && python -m pytest test_requests.py -q 2>&1 | tail -15; git stash -q && python -m pytest test_requests.py -q 2>&1 | tail -3; git stash pop -q
+2026-10-11 17:00:55,513 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+FAILED test_requests.py::RequestsTestCase::test_HTTP_200_OK_PUT - TypeError: ...
+FAILED test_requests.py::RequestsTestCase::test_HTTP_302_ALLOW_REDIRECT_GET
+FAILED test_requests.py::RequestsTestCase::test_POSTBIN_GET_POST_FILES - Type...
+FAILED test_requests.py::RequestsTestCase::test_POSTBIN_GET_POST_FILES_WITH_DATA
+FAILED test_requests.py::RequestsTestCase::test_custom_content_type - TypeErr...
+FAILED test_requests.py::RequestsTestCase::test_decompress_gzip - TypeError: ...
+FAILED test_requests.py::RequestsTestCase::test_different_encodings_dont_break_post
+FAILED test_requests.py::RequestsTestCase::test_links - TypeError: __init__()...
+FAILED test_requests.py::RequestsTestCase::test_prepared_request_hook - TypeE...
+FAILED test_requests.py::RequestsTestCase::test_request_ok_set - TypeError: _...
+FAILED test_requests.py::RequestsTestCase::test_status_raising - TypeError: _...
+FAILED test_requests.py::RequestsTestCase::test_unicode_get - TypeError: __in...
+FAILED test_requests.py::RequestsTestCase::test_urlencoded_get_query_multivalued_param
+FAILED test_requests.py::RequestsTestCase::test_user_agent_transfers - TypeEr...
+21 failed, 5 passed, 2 warnings in 0.45s
+FAILED test_requests.py::RequestsTestCase::test_urlencoded_get_query_multivalued_param
+FAILED test_requests.py::RequestsTestCase::test_user_agent_transfers - TypeEr...
+21 failed, 5 passed, 4 warnings in 0.43s
+
+2026-10-11 17:00:55,519 - INFO - swea-agent - ========================= STEP 7 =========================
+2026-10-11 17:00:55,526 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:00:57,076 - INFO - swea-agent - 💭 THOUGHT
+The same 21 tests fail before and after my change. Those failures are `TypeError: __init__()` errors from the test harness (they need network/`httpbin` and an old-style fixture), not from this change. Let me confirm the failing set is identical.
+
+🎬 ACTION
+cd /testbed && python -m pytest test_requests.py -q 2>&1 | grep FAILED | sort > /tmp/after; git stash -q; python -m pytest test_requests.py -q 2>&1 | grep FAILED | sort > /tmp/before; git stash pop -q; diff /tmp/before /tmp/after && echo "identical failure sets"; git diff --stat
+2026-10-11 17:00:58,576 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+identical failure sets
+ requests/models.py | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+2026-10-11 17:00:58,582 - INFO - swea-agent - ========================= STEP 8 =========================
+2026-10-11 17:00:58,589 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:01:01,498 - WARNING - swea-agent - Requerying model after FunctionCallingFormatError (1th requery)
+2026-10-11 17:01:01,503 - WARNING - swea-agent - Your last output did not use any tool calls!
+Please make sure your output includes exactly _ONE_ function call!
+You must invoke the function directly using the function call format.
+You cannot invoke commands with ```, you have to use the function call format.
+If you think you have already resolved the issue, please submit your changes by running the `submit` command.
+If you think you cannot solve the problem, please run `exit_forfeit` (if available) or `submit`.
+Else, please continue with a new tool call!
+2026-10-11 17:01:01,510 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:01:02,537 - INFO - swea-agent - 💭 THOUGHT
+The fix is already in place and verified, so I'll submit it now.
+
+🎬 ACTION
+submit
+2026-10-11 17:01:02,852 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+Thank you for your work on this issue. Please carefully follow the steps below to help review your changes.
+
+1. If you made any changes to your code after running the reproduction script, please run the reproduction script again.
+  If the reproduction script is failing, please revisit your changes and make sure they are correct.
+  If you have already removed your reproduction script, please ignore this step.
+2. Remove your reproduction script (if you haven't done so already).
+3. If you have modified any TEST files, please revert them to the state they had before you started fixing the issue.
+  You can do this with `git checkout -- /path/to/test/file.py`. Use below <diff> to find the files you need to revert.
+4. Run the submit command again to confirm.
+
+Here is a list of all of your changes:
+
+<diff>
+diff --git a/requests/models.py b/requests/models.py
+index 9926045..f40df14 100644
+--- a/requests/models.py
++++ b/requests/models.py
+@@ -386,13 +386,16 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
+         self.body = body
+ 
+     def prepare_content_length(self, body):
+-        self.headers['Content-Length'] = '0'
+         if hasattr(body, 'seek') and hasattr(body, 'tell'):
+             body.seek(0, 2)
+             self.headers['Content-Length'] = str(body.tell())
+             body.seek(0, 0)
+         elif body is not None:
+             self.headers['Content-Length'] = str(len(body))
++        elif self.method not in ('GET', 'HEAD'):
++            # Only send an explicit zero length for methods that may carry a
++            # body; GET/HEAD requests without a body must not advertise one.
++            self.headers['Content-Length'] = '0'
+ 
+     def prepare_auth(self, auth):
+         """Prepares the given HTTP auth data."""
+
+</diff>
+
+
+2026-10-11 17:01:02,861 - INFO - swea-agent - ========================= STEP 10 =========================
+2026-10-11 17:01:02,869 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:01:04,311 - INFO - swea-agent - 💭 THOUGHT
+The checklist asks me to clean up the reproduction script and confirm no test files were touched. My reproduction script lives at `/tmp/repro.py` (outside the repo), and the diff shows only `requests/models.py` changed, so no test files need reverting. I'll remove the temp script and submit.
+
+🎬 ACTION
+rm -f /tmp/repro.py /tmp/before /tmp/after; cd /testbed && git status --short
+2026-10-11 17:01:04,599 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+M  requests/models.py
+
+2026-10-11 17:01:04,608 - INFO - swea-agent - ========================= STEP 11 =========================
+2026-10-11 17:01:04,615 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:01:05,354 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+submit
+2026-10-11 17:01:05,665 - INFO - swea-agent - Found submission: diff --git a/requests/models.py b/requests/models.py
+index 9926045..f40df14 100644
+--- a/requests/models.py
++++ b/requests/models.py
+@@ -386,13 +386,16 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
+         self.body = body
+ 
+     def prepare_content_length(self, body):
+-        self.headers['Content-Length'] = '0'
+         if hasattr(body, 'seek') and hasattr(body, 'tell'):
+             body.seek(0, 2)
+             self.headers['Content-Length'] = str(body.tell())
+             body.seek(0, 0)
+         elif body is not None:
+             self.headers['Content-Length'] = str(len(body))
++        elif self.method not in ('GET', 'HEAD'):
++            # Only send an explicit zero length for methods that may carry a
++            # body; GET/HEAD requests without a body must not advertise one.
++            self.headers['Content-Length'] = '0'
+ 
+     def prepare_auth(self, auth):
+         """Prepares the given HTTP auth data."""
+
+2026-10-11 17:01:05,670 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+diff --git a/requests/models.py b/requests/models.py
+index 9926045..f40df14 100644
+--- a/requests/models.py
++++ b/requests/models.py
+@@ -386,13 +386,16 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
+         self.body = body
+ 
+     def prepare_content_length(self, body):
+-        self.headers['Content-Length'] = '0'
+         if hasattr(body, 'seek') and hasattr(body, 'tell'):
+             body.seek(0, 2)
+             self.headers['Content-Length'] = str(body.tell())
+             body.seek(0, 0)
+         elif body is not None:
+             self.headers['Content-Length'] = str(len(body))
++        elif self.method not in ('GET', 'HEAD'):
++            # Only send an explicit zero length for methods that may carry a
++            # body; GET/HEAD requests without a body must not advertise one.
++            self.headers['Content-Length'] = '0'
+ 
+     def prepare_auth(self, auth):
+         """Prepares the given HTTP auth data."""
+
+2026-10-11 17:01:05,685 - INFO - swea-agent - Trajectory saved to /home/box/context-shaping/results/swebench/runs/psf__requests-1142/swe_agent_nothink/out/psf__requests-1142/psf__requests-1142.traj
+2026-10-11 17:01:05,692 - INFO - swea-env - Beginning environment shutdown...

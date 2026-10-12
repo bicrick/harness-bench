@@ -1,0 +1,8 @@
+The bug is in `prepare_content_length` (requests/models.py:388): it always writes `Content-Length: 0` before checking the body, so GET requests get the header. I'll check the method ordering in `prepare` first.
+The method is set before the body is prepared, so I can skip the default `Content-Length: 0` for GET/HEAD requests and only add it when there is a body or the method is one that expects a body.
+Requests with GET/HEAD no longer send `Content-Length`, and POST still does. The test suite shows many failures, so I'll check whether they predate my change.
+GET and HEAD requests no longer send a `Content-Length` header, which is what the issue asks for.
+
+The cause was in `prepare_content_length` in `requests/models.py`. It set `Content-Length: 0` on every request before checking whether there was a body. Now it only sets the header when there is a body, or when the method is not GET or HEAD and there is no body (so POST with no data still sends `Content-Length: 0`).
+
+I checked the output directly: GET and HEAD have no `Content-Length`, POST with no data sends `0`, and POST with data sends the body length. The test suite has the same 21 failures before and after my change (a `strict` keyword error in the test environment), so I did not add or change any tests.

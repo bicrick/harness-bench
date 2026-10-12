@@ -1,0 +1,51 @@
+diff --git a/pylint/pyreverse/inspector.py b/pylint/pyreverse/inspector.py
+index 8fa12202..c2809e40 100644
+--- a/pylint/pyreverse/inspector.py
++++ b/pylint/pyreverse/inspector.py
+@@ -28,6 +28,36 @@ def _iface_hdlr(_):
+     return True
+ 
+ 
++def _annotated_type_of_assigned_value(assignattr):
++    """Return the type given by a PEP 484 annotation of the value assigned to
++    an attribute, if the value is a function argument annotated with a type.
++
++    Return None when no usable annotation is found.
++    """
++    assign = assignattr.parent
++    value = getattr(assign, "value", None)
++    if not isinstance(value, astroid.Name):
++        return None
++    frame = assignattr.frame()
++    if not isinstance(frame, astroid.FunctionDef):
++        return None
++    args = frame.args
++    if args is None or args.args is None:
++        return None
++    for arg_node, annotation in zip(args.args, args.annotations or []):
++        if arg_node.name != value.name or annotation is None:
++            continue
++        try:
++            inferred = list(annotation.infer())
++        except astroid.InferenceError:
++            return None
++        for inferred_node in inferred:
++            if isinstance(inferred_node, astroid.ClassDef):
++                return inferred_node
++        return None
++    return None
++
++
+ def _astroid_wrapper(func, modname):
+     print("parsing %s..." % modname)
+     try:
+@@ -231,6 +261,9 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+         """
+         try:
+             values = set(node.infer())
++            annotated = _annotated_type_of_assigned_value(node)
++            if annotated is not None:
++                values = {annotated}
+             current = set(parent.instance_attrs_type[node.attrname])
+             parent.instance_attrs_type[node.attrname] = list(current | values)
+         except astroid.InferenceError:

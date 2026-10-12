@@ -1,0 +1,14 @@
+Now let me verify against the issue's examples, including the `expand` path.
+`tensor_product_simp` now handles the powers. `expand(tensorproduct=True)` still leaves them unchanged, so let me look at how expand dispatches hints.
+Expand only dispatches to `_eval_expand_tensorproduct` on nodes that define it, and `Pow` does not. The clean fix within the tensor product class is to have `TensorProduct` distribute integer powers itself via `_eval_power`, so `TP**n` never stays as a `Pow` node. I'll add that and run the quantum test suite to check for regressions.
+The run reports 36 exceptions. I'll compare against the unmodified code to see whether they're pre-existing.
+Powers of `TensorProduct` now evaluate, both through `tensor_product_simp` and through `expand(tensorproduct=True)`. All the examples from the issue now give the expected results (`1x1` for `t1`, `1x1` for `t2`'s Pauli case).
+
+Changes in `sympy/physics/quantum/tensorproduct.py`:
+
+- **`TensorProduct._eval_power`** (new): for a positive integer exponent `n`, `(A x B)**n` returns `(A**n) x (B**n)`. This is what lets `expand` work, since `expand` only recurses into nodes that define the hint method and `Pow` does not.
+- **`tensor_product_simp`**: the `Pow` branch now distributes the exponent over a `TensorProduct` base. This is a second path to the same result; it also covers symbolic exponents, which the new `_eval_power` skips.
+
+The quantum and paulialgebra test suites give the same result before and after the change (100 passed, 10 skipped, 1 expected failure, 36 exceptions). The exceptions come from the environment's `collections` deprecation warnings and occur on the untouched code too. I did not add or change any tests.
+
+One behavioural consequence: `TensorProduct(A, B)**2` with an integer exponent now auto-evaluates to `(A**2)x(B**2)` instead of staying as a `Pow` node. That is mathematically equivalent, but any code that relied on the unevaluated form will see a different result.

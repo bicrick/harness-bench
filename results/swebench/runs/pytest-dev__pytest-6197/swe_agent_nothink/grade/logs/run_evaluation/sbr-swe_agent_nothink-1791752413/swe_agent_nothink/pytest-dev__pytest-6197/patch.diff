@@ -1,0 +1,43 @@
+diff --git a/src/_pytest/main.py b/src/_pytest/main.py
+index 3c205027d..a0cebc3b6 100644
+--- a/src/_pytest/main.py
++++ b/src/_pytest/main.py
+@@ -532,7 +532,11 @@ class Session(nodes.FSCollector):
+                     # Collect packages first.
+                     seen_dirs.add(dirpath)
+                     pkginit = dirpath.join("__init__.py")
+-                    if pkginit.exists():
++                    # Only treat a directory as a package if it actually
++                    # contains something other than its __init__.py to
++                    # collect; a bare __init__.py must not be imported just
++                    # because the directory happens to be under the argument.
++                    if pkginit.exists() and self._has_other_files(dirpath):
+                         for x in self._collectfile(pkginit):
+                             yield x
+                             if isinstance(x, Package):
+@@ -541,6 +545,13 @@ class Session(nodes.FSCollector):
+                     # Do not collect packages here.
+                     continue
+ 
++                if path.basename == "__init__.py" and not self._has_other_files(
++                    dirpath
++                ):
++                    # A lone __init__.py is not a test module; importing it
++                    # here would execute code from unrelated packages.
++                    continue
++
+                 for x in self._collectfile(path):
+                     key = (type(x), x.fspath)
+                     if key in self._node_cache:
+@@ -596,6 +607,11 @@ class Session(nodes.FSCollector):
+ 
+         return ihook.pytest_collect_file(path=path, parent=self)
+ 
++    def _has_other_files(self, dirpath):
++        return any(
++            f.basename != "__init__.py" for f in dirpath.listdir(self._visit_filter)
++        )
++
+     def _recurse(self, dirpath):
+         if dirpath.basename == "__pycache__":
+             return False

@@ -1,0 +1,196 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "y_small_train\|y_val\|classes_\|_check_early_stopping_scorer" sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py
+144:            X_train, X_val, y_train, y_val = train_test_split(
+149:            X_val, y_val = None, None
+234:                                                    raw_predictions_val, y_val)
+249:                     y_small_train) = self._get_small_trainset(
+252:                    self._check_early_stopping_scorer(
+253:                        X_binned_small_train, y_small_train,
+254:                        X_binned_val, y_val,
+278:                X_binned_small_train, y_small_train = self._get_small_trainset(
+352:                        raw_predictions_val, y_val
+356:                    should_early_stop = self._check_early_stopping_scorer(
+357:                        X_binned_small_train, y_small_train,
+358:                        X_binned_val, y_val,
+417:            y_small_train = y_train[indices]
+419:            return X_binned_small_train, y_small_train
+423:    def _check_early_stopping_scorer(self, X_binned_small_train, y_small_train,
+424:                                     X_binned_val, y_val):
+430:            self.scorer_(self, X_binned_small_train, y_small_train)
+435:                self.scorer_(self, X_binned_val, y_val)
+445:                                   y_val):
+457:                -self.loss_(y_val, raw_predictions_val)
+983:        return self.classes_[encoded_classes]
+1023:        # encode classes into 0 ... n_classes - 1 and sets attributes classes_
+1029:        self.classes_ = label_encoder.classes_
+1030:        n_classes = self.classes_.shape[0]
+[0m
+[0m$ [0mcd /testbed && sed -n 1015,1045p sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py && sed -n 420,440p sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py
+classes in multiclass classification.
+        """
+        decision = self._raw_predict(X)
+        if decision.shape[0] == 1:
+            decision = decision.ravel()
+        return decision.T
+
+    def _encode_y(self, y):
+        # encode classes into 0 ... n_classes - 1 and sets attributes classes_
+        # and n_trees_per_iteration_
+        check_classification_targets(y)
+
+        label_encoder = LabelEncoder()
+        encoded_y = label_encoder.fit_transform(y)
+        self.classes_ = label_encoder.classes_
+        n_classes = self.classes_.shape[0]
+        # only 1 tree for binary classification. For multiclass classification,
+        # we build 1 tree per class.
+        self.n_trees_per_iteration_ = 1 if n_classes <= 2 else n_classes
+        encoded_y = encoded_y.astype(Y_DTYPE, copy=False)
+        return encoded_y
+
+    def _get_loss(self):
+        if self.loss == 'auto':
+            if self.n_trees_per_iteration_ == 1:
+                return _LOSSES['binary_crossentropy']()
+            else:
+                return _LOSSES['categorical_crossentropy']()
+
+        return _LOSSES[self.loss]()
+        else:
+            return X_binned_train, y_train
+
+    def _check_early_stopping_scorer(self, X_binned_small_train, y_small_train,
+                                     X_binned_val, y_val):
+        """Check if fitting should be early-stopped based on scorer.
+
+        Scores are computed on validation data or on training data.
+        """
+        self.train_score_.append(
+            self.scorer_(self, X_binned_small_train, y_small_train)
+        )
+
+        if self._use_validation_data:
+            self.validation_score_.append(
+                self.scorer_(self, X_binned_val, y_val)
+            )
+            return self._should_stop(self.validation_score_)
+        else:
+            return self._should_stop(self.train_score_)
+[0m
+[0m$ [0mcd /testbed && sed -n 120,150p sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py
+# predicting is faster on pre-binned data, so we want early stopping
+        # predictions to be made on pre-binned data. Unfortunately the scorer_
+        # can only call predict() or predict_proba(), not raw_predict(), and
+        # there's no way to tell the scorer that it needs to predict binned
+        # data.
+        self._in_fit = True
+
+        self.loss_ = self._get_loss()
+
+        self.do_early_stopping_ = (self.n_iter_no_change is not None and
+                                   self.n_iter_no_change > 0)
+
+        # create validation data if needed
+        self._use_validation_data = self.validation_fraction is not None
+        if self.do_early_stopping_ and self._use_validation_data:
+            # stratify for classification
+            stratify = y if hasattr(self.loss_, 'predict_proba') else None
+
+            # Save the state of the RNG for the training and validation split.
+            # This is needed in order to have the same split when using
+            # warm starting.
+            if not (self._is_fitted() and self.warm_start):
+                self._train_val_split_seed = rng.randint(1024)
+
+            X_train, X_val, y_train, y_val = train_test_split(
+                X, y, test_size=self.validation_fraction, stratify=stratify,
+                random_state=self._train_val_split_seed)
+        else:
+            X_train, y_train = X, y
+            X_val, y_val = None, None
+[0m
+[0m$ [0mcd /testbed && grep -n "_encode_y" sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py; sed -n 95,118p sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py
+105:        y = self._encode_y(y)
+629:    def _encode_y(self, y=None):
+804:    def _encode_y(self, y):
+1022:    def _encode_y(self, y):
+        -------
+        self : object
+        """
+        fit_start_time = time()
+        acc_find_split_time = 0.  # time spent finding the best splits
+        acc_apply_split_time = 0.  # time spent splitting nodes
+        acc_compute_hist_time = 0.  # time spent computing histograms
+        # time spent predicting X for gradient and hessians update
+        acc_prediction_time = 0.
+        X, y = check_X_y(X, y, dtype=[X_DTYPE], force_all_finite=False)
+        y = self._encode_y(y)
+
+        # The rng state must be preserved if warm_start is True
+        if (self.warm_start and hasattr(self, '_rng')):
+            rng = self._rng
+        else:
+            rng = check_random_state(self.random_state)
+            self._rng = rng
+
+        self._validate_parameters()
+        self.n_features_ = X.shape[1]  # used for validation in predict()
+
+        # we need this stateful variable to tell raw_predict() that it was
+        # called from fit() (this current method), and that the data it has
+[0m
+[0m← [0mEdit sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py
+Index: /testbed/sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py
+===================================================================
+--- /testbed/sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py
++++ /testbed/sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py
+@@ -425,13 +425,20 @@
+ """Check if fitting should be early-stopped based on scorer.
+ 
+ Scores are computed on validation data or on training data.
+ """
++# For classifiers, y is encoded as floats in 0, ..., n_classes - 1 in
++# fit(), but the scorer calls predict() which returns the original
++# classes. Decode y_true so that it is comparable to y_pred.
++if hasattr(self, 'classes_'):
++    y_small_train = self.classes_[y_small_train.astype(int)]
+ self.train_score_.append(
+     self.scorer_(self, X_binned_small_train, y_small_train)
+ )
+ 
+ if self._use_validation_data:
++    if hasattr(self, 'classes_'):
++        y_val = self.classes_[y_val.astype(int)]
+     self.validation_score_.append(
+         self.scorer_(self, X_binned_val, y_val)
+     )
+     return self._should_stop(self.validation_score_)
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+import numpy as np
+from sklearn.experimental import enable_hist_gradient_boosting
+from sklearn.ensemble import HistGradientBoostingClassifier
+X = np.random.randn(100, 10)
+y = np.array(['x'] * 50 + ['y'] * 50, dtype=object)
+g = HistGradientBoostingClassifier(n_iter_no_change=10, random_state=0).fit(X, y)
+print('ok', g.score(X, y), len(g.validation_score_))
+y3 = np.array(['a','b','c']*34)[:100].astype(object)
+HistGradientBoostingClassifier(n_iter_no_change=5).fit(X, y3); print('multiclass ok')
+" && python -m pytest -q sklearn/ensemble/_hist_gradient_boosting 2>&1 | tail -3
+ok 0.75 14
+multiclass ok
+
+
+<shell_metadata>
+shell tool terminated command after exceeding timeout 120000 ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.
+</shell_metadata>
+[0m
+[0m$ [0mcd /testbed && timeout 110 python -m pytest -q sklearn/ensemble/_hist_gradient_boosting/tests/test_gradient_boosting.py -k "early or classes or string" 2>&1 | tail -3
+.
+[0m
+[0m$ [0mcd /testbed && timeout 110 python -m pytest -q -x sklearn/ensemble/_hist_gradient_boosting/tests/test_gradient_boosting.py -k "early" -p no:cacheprovider 2>&1 | tail -3; echo exit=$?
+.exit=0
+[0m

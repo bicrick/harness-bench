@@ -1,0 +1,90 @@
+Detected dumb terminal, disabling fancy input and pretty output.
+
+Update git name with: git config user.name "Your Name"
+Update git email with: git config user.email "you@example.com"
+Aider v0.86.2
+Model: anthropic/claude-haiku-5-5 with diff edit format, prompt cache
+Git repo: .git with 6,412 files
+Warning: For large repos, consider using --subtree-only and .aiderignore
+See: https://aider.chat/docs/faq.html#can-i-use-aider-in-a-large-mono-repo
+Repo-map: using 4096 tokens, files refresh
+
+
+https://aider.chat/HISTORY.html#release-notes
+
+Initial repo scan can be slow in larger repos, but only happens once.
+I can't edit the repository directly from here, and I don't have the file 
+contents for this issue, so I can't write exact SEARCH/REPLACE blocks yet. Based
+on the issue, the file most likely needing changes is:
+
+- `django/db/models/fields/related.py`
+
+The fix in Django for this issue (ticket about `limit_choices_to` with joins 
+producing duplicates) is in `ForeignKey.get_limit_choices_to` / `formfield()`: 
+when `limit_choices_to` is a `Q` object spanning a join, the queryset should be 
+made distinct. The likely change is in `ForeignKey.formfield()` so that the 
+`queryset` passed to the form field gets `.distinct()` applied when the limit 
+involves a join.
+
+Please add `django/db/models/fields/related.py` to the chat so I can propose the
+exact edit. You may also want `django/forms/models.py`, since `ModelChoiceField`
+consumes the queryset, but I expect `related.py` to be sufficient.
+
+Tokens: 30k sent, 15k cache write, 320 received. Cost: $0.0021 message, $0.0021 
+session.
+
+django/db/models/fields/related.py
+
+django/forms/models.py
+The root cause: `ModelChoiceField` builds its queryset from `limit_choices_to` 
+via `apply_limit_choices_to_to_formfield`, which calls `complex_filter`. When 
+the Q object spans a join (e.g. `limit_choices_to={'author__in': ...}` or a 
+multi-valued relation), the join can return the same row multiple times. The fix
+is to call `.distinct()` on the queryset after applying the limit, and only when
+a limit was actually applied.
+
+Changes in `django/forms/models.py`:
+
+django/forms/models.py
+```
+<<<<<<< SEARCH
+        if limit_choices_to is not None:
+            formfield.queryset = 
+formfield.queryset.complex_filter(limit_choices_to)
+=======
+        if limit_choices_to is not None:
+            formfield.queryset = 
+formfield.queryset.complex_filter(limit_choices_to).distinct()
+>>>>>>> REPLACE
+```
+
+Changes in `django/db/models/fields/related.py`: `ForeignKey.validate()` applies
+the same `limit_choices_to` filter, and has the same potential for duplicate-row
+joins, though `.exists()` is unaffected by duplicates, so no change is needed 
+there. The `formfield()` path in `ForeignKey` passes `limit_choices_to` through 
+`RelatedField.formfield`, which is what `apply_limit_choices_to_to_formfield` 
+consumes, so no edit is needed in `related.py` for this fix.
+
+No additional files need to be added. You can verify the change by running the 
+existing model form tests with `python -m pytest tests/model_forms` (or `python 
+tests/runtests.py model_forms`).
+
+Tokens: 101k sent, 49k cache write, 2.4k cache hit, 542 received.
+Cost: $0.0065 message, $0.0086 session.
+
+tests/runtests.py
+`tests/runtests.py` is not related to this fix, so no edits are needed there. 
+The fix lives in `django/forms/models.py`, which you already added, and I 
+already proposed it above. Please confirm whether you've applied that change, or
+tell me if you want me to re-state it.
+
+No other files need to be added. Once the change is applied, verify it with:
+
+```bash
+python tests/runtests.py model_forms
+```
+
+Tokens: 119k sent, 57k cache write, 2.4k cache hit, 130 received.
+Cost: $0.0075 message, $0.02 session.
+
+python tests/runtests.py model_forms

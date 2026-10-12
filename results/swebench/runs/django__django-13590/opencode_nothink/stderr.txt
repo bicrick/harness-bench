@@ -1,0 +1,76 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m✱ [0mGrep "def resolve_lookup_value"[90m in django/db/models/sql/query.py · 1 match[0m
+[0m→ [0mRead django/db/models/sql/query.py[90m [offset=1072, limit=30][0m
+[0m
+[0m← [0mEdit django/db/models/sql/query.py
+Index: /testbed/django/db/models/sql/query.py
+===================================================================
+--- /testbed/django/db/models/sql/query.py
++++ /testbed/django/db/models/sql/query.py
+@@ -1076,12 +1076,16 @@
+         )
+     elif isinstance(value, (list, tuple)):
+         # The items of the iterable may be expressions and therefore need
+         # to be resolved independently.
+-        return type(value)(
++        resolved_values = (
+             self.resolve_lookup_value(sub_value, can_reuse, allow_joins)
+             for sub_value in value
+         )
++        # Named tuples require their elements as positional arguments.
++        if hasattr(value, '_fields'):
++            return type(value)(*resolved_values)
++        return type(value)(resolved_values)
+     return value
+ 
+ def solve_lookup_type(self, lookup):
+     """
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+import django
+from django.conf import settings
+settings.configure(INSTALLED_APPS=['django.contrib.contenttypes','django.contrib.auth'], DATABASES={'default':{'ENGINE':'django.db.backends.sqlite3','NAME':':memory:'}})
+django.setup()
+from collections import namedtuple
+from django.db.models import F
+from django.db.models.sql.query import Query
+from django.contrib.auth.models import User
+R = namedtuple('R', ['near', 'far'])
+q = Query(User)
+print(q.resolve_lookup_value(R(1, F('id')), True, True))
+print(q.resolve_lookup_value((1, 2), True, True))
+"
+Traceback (most recent call last):
+  File "<string>", line 12, in <module>
+  File "/testbed/django/db/models/sql/query.py", line 1086, in resolve_lookup_value
+    return type(value)(*resolved_values)
+  File "/testbed/django/db/models/sql/query.py", line 1082, in <genexpr>
+    for sub_value in value
+  File "/testbed/django/db/models/sql/query.py", line 1075, in resolve_lookup_value
+    self, reuse=can_reuse, allow_joins=allow_joins,
+  File "/testbed/django/db/models/expressions.py", line 576, in resolve_expression
+    return query.resolve_ref(self.name, allow_joins, reuse, summarize)
+  File "/testbed/django/db/models/sql/query.py", line 1744, in resolve_ref
+    reuse.update(join_list)
+AttributeError: 'bool' object has no attribute 'update'
+[0m
+[0m$ [0mcd /testbed && python -c "
+import django
+from django.conf import settings
+settings.configure(INSTALLED_APPS=['django.contrib.contenttypes','django.contrib.auth'], DATABASES={'default':{'ENGINE':'django.db.backends.sqlite3','NAME':':memory:'}})
+django.setup()
+from collections import namedtuple
+from django.db.models import F
+from django.db.models.sql.query import Query
+from django.contrib.auth.models import User
+R = namedtuple('R', ['near', 'far'])
+q = Query(User)
+print(q.resolve_lookup_value(R(1, F('id')), set(), True))
+print(q.resolve_lookup_value((1, 2), set(), True))
+"
+R(near=1, far=Col(auth_user, auth.User.id))
+(1, 2)
+[0m

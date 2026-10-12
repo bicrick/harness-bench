@@ -1,0 +1,8 @@
+The fix belongs in `ThreadedWSGIServer`. Each request thread opens its own DB connection, and nothing closes it when the thread ends. I'll override `process_request_thread` to close connections in a `finally` block.
+I changed `ThreadedWSGIServer` in `django/core/servers/basehttp.py` so each request thread closes its database connections when it finishes. The `servers` test suite passes (25 tests, 1 skipped).
+
+**Cause:** `LiveServerThread.run()` only calls `connections.close_all()` for the server's main thread. Each request handled by `ThreadedWSGIServer` runs in its own thread, which opens a DB connection that was never closed. Those leftover connections are what make `destroy_test_db()` fail with "database is being accessed by other users".
+
+**Fix:** I overrode `process_request_thread` in `ThreadedWSGIServer` to call `connections.close_all()` in a `finally` block after the parent method handles the request. The import is local to the method to avoid any import-order issues.
+
+I did not reproduce the intermittent race from the issue, so the fix is verified only by the existing test suite passing, not by a reproduction.

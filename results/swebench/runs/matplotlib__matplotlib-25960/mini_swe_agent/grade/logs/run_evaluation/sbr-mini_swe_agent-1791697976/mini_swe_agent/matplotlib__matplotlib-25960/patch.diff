@@ -1,0 +1,47 @@
+diff --git a/lib/matplotlib/figure.py b/lib/matplotlib/figure.py
+index dab2bc4a5a..74e6ddd9a1 100644
+--- a/lib/matplotlib/figure.py
++++ b/lib/matplotlib/figure.py
+@@ -2274,12 +2274,38 @@ class SubFigure(FigureBase):
+             return
+         # need to figure out *where* this subplotspec is.
+         gs = self._subplotspec.get_gridspec()
++        nrows, ncols = gs.get_geometry()
++        # The spacing between subfigures is the one explicitly set on the
++        # gridspec (e.g. via `.Figure.subfigures` or `.Figure.add_gridspec`);
++        # the subfigures span the whole parent, so no margins are applied.
++        explicit = isinstance(gs, GridSpec)
++        wspace = gs.wspace if explicit and gs.wspace is not None else 0
++        hspace = gs.hspace if explicit and gs.hspace is not None else 0
+         wr = np.asarray(gs.get_width_ratios())
+         hr = np.asarray(gs.get_height_ratios())
+-        dx = wr[self._subplotspec.colspan].sum() / wr.sum()
+-        dy = hr[self._subplotspec.rowspan].sum() / hr.sum()
+-        x0 = wr[:self._subplotspec.colspan.start].sum() / wr.sum()
+-        y0 = 1 - hr[:self._subplotspec.rowspan.stop].sum() / hr.sum()
++
++        def _cell_edges(n, ratios, space):
++            # Mirrors the calculation in GridSpecBase.get_grid_positions
++            # for a unit interval without margins.
++            cell = 1 / (n + space * (n - 1))
++            sep = space * cell
++            norm = cell * n / ratios.sum()
++            cell_sizes = ratios * norm
++            seps = [0] + [sep] * (n - 1)
++            # Accumulated edges, alternating start/end for each cell.
++            return np.cumsum(np.column_stack([seps, cell_sizes]).flat)
++
++        cw = _cell_edges(ncols, wr, wspace).reshape((-1, 2)).T
++        ch = _cell_edges(nrows, hr, hspace).reshape((-1, 2)).T
++        colspan = self._subplotspec.colspan
++        rowspan = self._subplotspec.rowspan
++        x0 = cw[0][colspan.start]
++        x1 = cw[1][colspan.stop - 1]
++        # Rows are counted from the top of the figure.
++        y1 = 1 - ch[0][rowspan.start]
++        y0 = 1 - ch[1][rowspan.stop - 1]
++        dx = x1 - x0
++        dy = y1 - y0
+         if self.bbox_relative is None:
+             self.bbox_relative = Bbox.from_bounds(x0, y0, dx, dy)
+         else:

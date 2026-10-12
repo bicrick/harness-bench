@@ -1,0 +1,228 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m→ [0mRead sympy/combinatorics/homomorphisms.py[90m [offset=280, limit=120][0m
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy.combinatorics import *
+from sympy.combinatorics.homomorphisms import _check_homomorphism
+D3 = DihedralGroup(3)
+print(hasattr(D3,'relators'))
+print(D3.generators, D3.presentation().relators if hasattr(D3,'presentation') else None)
+print(D3.presentation().generators)
+"
+False
+[Permutation(0, 1, 2), Permutation(0, 2)] [x_1**2, x_0**3, x_1*x_0*x_1**-1*x_0]
+(x_0, x_1)
+[0m
+[0m← [0mEdit sympy/combinatorics/homomorphisms.py
+Index: /testbed/sympy/combinatorics/homomorphisms.py
+===================================================================
+--- /testbed/sympy/combinatorics/homomorphisms.py
++++ /testbed/sympy/combinatorics/homomorphisms.py
+@@ -309,42 +309,34 @@
+ 
+ def _check_homomorphism(domain, codomain, images):
+     if hasattr(domain, 'relators'):
+         rels = domain.relators
++        gens = domain.generators
+     else:
+-        gens = domain.presentation().generators
+-        rels = domain.presentation().relators
++        pres = domain.presentation()
++        gens = pres.generators
++        rels = pres.relators
+     identity = codomain.identity
+ 
++    # Map each generator symbol of the presentation to its image.
++    # For permutation groups, the presentation generators correspond
++    # positionally to ``domain.generators``.
++    if isinstance(domain, PermutationGroup):
++        sym_images = {gens[k]: images[domain.generators[k]]
++                      for k in range(len(gens))}
++    else:
++        sym_images = {g: images[g] for g in gens}
++
+     def _image(r):
+         if r.is_identity:
+             return identity
+-        else:
+-            w = identity
+-            r_arr = r.array_form
+-            i = 0
+-            j = 0
+-            # i is the index for r and j is for
+-            # r_arr. r_arr[j] is the tuple (sym, p)
+-            # where sym is the generator symbol
+-            # and p is the power to which it is
+-            # raised while r[i] is a generator
+-            # (not just its symbol) or the inverse of
+-            # a generator - hence the need for
+-            # both indices
+-            while i < len(r):
+-                power = r_arr[j][1]
+-                if isinstance(domain, PermutationGroup) and r[i] in gens:
+-                    s = domain.generators[gens.index(r[i])]
+-                else:
+-                    s = r[i]
+-                if s in images:
+-                    w = w*images[s]**power
+-                elif s**-1 in images:
+-                    w = w*images[s**-1]**power
+-                i += abs(power)
+-                j += 1
+-            return w
++        w = identity
++        for sym, power in r.array_form:
++            if sym in sym_images:
++                w = w*sym_images[sym]**power
++            else:
++                w = w*sym_images[sym**-1]**power
++        return w
+ 
+     for r in rels:
+         if isinstance(codomain, FpGroup):
+             s = codomain.equals(_image(r), identity)
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy.combinatorics import *
+from sympy.combinatorics.homomorphisms import homomorphism
+D3 = DihedralGroup(3)
+T = homomorphism(D3, D3, D3.generators, D3.generators)
+print('ok', T.is_isomorphism())
+try:
+    homomorphism(D3, D3, D3.generators, [D3.generators[0], D3.generators[0]])
+    print('BAD: should fail')
+except ValueError as e: print('ok raise', e)
+" && python -m pytest -q sympy/combinatorics/tests/test_homomorphisms.py 2>&1 | tail -5
+Traceback (most recent call last):
+  File "<string>", line 5, in <module>
+  File "/testbed/sympy/combinatorics/homomorphisms.py", line 306, in homomorphism
+    if check and not _check_homomorphism(domain, codomain, images):
+  File "/testbed/sympy/combinatorics/homomorphisms.py", line 357, in _check_homomorphism
+    s = _image(r).is_identity
+  File "/testbed/sympy/combinatorics/homomorphisms.py", line 337, in _image
+    w = w*sym_images[sym**-1]**power
+KeyError: 1/x_1
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy.combinatorics import *
+D3 = DihedralGroup(3)
+r = D3.presentation().relators[2]
+print(r.array_form, r.generators)
+"
+Traceback (most recent call last):
+  File "<string>", line 5, in <module>
+AttributeError: 'FreeGroupElement' object has no attribute 'generators'
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy.combinatorics import *
+D3 = DihedralGroup(3)
+r = D3.presentation().relators[2]
+print(r.array_form)
+"
+((x_1, 1), (x_0, 1), (x_1, -1), (x_0, 1))
+[0m
+[0m← [0mEdit sympy/combinatorics/homomorphisms.py
+Index: /testbed/sympy/combinatorics/homomorphisms.py
+===================================================================
+--- /testbed/sympy/combinatorics/homomorphisms.py
++++ /testbed/sympy/combinatorics/homomorphisms.py
+@@ -330,12 +330,9 @@
+     if r.is_identity:
+         return identity
+     w = identity
+     for sym, power in r.array_form:
+-        if sym in sym_images:
+-            w = w*sym_images[sym]**power
+-        else:
+-            w = w*sym_images[sym**-1]**power
++        w = w*sym_images[sym]**power
+     return w
+ 
+ for r in rels:
+     if isinstance(codomain, FpGroup):
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy.combinatorics import *
+from sympy.combinatorics.homomorphisms import homomorphism
+D3 = DihedralGroup(3)
+T = homomorphism(D3, D3, D3.generators, D3.generators)
+print('ok', T.is_isomorphism())
+try:
+    homomorphism(D3, D3, D3.generators, [D3.generators[0], D3.generators[0]])
+    print('BAD: should fail')
+except ValueError as e: print('ok raise', e)
+" && python -m pytest -q sympy/combinatorics/tests/test_homomorphisms.py 2>&1 | tail -5
+Traceback (most recent call last):
+  File "<string>", line 5, in <module>
+  File "/testbed/sympy/combinatorics/homomorphisms.py", line 306, in homomorphism
+    if check and not _check_homomorphism(domain, codomain, images):
+  File "/testbed/sympy/combinatorics/homomorphisms.py", line 354, in _check_homomorphism
+    s = _image(r).is_identity
+  File "/testbed/sympy/combinatorics/homomorphisms.py", line 334, in _image
+    w = w*sym_images[sym]**power
+KeyError: x_1
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy.combinatorics import *
+D3 = DihedralGroup(3)
+p = D3.presentation()
+print(type(p.generators), p.generators, [type(g) for g in p.generators])
+r = p.relators[2]
+print([type(s) for s,_ in r.array_form], r.array_form[0][0] in p.generators)
+"
+<class 'tuple'> (x_0, x_1) [<class 'sympy.combinatorics.free_groups.FreeGroupElement'>, <class 'sympy.combinatorics.free_groups.FreeGroupElement'>]
+[<class 'sympy.core.symbol.Symbol'>, <class 'sympy.core.symbol.Symbol'>, <class 'sympy.core.symbol.Symbol'>, <class 'sympy.core.symbol.Symbol'>] False
+[0m
+[0m← [0mEdit sympy/combinatorics/homomorphisms.py
+Index: /testbed/sympy/combinatorics/homomorphisms.py
+===================================================================
+--- /testbed/sympy/combinatorics/homomorphisms.py
++++ /testbed/sympy/combinatorics/homomorphisms.py
+@@ -320,12 +320,12 @@
+ # Map each generator symbol of the presentation to its image.
+ # For permutation groups, the presentation generators correspond
+ # positionally to ``domain.generators``.
+ if isinstance(domain, PermutationGroup):
+-    sym_images = {gens[k]: images[domain.generators[k]]
++    sym_images = {gens[k].array_form[0][0]: images[domain.generators[k]]
+                   for k in range(len(gens))}
+ else:
+-    sym_images = {g: images[g] for g in gens}
++    sym_images = {g.array_form[0][0]: images[g] for g in gens}
+ 
+ def _image(r):
+     if r.is_identity:
+         return identity
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy.combinatorics import *
+from sympy.combinatorics.homomorphisms import homomorphism
+D3 = DihedralGroup(3)
+T = homomorphism(D3, D3, D3.generators, D3.generators)
+print('ok', T.is_isomorphism())
+try:
+    homomorphism(D3, D3, D3.generators, [D3.generators[0], D3.generators[0]])
+    print('BAD: should fail')
+except ValueError as e: print('ok raise', e)
+" && python -m pytest -q sympy/combinatorics/tests/test_homomorphisms.py 2>&1 | tail -5
+ok True
+ok raise The given images do not define a homomorphism
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed && python -c "
+import sympy.combinatorics.tests.test_homomorphisms as t
+import inspect
+fails=0
+for n,f in inspect.getmembers(t, inspect.isfunction):
+    if n.startswith('test_'):
+        try: f()
+        except Exception as e: fails+=1; print('FAIL',n,repr(e))
+print('done, failures:', fails)
+"
+done, failures: 0
+[0m

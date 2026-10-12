@@ -1,0 +1,51 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..7ff613544 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -2160,7 +2160,12 @@ class UninitializedInstanceAttributeMixin(DataDocumenterMixinBase):
+                 self.attr = None  #: This is a target of this mix-in.
+     """
+ 
+-    def get_attribute_comment(self, parent: Any) -> Optional[List[str]]:
++    def get_attribute_comment(self, parent: Any, attrname: str) -> Optional[List[str]]:
++        """Return the doc-comment of *attrname* searching *parent* and its base classes.
++
++        The search follows the MRO so that an attribute inherited from a base class
++        (e.g. documented with ``#:`` in the base class's source) is found too.
++        """
+         try:
+             for cls in inspect.getmro(parent):
+                 try:
+@@ -2169,8 +2174,8 @@ class UninitializedInstanceAttributeMixin(DataDocumenterMixinBase):
+ 
+                     analyzer = ModuleAnalyzer.for_module(module)
+                     analyzer.analyze()
+-                    if qualname and self.objpath:
+-                        key = (qualname, self.objpath[-1])
++                    if qualname and attrname:
++                        key = (qualname, attrname)
+                         if key in analyzer.attr_docs:
+                             return list(analyzer.attr_docs[key])
+                 except (AttributeError, PycodeError):
+@@ -2183,7 +2188,7 @@ class UninitializedInstanceAttributeMixin(DataDocumenterMixinBase):
+     def is_uninitialized_instance_attribute(self, parent: Any) -> bool:
+         """Check the subject is an attribute defined in __init__()."""
+         # An instance variable defined in __init__().
+-        if self.get_attribute_comment(parent):
++        if self.get_attribute_comment(parent, self.objpath[-1]):
+             return True
+         else:
+             return False
+@@ -2219,8 +2224,10 @@ class UninitializedInstanceAttributeMixin(DataDocumenterMixinBase):
+                 super().should_suppress_value_header())
+ 
+     def get_doc(self, encoding: str = None, ignore: int = None) -> List[List[str]]:
+-        if self.object is UNINITIALIZED_ATTR:
+-            comment = self.get_attribute_comment(self.parent)
++        # Look for a doc-comment of the attribute, including the ones inherited
++        # from base classes (they are not found by the analyzer for self.parent).
++        if self.parent:
++            comment = self.get_attribute_comment(self.parent, self.objpath[-1])
+             if comment:
+                 return [comment]
+ 

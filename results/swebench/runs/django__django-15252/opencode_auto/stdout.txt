@@ -1,0 +1,19 @@
+The recorder creates and writes the `django_migrations` table on every connection without consulting the router. I'll gate every recorder operation on `router.allow_migrate` for the `Migration` model.
+Now I'll run the migration recorder and executor tests to check for regressions.
+The change introduced a regression in `test_migrate_fake_initial`, which passes on the original code. Let me look at that test.
+The failure comes from my gating. `TestRouter` disallows the recorder model on `other`, but this existing test expects `0001` to be recorded there so `--fake-initial` can detect it. Let me check the repo version and history before deciding how to reconcile the two.
+I'm stopping here rather than forcing a further change, because the remaining failure is a genuine conflict in the requirements.
+
+**What I changed** (`django/db/migrations/recorder.py`):
+
+- Added `MigrationRecorder.allowed()`, which calls `router.allow_migrate(alias, 'migrations', model_name='migration')`.
+- `ensure_schema()` no longer creates `django_migrations` on connections the router disallows.
+- `applied_migrations()`, `record_applied()`, `record_unapplied()` and `flush()` are no-ops (or return `{}`) on disallowed connections, so they don't fail on a missing table.
+
+**Test status:** `runtests.py migrations` runs 629 tests. On the original code they all pass. With this change, one fails: `migrations.test_commands.MigrateTests.test_migrate_fake_initial`.
+
+**Why it fails:** the test's `TestRouter` denies the `migrations` app's recorder model on `other`, but the test then expects `0001` to be recorded as applied on `other` so that `--fake-initial` works. With the recorder gated, `0001` is never recorded there, so the migration re-runs and fails with `table "migrations_tribble" already exists`. The issue's requested behaviour and this existing test can't both hold with the test's router as written.
+
+**Decision needed:** one of these has to give:
+1. Keep the fix and update `TestRouter` (or that test) so the recorder is allowed on `other`. I wasn't willing to change tests, so I haven't done this.
+2. Keep the test as-is and narrow the fix, e.g. only skip table creation and not reads/writes. That leaves the table-creation-with-no-table path broken for the issue's router, so I don't recommend it.

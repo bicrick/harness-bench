@@ -1,0 +1,9 @@
+I'll look at the relevant code.
+The `y_small_train` and `y_val` passed to the scorer are encoded (floats 0..n-1), while `predict` returns original labels. The cleanest fix is to decode them in the classifier's scorer path. The base class is shared with the regressor, so I'll add the decoding only when `classes_` exists (classifier), as the issue suggests, but use `astype(int)` safely.
+Now I'll verify with the reproduction from the issue, plus a multiclass string case.
+Both string-target cases now fit without error. The test suite run timed out, so I'll rerun just the classifier tests.
+The partial output didn't finish within the time limit, but the selected classifier and early-stopping tests ran without any failures so far.
+
+The fix is in `sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py`, in `_check_early_stopping_scorer`. For classifiers, `y_small_train` and `y_val` are decoded from the encoded 0..n_classes-1 values back to the original labels before the scorer is called, since the scorer compares them against `predict()` output. The decoding is guarded by `hasattr(self, 'classes_')`, so regressors are unaffected.
+
+I checked the issue's reproduction (string labels, binary) and a multiclass string case; both now fit without the `TypeError`. I didn't add or change any tests.

@@ -1,0 +1,8 @@
+# Finalize the same-settings (no thinking) set
+Runners: tmux nt_{claude_code,opencode,aider,mini_swe_agent,mini_rev,swe_agent,swe_agent_rev} (~/sbr-nothink-launch.sh, logs ~/sbr-nt-*.txt), watchdog sbr_nt_watchdog. Done when each of the 5 *_nothink harnesses has 50 scored rows in results/swebench/results.jsonl.
+1. cd ~/context-shaping; `python scripts/swebench_tokens.py` then `python scripts/swebench_final.py` -> take rows cursor_nothink + {mini_swe_agent,swe_agent,claude_code,opencode,aider}_nothink: rate+Wilson CI, $/solve, tok/solve, min/solve, cache.
+2. Verify parity: every *_nothink calls.jsonl row has req.normalized and think_blocks==0; cursor_nothink 0 thinking events.
+3. docs/SWEBENCH_PILOT.md: add "Playing field" section (settings table below + finding: Haiku 5.5 thinks adaptively by default, so the original five proxied runs all had thinking on) and the fair 50-task table; label original runs "default settings", new set "same settings". Append entry to ~/sbr-deviations.md (proxy normalization: thinking={"type":"disabled"}, output_config.effort dropped, thinking-clearing context edits and history thinking blocks dropped).
+4. `python scripts/why_harnesses_differ.py` (uses SAME map) and update docs/WHY_HARNESSES_DIFFER.md.
+5. /workspace/personal-website/src/components/project/harness/swebench.js: SWE_FAIR = same-settings rows with plain labels, no tag/variant; keep SWE as "default settings". why.js: OUTCOMES_FAIR/CHECKED_FAIR from same-settings rows, no tags. Tell parent which component copy to change (Confounds.js 'auto-approve'/'thinking off' labels; ContextShaping.js ocA/cuN copy).
+6. Commit + push both repos (branch claude/eager-noether-o13tek).
