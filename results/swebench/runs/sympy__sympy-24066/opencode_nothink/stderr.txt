@@ -1,0 +1,361 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "_collect_factor_and_dimension" -A60 sympy/physics/units/unitsystem.py | head -120
+152:    def _collect_factor_and_dimension(self, expr):
+153-        """
+154-        Return tuple with scale factor expression and dimension expression.
+155-        """
+156-        from sympy.physics.units import Quantity
+157-        if isinstance(expr, Quantity):
+158-            return expr.scale_factor, expr.dimension
+159-        elif isinstance(expr, Mul):
+160-            factor = 1
+161-            dimension = Dimension(1)
+162-            for arg in expr.args:
+163:                arg_factor, arg_dim = self._collect_factor_and_dimension(arg)
+164-                factor *= arg_factor
+165-                dimension *= arg_dim
+166-            return factor, dimension
+167-        elif isinstance(expr, Pow):
+168:            factor, dim = self._collect_factor_and_dimension(expr.base)
+169:            exp_factor, exp_dim = self._collect_factor_and_dimension(expr.exp)
+170-            if self.get_dimension_system().is_dimensionless(exp_dim):
+171-                exp_dim = 1
+172-            return factor ** exp_factor, dim ** (exp_factor * exp_dim)
+173-        elif isinstance(expr, Add):
+174:            factor, dim = self._collect_factor_and_dimension(expr.args[0])
+175-            for addend in expr.args[1:]:
+176-                addend_factor, addend_dim = \
+177:                    self._collect_factor_and_dimension(addend)
+178-                if dim != addend_dim:
+179-                    raise ValueError(
+180-                        'Dimension of "{}" is {}, '
+181-                        'but it should be {}'.format(
+182-                            addend, addend_dim, dim))
+183-                factor += addend_factor
+184-            return factor, dim
+185-        elif isinstance(expr, Derivative):
+186:            factor, dim = self._collect_factor_and_dimension(expr.args[0])
+187-            for independent, count in expr.variable_count:
+188:                ifactor, idim = self._collect_factor_and_dimension(independent)
+189-                factor /= ifactor**count
+190-                dim /= idim**count
+191-            return factor, dim
+192-        elif isinstance(expr, Function):
+193:            fds = [self._collect_factor_and_dimension(
+194-                arg) for arg in expr.args]
+195-            return (expr.func(*(f[0] for f in fds)),
+196-                    *(d[1] for d in fds))
+197-        elif isinstance(expr, Dimension):
+198-            return S.One, expr
+199-        else:
+200-            return expr, Dimension(1)
+201-
+202-    def get_units_non_prefixed(self) -> tSet[Quantity]:
+203-        """
+204-        Return the units of the system that do not have a prefix.
+205-        """
+206-        return set(filter(lambda u: not u.is_prefixed and not u.is_physical_constant, self._units))
+[0m
+[0m$ [0mcd /testbed && grep -n "def is_dimensionless" -A20 sympy/physics/units/dimensions.py
+447:    def is_dimensionless(self, dimension):
+448-        """
+449-        Check if the dimension object really has a dimension.
+450-
+451-        A dimension should have at least one component with non-zero power.
+452-        """
+453-        if dimension.name == 1:
+454-            return True
+455-        return self.get_dimensional_dependencies(dimension) == {}
+456-
+457-    @property
+458-    def list_can_dims(self):
+459-        """
+460-        Useless method, kept for compatibility with previous versions.
+461-
+462-        DO NOT USE.
+463-
+464-        List all canonical dimension names.
+465-        """
+466-        dimset = set()
+467-        for i in self.base_dims:
+[0m
+[0m← [0mEdit sympy/physics/units/unitsystem.py
+Index: /testbed/sympy/physics/units/unitsystem.py
+===================================================================
+--- /testbed/sympy/physics/units/unitsystem.py
++++ /testbed/sympy/physics/units/unitsystem.py
+@@ -191,10 +191,16 @@
+     return factor, dim
+ elif isinstance(expr, Function):
+     fds = [self._collect_factor_and_dimension(
+         arg) for arg in expr.args]
+-    return (expr.func(*(f[0] for f in fds)),
+-            *(d[1] for d in fds))
++    dimless = self.get_dimension_system().is_dimensionless
++    for f in fds:
++        if not dimless(f[1]):
++            raise ValueError(
++                'Dimension of "{}" is {}, '
++                'but it should be {}'.format(
++                    expr.args[fds.index(f)], f[1], Dimension(1)))
++    return (expr.func(*(f[0] for f in fds)), Dimension(1))
+ elif isinstance(expr, Dimension):
+     return S.One, expr
+ else:
+     return expr, Dimension(1)
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy import exp
+from sympy.physics import units
+from sympy.physics.units.systems.si import SI
+expr = units.second / (units.ohm * units.farad)
+dim = SI._collect_factor_and_dimension(expr)[1]
+assert SI.get_dimension_system().is_dimensionless(dim)
+print(SI._collect_factor_and_dimension(100 + exp(expr)))
+" && python -m pytest -q sympy/physics/units 2>&1 | tail -15
+(E + 100, Dimension(1))
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed && python -c "
+import sympy.physics.units.tests.test_unitsystem as t, sympy.physics.units.tests.test_quantities as q, sympy.physics.units.tests.test_dimensions as d
+for m in (t,q,d):
+    for n in dir(m):
+        if n.startswith('test_'):
+            getattr(m,n)()
+print('ok')
+" 2>&1 | tail -15
+Traceback (most recent call last):
+  File "<string>", line 6, in <module>
+  File "/testbed/sympy/physics/units/tests/test_quantities.py", line 366, in test_factor_and_dimension
+    SI._collect_factor_and_dimension(expr)
+  File "/testbed/sympy/physics/units/unitsystem.py", line 198, in _collect_factor_and_dimension
+    raise ValueError(
+ValueError: Dimension of "v_w1/2 - v_w2" is Dimension(length/time), but it should be Dimension(1)
+[0m
+[0m$ [0mcd /testbed && sed -n 355,380p sympy/physics/units/tests/test_quantities.py
+assert (1, volume/amount_of_substance) == SI._collect_factor_and_dimension(
+        exp(pH))
+
+    v_w1 = Quantity('v_w1')
+    v_w2 = Quantity('v_w2')
+
+    v_w1.set_global_relative_scale_factor(Rational(3, 2), meter/second)
+    v_w2.set_global_relative_scale_factor(2, meter/second)
+
+    expr = Abs(v_w1/2 - v_w2)
+    assert (Rational(5, 4), length/time) == \
+        SI._collect_factor_and_dimension(expr)
+
+    expr = Rational(5, 2)*second/meter*v_w1 - 3000
+    assert (-(2996 + Rational(1, 4)), Dimension(1)) == \
+        SI._collect_factor_and_dimension(expr)
+
+    expr = v_w1**(v_w2/v_w1)
+    assert ((Rational(3, 2))**Rational(4, 3), (length/time)**Rational(4, 3)) == \
+        SI._collect_factor_and_dimension(expr)
+
+    with warns_deprecated_sympy():
+        assert (3000, Dimension(1)) == Quantity._collect_factor_and_dimension(3000)
+
+
+@XFAIL
+[0m
+[0m← [0mEdit sympy/physics/units/unitsystem.py
+Index: /testbed/sympy/physics/units/unitsystem.py
+===================================================================
+--- /testbed/sympy/physics/units/unitsystem.py
++++ /testbed/sympy/physics/units/unitsystem.py
+@@ -191,16 +191,12 @@
+     return factor, dim
+ elif isinstance(expr, Function):
+     fds = [self._collect_factor_and_dimension(
+         arg) for arg in expr.args]
+-    dimless = self.get_dimension_system().is_dimensionless
+-    for f in fds:
+-        if not dimless(f[1]):
+-            raise ValueError(
+-                'Dimension of "{}" is {}, '
+-                'but it should be {}'.format(
+-                    expr.args[fds.index(f)], f[1], Dimension(1)))
+-    return (expr.func(*(f[0] for f in fds)), Dimension(1))
++    dimension_system = self.get_dimension_system()
++    return (expr.func(*(f[0] for f in fds)),
++            *(Dimension(1) if dimension_system.is_dimensionless(d[1])
++              else d[1] for d in fds))
+ elif isinstance(expr, Dimension):
+     return S.One, expr
+ else:
+     return expr, Dimension(1)
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy import exp
+from sympy.physics import units
+from sympy.physics.units.systems.si import SI
+expr = units.second / (units.ohm * units.farad)
+print(SI._collect_factor_and_dimension(100 + exp(expr)))
+" && python -c "
+import sympy.physics.units.tests.test_unitsystem as t, sympy.physics.units.tests.test_quantities as q, sympy.physics.units.tests.test_dimensions as d
+for m in (t,q,d):
+    for n in dir(m):
+        if n.startswith('test_'):
+            getattr(m,n)()
+print('ok')
+" 2>&1 | tail -5
+(E + 100, Dimension(1))
+Traceback (most recent call last):
+  File "<string>", line 6, in <module>
+  File "/testbed/sympy/testing/pytest.py", line 162, in wrapper
+    raise XFail(func.__name__)
+sympy.testing.pytest.XFail: test_factor_and_dimension_with_Abs
+[0m
+[0m$ [0mcd /testbed && python -c "
+import sympy.physics.units.tests.test_unitsystem as t, sympy.physics.units.tests.test_quantities as q, sympy.physics.units.tests.test_dimensions as d
+from sympy.testing.pytest import XFail
+for m in (t,q,d):
+    for n in dir(m):
+        if n.startswith('test_'):
+            try: getattr(m,n)()
+            except XFail: pass
+print('ok')
+" 2>&1 | tail -5
+Traceback (most recent call last):
+  File "<string>", line 7, in <module>
+  File "/testbed/sympy/physics/units/tests/test_quantities.py", line 219, in test_mul_div
+    assert v1 == v2.convert_to(v1)
+AssertionError
+[0m
+[0m$ [0mcd /testbed && git stash -q && python -c "
+import sympy.physics.units.tests.test_quantities as q
+try: q.test_mul_div()
+except AssertionError: print('fails on baseline too')
+"; git stash pop -q && git diff --stat
+sympy/physics/units/unitsystem.py | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+[0m
+[0m$ [0mcd /testbed && sed -n 205,222p sympy/physics/units/tests/test_quantities.py; git diff
+u.set_global_relative_scale_factor(S(10), meter)
+    v.set_global_relative_scale_factor(S(5), meter)
+    t.set_global_relative_scale_factor(S(2), second)
+    ut.set_global_relative_scale_factor(S(20), meter*second)
+    v2.set_global_relative_scale_factor(S(5), meter/second)
+
+    assert 1 / u == u**(-1)
+    assert u / 1 == u
+
+    v1 = u / t
+    v2 = v
+
+    # Pow only supports structural equality:
+    assert v1 != v2
+    assert v1 == v2.convert_to(v1)
+
+    # TODO: decide whether to allow such expression in the future
+    # (requires somehow manipulating the core).
+diff --git a/sympy/physics/units/unitsystem.py b/sympy/physics/units/unitsystem.py
+index 3daf84c108..ceec22314a 100755
+--- a/sympy/physics/units/unitsystem.py
++++ b/sympy/physics/units/unitsystem.py
+@@ -192,8 +192,10 @@ def _collect_factor_and_dimension(self, expr):
+         elif isinstance(expr, Function):
+             fds = [self._collect_factor_and_dimension(
+                 arg) for arg in expr.args]
++            dimension_system = self.get_dimension_system()
+             return (expr.func(*(f[0] for f in fds)),
+-                    *(d[1] for d in fds))
++                    *(Dimension(1) if dimension_system.is_dimensionless(d[1])
++                      else d[1] for d in fds))
+         elif isinstance(expr, Dimension):
+             return S.One, expr
+         else:
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy.physics import units
+from sympy.physics.units import Quantity, meter, second
+from sympy.physics.units.systems.si import SI
+u=Quantity('u');t=Quantity('t');v=Quantity('v')
+u.set_global_relative_scale_factor(10,meter);v.set_global_relative_scale_factor(5,meter);t.set_global_relative_scale_factor(2,second)
+v1=u/t
+print(v1.convert_to(v1), v.convert_to(v1))
+"
+Traceback (most recent call last):
+  File "<string>", line 8, in <module>
+AttributeError: 'Mul' object has no attribute 'convert_to'
+[0m
+[0m← [0mEdit sympy/physics/units/unitsystem.py
+Index: /testbed/sympy/physics/units/unitsystem.py
+===================================================================
+--- /testbed/sympy/physics/units/unitsystem.py
++++ /testbed/sympy/physics/units/unitsystem.py
+@@ -192,11 +192,12 @@
+ elif isinstance(expr, Function):
+     fds = [self._collect_factor_and_dimension(
+         arg) for arg in expr.args]
+     dimension_system = self.get_dimension_system()
++    if all(dimension_system.is_dimensionless(d[1]) for d in fds):
++        return expr.func(*(f[0] for f in fds)), Dimension(1)
+     return (expr.func(*(f[0] for f in fds)),
+-            *(Dimension(1) if dimension_system.is_dimensionless(d[1])
+-              else d[1] for d in fds))
++            *(d[1] for d in fds))
+ elif isinstance(expr, Dimension):
+     return S.One, expr
+ else:
+     return expr, Dimension(1)
+
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy import exp
+from sympy.physics import units
+from sympy.physics.units.systems.si import SI
+expr = units.second / (units.ohm * units.farad)
+print(SI._collect_factor_and_dimension(100 + exp(expr)))
+" && python -c "
+import sympy.physics.units.tests.test_unitsystem as t, sympy.physics.units.tests.test_quantities as q, sympy.physics.units.tests.test_dimensions as d
+from sympy.testing.pytest import XFail
+for m in (t,q,d):
+    for n in dir(m):
+        if n.startswith('test_'):
+            try: getattr(m,n)()
+            except XFail: pass
+print('ok')
+" 2>&1 | tail -5
+(E + 100, Dimension(1))
+Traceback (most recent call last):
+  File "<string>", line 7, in <module>
+  File "/testbed/sympy/physics/units/tests/test_quantities.py", line 219, in test_mul_div
+    assert v1 == v2.convert_to(v1)
+AssertionError
+[0m
+[0m$ [0mcd /testbed && git stash -q && python -c "
+import sympy.physics.units.tests.test_quantities as q
+q.test_mul_div(); print('baseline passes')
+"; git stash pop -q; python -c "
+import sympy.physics.units.tests.test_quantities as q
+q.test_mul_div(); print('with fix passes')
+" 2>&1 | tail -2
+baseline passes
+with fix passes
+[0m
+[0m$ [0mcd /testbed && cat > /tmp/run_units.py <<'EOF'
+import sympy.physics.units.tests.test_unitsystem as t, sympy.physics.units.tests.test_quantities as q, sympy.physics.units.tests.test_dimensions as d
+from sympy.testing.pytest import XFail
+bad=[]
+for m in (t,q,d):
+    for n in sorted(dir(m)):
+        if n.startswith('test_'):
+            try: getattr(m,n)()
+            except XFail: pass
+            except Exception as e: bad.append((n,type(e).__name__))
+print('failures:', bad)
+EOF
+echo "--- fix:"; python /tmp/run_units.py 2>&1 | tail -1
+git stash -q; echo "--- baseline:"; python /tmp/run_units.py 2>&1 | tail -1; git stash pop -q
+--- fix:
+failures: [('test_mul_div', 'AssertionError')]
+--- baseline:
+failures: [('test_mul_div', 'AssertionError')]
+[0m

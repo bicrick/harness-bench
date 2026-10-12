@@ -1,0 +1,100 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..e89a885fea 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -550,9 +550,95 @@ class Query(BaseExpression):
+         Perform a COUNT() query using the current filter constraints.
+         """
+         obj = self.clone()
++        obj.strip_unused_annotations()
+         obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+         return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++    def strip_unused_annotations(self):
++        """
++        Remove annotations that cannot affect the result of a COUNT(*) query.
++
++        An annotation is kept only if it is referenced by the WHERE clause, by
++        ordering, or (transitively) by another kept annotation. Queries whose
++        row cardinality may depend on annotations (sliced, distinct, combined,
++        or with an explicit tuple GROUP BY from values()) are left untouched.
++        """
++        if (
++            not self.annotations
++            or self.is_sliced
++            or self.distinct
++            or self.combinator
++            or isinstance(self.group_by, tuple)
++        ):
++            return
++
++        def referenced_aliases(nodes):
++            """Yield alias names and annotation objects referenced by nodes."""
++            for node in nodes:
++                if node is None:
++                    continue
++                if hasattr(node, "flatten"):
++                    for expr in node.flatten():
++                        if isinstance(expr, Ref):
++                            yield expr.refs
++                        yield expr
++                elif hasattr(node, "children"):
++                    # WhereNode: recurse into children.
++                    yield from referenced_aliases(node.children)
++
++        by_id = {id(expr): alias for alias, expr in self.annotations.items()}
++
++        def needed_from(nodes):
++            found = set()
++            for item in referenced_aliases(nodes):
++                if isinstance(item, str):
++                    found.add(item)
++                elif id(item) in by_id:
++                    found.add(by_id[id(item)])
++            return found
++
++        needed = needed_from([self.where, *self.order_by])
++        # Transitively keep annotations referenced by kept annotations.
++        pending = set(needed)
++        while pending:
++            alias = pending.pop()
++            if alias not in self.annotations:
++                continue
++            for dep in needed_from([self.annotations[alias]]):
++                if dep not in needed:
++                    needed.add(dep)
++                    pending.add(dep)
++
++        removable = [alias for alias in self.annotations if alias not in needed]
++        if not removable:
++            return
++        # Removing an annotation is only safe when it does not own a join:
++        # a join left behind would multiply rows and change the count. Keep
++        # the query intact if any removable annotation references a
++        # multi-valued relation (i.e. contributes joins).
++        for alias in removable:
++            if self._annotation_contributes_joins(self.annotations[alias]):
++                return
++        for alias in removable:
++            del self.annotations[alias]
++            if self.annotation_select_mask is not None:
++                self.annotation_select_mask.discard(alias)
++        self._annotation_select_cache = None
++
++    def _annotation_contributes_joins(self, annotation):
++        """
++        Return True if resolving ``annotation`` required any join on this query
++        (i.e. it references a relation other than the base table).
++        """
++        if not hasattr(annotation, "flatten"):
++            # Not an expression we can analyse (e.g. a WhereNode from a Q()
++            # annotation); be conservative and keep the annotation.
++            return True
++        for expr in annotation.flatten():
++            if isinstance(expr, Col) and expr.alias != self.base_table:
++                return True
++        return False
++
+     def has_filters(self):
+         return self.where
+ 

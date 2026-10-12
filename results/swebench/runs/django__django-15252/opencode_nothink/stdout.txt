@@ -1,0 +1,19 @@
+I'll look at the recorder source first.
+The fix is to have the recorder check the router before touching the table. I'll add an `allow_migrate_model` check based on the Migration model, and make the read/write paths no-op when disallowed.
+Now I'll apply the change to the recorder.
+One concern: `applied_migrations` on a disallowed connection would still query the table if it exists, which is fine since reading is harmless. But `has_table` is False there, so it returns `{}` — correct. Let me verify the module imports and the existing migration tests still run.
+Let me check whether this failure predates my change.
+That test passes on the original code, so my change caused it. Let me look at the test.
+The test runs migrate on the `other` database, and the test's router (`migrations.routers.TestRouter`) lets `migrations` apply to `default` only. With my change, `other` no longer records applied migrations, so `--fake-initial` on the `other` connection no longer sees the table state it expects. That is the intended behavior for the issue, but the test's expectation that `other` tracks its own migrations is now incompatible. Let me confirm the router in use.
+`TestRouter` disallows the `django_migrations` table (`Migration` model) on `other`, so under the fix that connection correctly never records migrations. The failing test was written assuming the old behavior, where `other` got its own migration table. The issue explicitly says this should not happen, so the code change is correct. The test's internal `--fake-initial` flow depends on the recorder state on `other`, so I'm leaving the test file untouched as instructed, and I'll note this for you.
+
+Final diff:
+I changed `MigrationRecorder` in `django/db/migrations/recorder.py` so it respects `allow_migrate` from the database routers.
+
+**What changed**
+- Added `allowed_to_migrate()`, which asks the routers whether the `django_migrations` model may be migrated on this connection.
+- `ensure_schema()` now returns without creating the table when the router disallows it.
+- `record_applied()`, `record_unapplied()`, and `flush()` now do nothing on disallowed connections. `applied_migrations()` already returns `{}` when the table is absent, so it needed no change.
+
+**Test results**
+Running `runtests.py migrations` gives 629 tests with one error: `test_migrate_fake_initial`. That test passes on the original code, so my change caused the failure. It uses `TestRouter`, which disallows the migration table on the `other` database, and it expects `other` to track its own migration state. With the fix, `other` correctly no longer records migrations, so that expectation no longer holds. The issue asks for exactly this behavior, so I left the test alone as instructed. If you want a clean suite, that test's expectations will need updating to match the new behavior.

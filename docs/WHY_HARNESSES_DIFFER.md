@@ -7,6 +7,33 @@ No Thinking" model id). Script: `scripts/why_harnesses_differ.py`, output:
 `results/swebench/why_harnesses.json`. Final scored row per (task, harness) from
 `summary_tokens.csv`; per-run artifacts from `results/swebench/runs/<iid>/<harness>/`.
 
+## Same settings (headline, 2026-10-11)
+
+All six harnesses on `claude-haiku-5-5` with thinking off and permissions auto-approved
+(`*_nothink` rows; see the "Playing field" section of `docs/SWEBENCH_PILOT.md`). This is the
+comparison the write-up uses; the sections below it describe the default-settings run.
+
+| harness | fixed | wrong fix | no fix submitted | ran code after editing | ran tests after editing | repro before editing | median actions |
+|---|---|---|---|---|---|---|---|
+| SWE-agent | 37 | 13 | 0 | 98% | 94% | 56% | 13 |
+| Cursor | 35 | 15 | 0 | 80% | 68% | 12% | 5 |
+| OpenCode | 35 | 14 | 1 | n/a | n/a | n/a | n/a |
+| mini-swe-agent | 34 | 16 | 0 | 64% | 62% | 24% | 7 |
+| Claude Code | 33 | 15 | 2 | n/a | n/a | n/a | n/a |
+| Aider | 26 | 19 | 5 | n/a | n/a | n/a | n/a |
+
+- With headless configuration fixed for everyone, empty runs mostly disappear (0-2 per
+  harness) except Aider (5), which still hands the turn back to a user who is not there.
+- Without thinking, wrong fixes are what separate the field (13-16 for the top five, 19 for
+  Aider). Aider's median output fell from about 2,900 to 1,050 tokens per task: with no
+  reasoning and only ~2 model calls, it commits to a first guess and never checks it.
+- SWE-agent still checks its own work most (98% ran code after an edit) and ties its
+  default-settings score (37) while using about 40% fewer tokens per fix.
+- 24 tasks were fixed by all six and 12 by none. Only-one-harness fixes: Cursor
+  astropy-14369, SWE-agent sphinx-8638.
+- Cost per fix: Aider $0.134 vs $0.0044 (mini-swe-agent) to $0.0102 (Claude Code); cache
+  hits 2% vs 87-95%.
+
 ## What data exists
 
 | harness | step-level transcript | what we can measure |

@@ -1,0 +1,176 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m✱ [0mGrep "pytestmark"[90m in src/_pytest · 6 matches[0m
+[0m
+[0m$ [0mcd /testbed && git log --oneline -1 && ls changelog | head -30
+ff198e35c SWE-bench
+10012.deprecation.rst
+10150.bugfix.rst
+10218.improvement.rst
+10313.trivial.rst
+4562.deprecation.rst
+7337.improvement.rst
+8508.improvement.rst
+8646.improvement.rst
+9159.bugfix.rst
+9248.doc.rst
+9291.doc.rst
+9741.improvement.rst
+9742.improvement.rst
+9823.improvement.rst
+9873.improvement.rst
+9877.bugfix.rst
+9883.improvement.rst
+9897.feature.rst
+9906.trivial.rst
+9910.trivial.rst
+9920.improvement.rst
+9984.trivial.rst
+9987.improvement.rst
+README.rst
+_template.rst
+[0m
+[0m→ [0mRead src/_pytest/mark/structures.py[90m [offset=350, limit=60][0m
+[0m
+[0m$ [0mcd /testbed && grep -rn "get_unpacked_marks\|def get_real_func\|iter_markers" src/_pytest | head -30
+src/_pytest/mark/structures.py:358:def get_unpacked_marks(obj: object) -> Iterable[Mark]:
+src/_pytest/mark/structures.py:391:    obj.pytestmark = [*get_unpacked_marks(obj), mark]
+src/_pytest/mark/__init__.py:170:        mapped_names.update(mark.name for mark in item.iter_markers())
+src/_pytest/mark/__init__.py:215:        mark_names = {mark.name for mark in item.iter_markers()}
+src/_pytest/fixtures.py:1429:        for marker in node.iter_markers(name="parametrize"):
+src/_pytest/fixtures.py:1447:            arg for mark in node.iter_markers(name="usefixtures") for arg in mark.args
+src/_pytest/fixtures.py:1557:                for mark in metafunc.definition.iter_markers("parametrize")
+src/_pytest/warnings.py:57:            for mark in item.iter_markers(name="filterwarnings"):
+src/_pytest/nodes.py:363:    def iter_markers(self, name: Optional[str] = None) -> Iterator[Mark]:
+src/_pytest/nodes.py:369:        return (x[1] for x in self.iter_markers_with_node(name=name))
+src/_pytest/nodes.py:371:    def iter_markers_with_node(
+src/_pytest/nodes.py:401:        return next(self.iter_markers(name=name), default)
+src/_pytest/pytester.py:953:        for extra_element in self._request.node.iter_markers("pytester_example_path"):
+src/_pytest/compat.py:267:def get_real_func(obj):
+src/_pytest/skipping.py:169:    for mark in item.iter_markers(name="skipif"):
+src/_pytest/skipping.py:186:    for mark in item.iter_markers(name="skip"):
+src/_pytest/skipping.py:207:    for mark in item.iter_markers(name="xfail"):
+src/_pytest/python.py:66:from _pytest.mark.structures import get_unpacked_marks
+src/_pytest/python.py:149:    for marker in metafunc.definition.iter_markers(name="parametrize"):
+src/_pytest/python.py:314:                self.own_markers.extend(get_unpacked_marks(self.obj))
+src/_pytest/python.py:1717:        self.own_markers.extend(get_unpacked_marks(self.obj))
+[0m
+[0m← [0mEdit src/_pytest/mark/structures.py
+Index: /testbed/src/_pytest/mark/structures.py
+===================================================================
+--- /testbed/src/_pytest/mark/structures.py
++++ /testbed/src/_pytest/mark/structures.py
+@@ -355,9 +355,26 @@
+         return self.with_args(*args, **kwargs)
+ 
+ 
+ def get_unpacked_marks(obj: object) -> Iterable[Mark]:
+-    """Obtain the unpacked marks that are stored on an object."""
++    """Obtain the unpacked marks that are stored on an object.
++
++    For classes, marks are collected from the whole MRO (base classes
++    included), so that marks from multiple base classes are not lost.
++    """
++    if inspect.isclass(obj):
++        mark_list: List[Any] = []
++        for klass in reversed(obj.__mro__):
++            # Use the class' own __dict__ to avoid picking up inherited
++            # attributes multiple times.
++            own = vars(klass).get("pytestmark", [])
++            if not isinstance(own, list):
++                own = [own]
++            for mark in own:
++                if mark not in mark_list:
++                    mark_list.append(mark)
++        return normalize_mark_list(mark_list)
++
+     mark_list = getattr(obj, "pytestmark", [])
+     if not isinstance(mark_list, list):
+         mark_list = [mark_list]
+     return normalize_mark_list(mark_list)
+
+[0m
+[0m$ [0mcd /testbed && sed -n 1,30p src/_pytest/mark/structures.py | grep -n "import"
+1:import collections.abc
+2:import inspect
+3:import warnings
+4:from typing import Any
+5:from typing import Callable
+6:from typing import Collection
+7:from typing import Iterable
+8:from typing import Iterator
+9:from typing import List
+10:from typing import Mapping
+11:from typing import MutableMapping
+12:from typing import NamedTuple
+13:from typing import Optional
+14:from typing import overload
+15:from typing import Sequence
+16:from typing import Set
+17:from typing import Tuple
+18:from typing import Type
+19:from typing import TYPE_CHECKING
+20:from typing import TypeVar
+21:from typing import Union
+23:import attr
+25:from .._code import getfslineno
+26:from ..compat import ascii_escaped
+27:from ..compat import final
+28:from ..compat import NOTSET
+29:from ..compat import NotSetType
+30:from _pytest.config import Config
+[0m
+[0m← [0mEdit src/_pytest/mark/structures.py
+Index: /testbed/src/_pytest/mark/structures.py
+===================================================================
+--- /testbed/src/_pytest/mark/structures.py
++++ /testbed/src/_pytest/mark/structures.py
+@@ -368,11 +368,9 @@
+         # attributes multiple times.
+         own = vars(klass).get("pytestmark", [])
+         if not isinstance(own, list):
+             own = [own]
+-        for mark in own:
+-            if mark not in mark_list:
+-                mark_list.append(mark)
++        mark_list.extend(own)
+     return normalize_mark_list(mark_list)
+ 
+ mark_list = getattr(obj, "pytestmark", [])
+ if not isinstance(mark_list, list):
+
+[0m
+[0m$ [0mcd /tmp && mkdir -p mrotest && cd mrotest && cat > test_mro.py <<'EOF'
+import pytest
+
+@pytest.mark.foo
+class Foo: pass
+
+@pytest.mark.bar
+class Bar: pass
+
+class TestDings(Foo, Bar):
+    def test_dings(self):
+        pass
+EOF
+python -m pytest test_mro.py -q --collect-only -m "foo or bar" 2>&1 | tail -3; python -c "
+import sys; sys.path.insert(0,'.')
+import test_mro
+from _pytest.mark.structures import get_unpacked_marks
+print([m.name for m in get_unpacked_marks(test_mro.TestDings)])"
+cd /testbed && python -m pytest testing/test_mark.py testing/test_mark_expression.py -q 2>&1 | tail -3
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1 test collected in 0.01s
+['bar', 'foo']
+........................................................................ [ 83%]
+............x................                                            [100%]
+172 passed, 1 xfailed in 3.60s
+[0m
+[0m$ [0mcd /testbed && cat > changelog/8016.bugfix.rst <<'EOF'
+Fixed marks being lost when a class inherits from multiple base classes that each define marks; marks are now collected across the whole MRO.
+EOF
+rm -rf /tmp/mrotest; git status --short
+M src/_pytest/mark/structures.py
+?? changelog/8016.bugfix.rst
+[0m

@@ -1,0 +1,47 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..c45204c03 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -584,6 +584,16 @@ class Documenter:
+         else:
+             return 'docstring of %s' % fullname
+ 
++    def get_inherited_attr_doc(self, cls: Any, membername: str,
++                               attr_docs: Dict[Tuple[str, str], List[str]]) -> Optional[List[str]]:
++        """Return the attribute documentation of *membername* defined in a base of *cls*."""
++        for base in getattr(cls, '__mro__', [])[1:]:
++            key = (base.__qualname__, membername)
++            if key in attr_docs:
++                return attr_docs[key]
++
++        return None
++
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         """Add content from docstrings, attribute documentation and user."""
+@@ -606,6 +616,15 @@ class Documenter:
+ 
+                     for i, line in enumerate(self.process_doc(docstrings)):
+                         self.add_line(line, sourcename, i)
++                else:
++                    inherited_doc = self.get_inherited_attr_doc(self.parent, self.objpath[-1],
++                                                                attr_docs)
++                    if inherited_doc is not None:
++                        no_docstring = True
++                        docstrings = [list(inherited_doc)]
++
++                        for i, line in enumerate(self.process_doc(docstrings)):
++                            self.add_line(line, sourcename, i)
+ 
+         # add content from docstrings
+         if not no_docstring:
+@@ -746,7 +765,8 @@ class Documenter:
+                         keep = has_doc or self.options.undoc_members
+                 else:
+                     keep = False
+-            elif (namespace, membername) in attr_docs:
++            elif ((namespace, membername) in attr_docs or
++                  self.get_inherited_attr_doc(self.object, membername, attr_docs) is not None):
+                 if want_all and isprivate:
+                     if self.options.private_members is None:
+                         keep = False

@@ -1,0 +1,381 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "def _eval_power\|def tensor_product_simp\|class TensorProduct\|def _tensor_product_simp\|def __pow__\|_tensor_product_simp\|def _eval_expand_tensorproduct" sympy/physics/quantum/tensorproduct.py
+49:class TensorProduct(Expr):
+241:    def _eval_expand_tensorproduct(self, **hints):
+271:def tensor_product_simp_Mul(e):
+348:def tensor_product_simp(e, **hints):
+[0m
+[0m$ [0mcd /testbed && sed -n 230,380p sympy/physics/quantum/tensorproduct.py
+# rendered to render this properly.
+            s = s + '{' + printer._print(self.args[i], *args) + '}'
+            if isinstance(self.args[i], (Add, Mul)):
+                s = s + '\\right)'
+            if i != length - 1:
+                s = s + '\\otimes '
+        return s
+
+    def doit(self, **hints):
+        return TensorProduct(*[item.doit(**hints) for item in self.args])
+
+    def _eval_expand_tensorproduct(self, **hints):
+        """Distribute TensorProducts across addition."""
+        args = self.args
+        add_args = []
+        stop = False
+        for i in range(len(args)):
+            if isinstance(args[i], Add):
+                for aa in args[i].args:
+                    tp = TensorProduct(*args[:i] + (aa,) + args[i + 1:])
+                    if isinstance(tp, TensorProduct):
+                        tp = tp._eval_expand_tensorproduct()
+                    add_args.append(tp)
+                break
+
+        if add_args:
+            return Add(*add_args)
+        else:
+            return self
+
+    def _eval_trace(self, **kwargs):
+        indices = kwargs.get('indices', None)
+        exp = tensor_product_simp(self)
+
+        if indices is None or len(indices) == 0:
+            return Mul(*[Tr(arg).doit() for arg in exp.args])
+        else:
+            return Mul(*[Tr(value).doit() if idx in indices else value
+                         for idx, value in enumerate(exp.args)])
+
+
+def tensor_product_simp_Mul(e):
+    """Simplify a Mul with TensorProducts.
+
+    Current the main use of this is to simplify a ``Mul`` of ``TensorProduct``s
+    to a ``TensorProduct`` of ``Muls``. It currently only works for relatively
+    simple cases where the initial ``Mul`` only has scalars and raw
+    ``TensorProduct``s, not ``Add``, ``Pow``, ``Commutator``s of
+    ``TensorProduct``s.
+
+    Parameters
+    ==========
+
+    e : Expr
+        A ``Mul`` of ``TensorProduct``s to be simplified.
+
+    Returns
+    =======
+
+    e : Expr
+        A ``TensorProduct`` of ``Mul``s.
+
+    Examples
+    ========
+
+    This is an example of the type of simplification that this function
+    performs::
+
+        >>> from sympy.physics.quantum.tensorproduct import \
+                    tensor_product_simp_Mul, TensorProduct
+        >>> from sympy import Symbol
+        >>> A = Symbol('A',commutative=False)
+        >>> B = Symbol('B',commutative=False)
+        >>> C = Symbol('C',commutative=False)
+        >>> D = Symbol('D',commutative=False)
+        >>> e = TensorProduct(A,B)*TensorProduct(C,D)
+        >>> e
+        AxB*CxD
+        >>> tensor_product_simp_Mul(e)
+        (A*C)x(B*D)
+
+    """
+    # TODO: This won't work with Muls that have other composites of
+    # TensorProducts, like an Add, Pow, Commutator, etc.
+    # TODO: This only works for the equivalent of single Qbit gates.
+    if not isinstance(e, Mul):
+        return e
+    c_part, nc_part = e.args_cnc()
+    n_nc = len(nc_part)
+    if n_nc == 0 or n_nc == 1:
+        return e
+    elif e.has(TensorProduct):
+        current = nc_part[0]
+        if not isinstance(current, TensorProduct):
+            raise TypeError('TensorProduct expected, got: %r' % current)
+        n_terms = len(current.args)
+        new_args = list(current.args)
+        for next in nc_part[1:]:
+            # TODO: check the hilbert spaces of next and current here.
+            if isinstance(next, TensorProduct):
+                if n_terms != len(next.args):
+                    raise QuantumError(
+                        'TensorProducts of different lengths: %r and %r' %
+                        (current, next)
+                    )
+                for i in range(len(new_args)):
+                    new_args[i] = new_args[i] * next.args[i]
+            else:
+                # this won't quite work as we don't want next in the
+                # TensorProduct
+                for i in range(len(new_args)):
+                    new_args[i] = new_args[i] * next
+            current = next
+        return Mul(*c_part) * TensorProduct(*new_args)
+    else:
+        return e
+
+
+def tensor_product_simp(e, **hints):
+    """Try to simplify and combine TensorProducts.
+
+    In general this will try to pull expressions inside of ``TensorProducts``.
+    It currently only works for relatively simple cases where the products have
+    only scalars, raw ``TensorProducts``, not ``Add``, ``Pow``, ``Commutators``
+    of ``TensorProducts``. It is best to see what it does by showing examples.
+
+    Examples
+    ========
+
+    >>> from sympy.physics.quantum import tensor_product_simp
+    >>> from sympy.physics.quantum import TensorProduct
+    >>> from sympy import Symbol
+    >>> A = Symbol('A',commutative=False)
+    >>> B = Symbol('B',commutative=False)
+    >>> C = Symbol('C',commutative=False)
+    >>> D = Symbol('D',commutative=False)
+
+    First see what happens to products of tensor products:
+
+    >>> e = TensorProduct(A,B)*TensorProduct(C,D)
+    >>> e
+    AxB*CxD
+    >>> tensor_product_simp(e)
+    (A*C)x(B*D)
+
+    This is the core logic of this function, and it works inside, powers, sums,
+    commutators and anticommutators as well:
+
+    >>> tensor_product_simp(e**2)
+    (A*C)x(B*D)**2
+[0m
+[0m$ [0mcd /testbed && sed -n 380,430p sympy/physics/quantum/tensorproduct.py
+"""
+    if isinstance(e, Add):
+        return Add(*[tensor_product_simp(arg) for arg in e.args])
+    elif isinstance(e, Pow):
+        return tensor_product_simp(e.base) ** e.exp
+    elif isinstance(e, Mul):
+        return tensor_product_simp_Mul(e)
+    elif isinstance(e, Commutator):
+        return Commutator(*[tensor_product_simp(arg) for arg in e.args])
+    elif isinstance(e, AntiCommutator):
+        return AntiCommutator(*[tensor_product_simp(arg) for arg in e.args])
+    else:
+        return e
+[0m
+[0m$ [0mcd /testbed && python -c "
+from sympy import *
+from sympy.physics.quantum import TensorProduct as tp
+from sympy.physics.quantum import tensor_product_simp as tps
+from sympy.physics.paulialgebra import Pauli
+a = Symbol('a', commutative=False)
+t1 = tp(1,1)*tp(1,1); print(repr(t1), type(t1))
+print(tps(t1))
+print(tps(tp(1,1)*tp(1,a)).subs(a,1))
+print(tp(1,a)**2)
+print(tps(tp(1,Pauli(3))*tp(1,a)).subs(a, Pauli(3)))
+"
+/testbed/sympy/core/basic.py:3: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
+  from collections import Mapping, defaultdict
+/testbed/sympy/core/containers.py:271: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
+  class OrderedSet(collections.MutableSet):
+/testbed/sympy/solvers/diophantine.py:3188: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if feasible is 1:  # it's prime and k == 2
+/testbed/sympy/plotting/plot.py:28: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
+  from collections import Callable
+1x1**2 <class 'sympy.core.power.Pow'>
+1x1**2
+1x1
+1xa**2
+1x1
+[0m
+[0m$ [0mcd /testbed && sed -n 49,60p sympy/physics/quantum/tensorproduct.py; grep -n "_eval_power\|is_commutative\|def __new__" sympy/physics/quantum/tensorproduct.py
+class TensorProduct(Expr):
+    """The tensor product of two or more arguments.
+
+    For matrices, this uses ``matrix_tensor_product`` to compute the Kronecker
+    or tensor product matrix. For other objects a symbolic ``TensorProduct``
+    instance is returned. The tensor product is a non-commutative
+    multiplication that is used primarily with operators and states in quantum
+    mechanics.
+
+    Currently, the tensor product distinguishes between commutative and non-
+    commutative arguments.  Commutative arguments are assumed to be scalars and
+    are pulled out in front of the ``TensorProduct``. Non-commutative arguments
+117:    is_commutative = False
+119:    def __new__(cls, *args):
+[0m
+[0m← [0mEdit sympy/physics/quantum/tensorproduct.py
+Index: /testbed/sympy/physics/quantum/tensorproduct.py
+===================================================================
+--- /testbed/sympy/physics/quantum/tensorproduct.py
++++ /testbed/sympy/physics/quantum/tensorproduct.py
+@@ -381,9 +381,13 @@
+ """
+ if isinstance(e, Add):
+     return Add(*[tensor_product_simp(arg) for arg in e.args])
+ elif isinstance(e, Pow):
+-    return tensor_product_simp(e.base) ** e.exp
++    base = tensor_product_simp(e.base)
++    if isinstance(base, TensorProduct) and e.exp.is_Integer:
++        # (AxB)**n == (A**n)x(B**n)
++        return TensorProduct(*[arg ** e.exp for arg in base.args])
++    return base ** e.exp
+ elif isinstance(e, Mul):
+     return tensor_product_simp_Mul(e)
+ elif isinstance(e, Commutator):
+     return Commutator(*[tensor_product_simp(arg) for arg in e.args])
+
+[0m
+[0m$ [0mcd /testbed && python -W ignore -c "
+from sympy import *
+from sympy.physics.quantum import TensorProduct as tp
+from sympy.physics.quantum import tensor_product_simp as tps
+from sympy.physics.paulialgebra import Pauli
+a = Symbol('a', commutative=False)
+print(tps(tp(1,1)*tp(1,1)))
+print(tps(tp(1,1)*tp(1,a)).subs(a,1))
+print(tps(tp(1,Pauli(3))*tp(1,Pauli(3))))
+print(tps(tp(1,Pauli(3))*tp(1,a)).subs(a, Pauli(3)))
+print(tp(1,Pauli(3))**2)
+print(tps(tp(1,Pauli(3))**2))
+print(tps(tp(1,a)*tp(1,a)).subs(a,Pauli(3)))
+" 2>&1 | grep -v Warning
+from collections import Mapping, defaultdict
+  class OrderedSet(collections.MutableSet):
+  from collections import Callable
+1x1
+1x1
+1x1
+1x1
+1xsigma3**2
+1x1
+1x1
+[0m
+[0m$ [0mcd /testbed && python -W ignore -c "
+from sympy import *
+from sympy.physics.quantum import TensorProduct as tp
+from sympy.physics.paulialgebra import Pauli
+t1 = tp(1,1)*tp(1,1)
+print(t1.expand(tensorproduct=True))
+t2 = tp(1,Pauli(3))*tp(1,Pauli(3))
+print(t2.expand(tensorproduct=True))
+" 2>&1 | grep -v -i "warning\|from collections\|class Ordered"
+1x1**2
+1xsigma3**2
+[0m
+[0m$ [0mcd /testbed && grep -rn "tensorproduct" sympy/core/*.py sympy/physics/quantum/*.py | grep -v "^sympy/physics/quantum/tensorproduct.py:.*#" | head -30
+sympy/physics/quantum/__init__.py:50:from . import tensorproduct
+sympy/physics/quantum/__init__.py:51:from .tensorproduct import *
+sympy/physics/quantum/__init__.py:52:__all__.extend(tensorproduct.__all__)
+sympy/physics/quantum/density.py:12:from sympy.physics.quantum.tensorproduct import TensorProduct, tensor_product_simp
+sympy/physics/quantum/operator.py:482:        # TODO if operands are tensorproducts this may be will be handled
+sympy/physics/quantum/qapply.py:18:from sympy.physics.quantum.tensorproduct import TensorProduct
+sympy/physics/quantum/qapply.py:84:    e = e.expand(commutator=True, tensorproduct=True)
+sympy/physics/quantum/qapply.py:170:        result = TensorProduct(*[qapply(lhs.args[n]*rhs.args[n], **options) for n in range(len(lhs.args))]).expand(tensorproduct=True)
+sympy/physics/quantum/qft.py:23:from sympy.physics.quantum.tensorproduct import matrix_tensor_product
+sympy/physics/quantum/represent.py:17:from sympy.physics.quantum.tensorproduct import TensorProduct
+sympy/physics/quantum/spin.py:20:from sympy.physics.quantum.tensorproduct import TensorProduct
+sympy/physics/quantum/spin.py:1235:        >>> from sympy.physics.quantum.tensorproduct import TensorProduct
+sympy/physics/quantum/spin.py:1818:        >>> from sympy.physics.quantum.tensorproduct import TensorProduct
+sympy/physics/quantum/tensorproduct.py:114:        >>> tp.expand(tensorproduct=True)
+sympy/physics/quantum/tensorproduct.py:149:        return TensorProduct(*terms).expand(tensorproduct=True)
+sympy/physics/quantum/tensorproduct.py:241:    def _eval_expand_tensorproduct(self, **hints):
+sympy/physics/quantum/tensorproduct.py:251:                        tp = tp._eval_expand_tensorproduct()
+sympy/physics/quantum/tensorproduct.py:298:        >>> from sympy.physics.quantum.tensorproduct import \
+[0m
+[0m$ [0mcd /testbed && grep -n "def expand" -A 45 sympy/core/expr.py | grep -n "hint\|_eval" | head -30
+2:3054-            mul=True, log=True, multinomial=True, basic=True, **hints):
+4:3056-        Expand an expression using hints.
+12:3064-        hints.update(power_base=power_base, power_exp=power_exp, mul=mul,
+16:3068-        if hints.pop('frac', False):
+17:3069-            n, d = [a.expand(deep=deep, modulus=modulus, **hints)
+20:3072-        elif hints.pop('denom', False):
+22:3074-            return n/d.expand(deep=deep, modulus=modulus, **hints)
+23:3075-        elif hints.pop('numer', False):
+25:3077-            return n.expand(deep=deep, modulus=modulus, **hints)/d
+27:3079-        # Although the hints are sorted here, an earlier hint may get applied
+29:3081-        # the hints are applied.  e.g. expand(log(x*(y + z))) -> log(x*y +
+35:3087-        # Additionally, because hints are only applied once, the expression
+43:3095-        def _expand_hint_key(hint):
+45:3097-            if hint == 'mul':
+[0m
+[0m$ [0mcd /testbed && grep -n "def _eval_expand_\|def _expand_hint" -A 12 sympy/core/expr.py | head -50
+3018:    def _eval_expand_complex(self, **hints):
+3019-        real, imag = self.as_real_imag(**hints)
+3020-        return real + S.ImaginaryUnit*imag
+3021-
+3022-    @staticmethod
+3023:    def _expand_hint(expr, hint, deep=True, **hints):
+3024-        """
+3025-        Helper for ``expand()``.  Recursively calls ``expr._eval_expand_hint()``.
+3026-
+3027-        Returns ``(expr, hit)``, where expr is the (possibly) expanded
+3028-        ``expr`` and ``hit`` is ``True`` if ``expr`` was truly expanded and
+3029-        ``False`` otherwise.
+3030-        """
+3031-        hit = False
+3032-        # XXX: Hack to support non-Basic args
+3033-        #              |
+3034-        #              V
+3035-        if deep and getattr(expr, 'args', ()) and not expr.is_Atom:
+--
+3095:        def _expand_hint_key(hint):
+3096-            """Make multinomial come before mul"""
+3097-            if hint == 'mul':
+3098-                return 'mulz'
+3099-            return hint
+3100-
+3101-        for hint in sorted(hints.keys(), key=_expand_hint_key):
+3102-            use_hint = hints[hint]
+3103-            if use_hint:
+3104-                hint = '_eval_expand_' + hint
+3105-                expr, hit = Expr._expand_hint(expr, hint, deep=deep, **hints)
+3106-
+3107-        while True:
+[0m
+[0m$ [0mcd /testbed && python -W ignore -m pytest -q sympy/physics/quantum/tests/test_tensorproduct.py 2>&1 | tail -5
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed && python -W ignore -c "
+import sympy.physics.quantum.tests.test_tensorproduct as t
+import inspect
+for n,f in inspect.getmembers(t, inspect.isfunction):
+    if n.startswith('test_'): f(); print('ok', n)
+" 2>&1 | grep -v -i "warning\|from collections\|class Ordered"
+if not isinstance(other, collections.Iterable):
+ok test_eval_trace
+ok test_issue_5923
+ok test_tensor_product_abstract
+ok test_tensor_product_commutator
+ok test_tensor_product_dagger
+ok test_tensor_product_expand
+ok test_tensor_product_simp
+[0m
+[0m$ [0mcd /testbed && python -W ignore -c "
+from sympy import *
+from sympy.physics.quantum import TensorProduct as tp
+from sympy.physics.quantum import tensor_product_simp as tps
+from sympy.physics.paulialgebra import Pauli
+a = Symbol('a', commutative=False)
+print(tps(tp(1,1)*tp(1,1)))
+print(tps(tp(1,1)*tp(1,a)).subs(a,1))
+print(tps(tp(1,Pauli(3))*tp(1,Pauli(3))))
+print(tps(tp(1,Pauli(3))*tp(1,a)).subs(a, Pauli(3)))
+" 2>&1 | grep -v -i "warning\|from collections\|class Ordered\|isinstance"
+1x1
+1x1
+1x1
+1x1
+[0m

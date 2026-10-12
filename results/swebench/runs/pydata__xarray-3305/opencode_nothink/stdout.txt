@@ -1,0 +1,16 @@
+I'll look at the quantile implementation.
+Dataset.quantile handles attrs; the Variable one doesn't accept `keep_attrs`. Let me view the Variable implementation and the DataArray/Dataset call sites.
+The Dataset path already handles attrs at the dataset level, but DataArray goes through `_to_temp_dataset`, where the variable attrs are lost. The cleanest fix is to have `Variable.quantile` accept `keep_attrs` and preserve the variable's attrs, matching how `Variable.reduce` works.
+
+Let me make that edit.
+Now I'll update the Dataset call site to pass `keep_attrs` through, and check how the DataArray path reaches it.
+`keep_attrs` is resolved to a bool only after this loop in Dataset.quantile (line ~4780), so passing it here could forward `None`, which `Variable.quantile` already handles by falling back to the global option. Still, to be consistent, I'll move the resolution before the loop.
+Now I'll verify with the MCVE, plus a Dataset case and the existing quantile tests.
+`DataArray.quantile(..., keep_attrs=True)` now preserves the attributes, and the existing quantile tests pass.
+
+The fix is in `xarray/core/variable.py` and `xarray/core/dataset.py`:
+
+- **`Variable.quantile`** now accepts a `keep_attrs` argument. When it's true, the result is built with the variable's attrs; otherwise it falls back to the global `keep_attrs` option, defaulting to False. This matches how `Variable.reduce` behaves.
+- **`Dataset.quantile`** resolves `keep_attrs` before the per-variable loop and passes it down to each `Variable.quantile` call, so the variables keep their attributes too.
+
+The MCVE now returns `OrderedDict([('units', 'K')])`. Without `keep_attrs`, the result is still empty, and the Dataset-level attrs and DataArray attrs both come through correctly. I didn't add any tests, per your instructions.

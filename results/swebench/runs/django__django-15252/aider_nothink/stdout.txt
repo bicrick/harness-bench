@@ -1,0 +1,160 @@
+Detected dumb terminal, disabling fancy input and pretty output.
+
+Update git name with: git config user.name "Your Name"
+Update git email with: git config user.email "you@example.com"
+Aider v0.86.2
+Model: anthropic/claude-haiku-5-5 with diff edit format, prompt cache
+Git repo: .git with 6,591 files
+Warning: For large repos, consider using --subtree-only and .aiderignore
+See: https://aider.chat/docs/faq.html#can-i-use-aider-in-a-large-mono-repo
+Repo-map: using 4096 tokens, files refresh
+
+
+https://aider.chat/HISTORY.html#release-notes
+
+
+django/db/migrations/executor.py
+
+django/db/migrations/recorder.py
+
+django/test/runner.py
+Initial repo scan can be slow in larger repos, but only happens once.
+The recorder should check `router.allow_migrate` before touching the 
+`django_migrations` table on a connection. I'll add a `router` check in 
+`MigrationRecorder`: reads return empty, and writes/schema creation are skipped 
+when the router disallows migrating the migrations app on that connection. I'll 
+also guard the executor's `ensure_schema` path implicitly through the recorder.
+
+django/db/migrations/recorder.py
+```
+<<<<<<< SEARCH
+from django.apps.registry import Apps
+from django.db import DatabaseError, models
+=======
+from django.apps.registry import Apps
+from django.db import DatabaseError, models, router
+>>>>>>> REPLACE
+```
+
+django/db/migrations/recorder.py
+```
+<<<<<<< SEARCH
+    def has_table(self):
+        """Return True if the django_migrations table exists."""
+        with self.connection.cursor() as cursor:
+            tables = self.connection.introspection.table_names(cursor)
+        return self.Migration._meta.db_table in tables
+
+    def ensure_schema(self):
+        """Ensure the table exists and has the correct schema."""
+        # If the table's there, that's fine - we've never changed its schema
+        # in the codebase.
+        if self.has_table():
+            return
+=======
+    def allow_migrate(self):
+        """
+        Return True if the router allows the django_migrations table to be
+        created and written on this connection.
+        """
+        return router.allow_migrate(
+            self.connection.alias, self.Migration._meta.app_label,
+            model_name=self.Migration._meta.model_name,
+        )
+
+    def has_table(self):
+        """Return True if the django_migrations table exists."""
+        with self.connection.cursor() as cursor:
+            tables = self.connection.introspection.table_names(cursor)
+        return self.Migration._meta.db_table in tables
+
+    def ensure_schema(self):
+        """Ensure the table exists and has the correct schema."""
+        # The router may forbid migrating the migrations app on this
+        # connection; in that case don't create the table.
+        if not self.allow_migrate():
+            return
+        # If the table's there, that's fine - we've never changed its schema
+        # in the codebase.
+        if self.has_table():
+            return
+>>>>>>> REPLACE
+```
+
+django/db/migrations/recorder.py
+```
+<<<<<<< SEARCH
+        if self.has_table():
+            return {(migration.app, migration.name): migration for migration in 
+self.migration_qs}
+=======
+        if self.has_table():
+            return {(migration.app, migration.name): migration for migration in 
+self.migration_qs}
+>>>>>>> REPLACE
+```
+
+Since that last block was a no-op, here is the actual change to 
+`applied_migrations`, which must also respect the router:
+
+django/db/migrations/recorder.py
+```
+<<<<<<< SEARCH
+        if self.has_table():
+            return {(migration.app, migration.name): migration for migration in 
+self.migration_qs}
+        else:
+=======
+        if self.allow_migrate() and self.has_table():
+            return {(migration.app, migration.name): migration for migration in 
+self.migration_qs}
+        else:
+>>>>>>> REPLACE
+```
+
+Finally, `record_applied`, `record_unapplied`, and `flush` operate on the table 
+via `migration_qs`; they should be no-ops when the router forbids migrating on 
+this connection.
+
+django/db/migrations/recorder.py
+```
+<<<<<<< SEARCH
+    def record_applied(self, app, name):
+        """Record that a migration was applied."""
+        self.ensure_schema()
+        self.migration_qs.create(app=app, name=name)
+
+    def record_unapplied(self, app, name):
+        """Record that a migration was unapplied."""
+        self.ensure_schema()
+        self.migration_qs.filter(app=app, name=name).delete()
+
+    def flush(self):
+        """Delete all migration records. Useful for testing migrations."""
+        self.migration_qs.all().delete()
+=======
+    def record_applied(self, app, name):
+        """Record that a migration was applied."""
+        if not self.allow_migrate():
+            return
+        self.ensure_schema()
+        self.migration_qs.create(app=app, name=name)
+
+    def record_unapplied(self, app, name):
+        """Record that a migration was unapplied."""
+        if not self.allow_migrate():
+            return
+        self.ensure_schema()
+        self.migration_qs.filter(app=app, name=name).delete()
+
+    def flush(self):
+        """Delete all migration records. Useful for testing migrations."""
+        if not self.allow_migrate():
+            return
+        self.migration_qs.all().delete()
+>>>>>>> REPLACE
+```
+
+Tokens: 58k sent, 27k cache write, 2.4k cache hit, 1.5k received.
+Cost: $0.0043 message, $0.0043 session.
+Applied edit to django/db/migrations/recorder.py

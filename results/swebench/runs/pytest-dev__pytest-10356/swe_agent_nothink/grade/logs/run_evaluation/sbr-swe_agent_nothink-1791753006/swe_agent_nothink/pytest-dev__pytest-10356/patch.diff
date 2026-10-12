@@ -1,0 +1,42 @@
+diff --git a/changelog/8859.bugfix.rst b/changelog/8859.bugfix.rst
+new file mode 100644
+index 000000000..7cfb447a0
+--- /dev/null
++++ b/changelog/8859.bugfix.rst
+@@ -0,0 +1 @@
++Fixed a bug where markers from multiple base classes were lost when a class inherits from several classes that define marks; marks are now collected across the whole MRO.
+diff --git a/src/_pytest/mark/structures.py b/src/_pytest/mark/structures.py
+index 800a25c92..7559bcf63 100644
+--- a/src/_pytest/mark/structures.py
++++ b/src/_pytest/mark/structures.py
+@@ -356,10 +356,26 @@ class MarkDecorator:
+ 
+ 
+ def get_unpacked_marks(obj: object) -> Iterable[Mark]:
+-    """Obtain the unpacked marks that are stored on an object."""
+-    mark_list = getattr(obj, "pytestmark", [])
+-    if not isinstance(mark_list, list):
+-        mark_list = [mark_list]
++    """Obtain the unpacked marks that are stored on an object.
++
++    For classes, marks are collected from every class in the MRO, so that
++    markers from multiple base classes are not lost.
++    """
++    if inspect.isclass(obj):
++        mark_list: List[object] = []
++        # Walk the MRO from the most basic class to the most derived one, so
++        # that the marks of the derived class come last (as before).
++        for klass in reversed(obj.__mro__):
++            # Read only each class's own attribute so inherited marks are not
++            # counted twice; every class in the MRO contributes its own marks.
++            own = klass.__dict__.get("pytestmark", [])
++            if not isinstance(own, list):
++                own = [own]
++            mark_list.extend(own)
++    else:
++        mark_list = getattr(obj, "pytestmark", [])
++        if not isinstance(mark_list, list):
++            mark_list = [mark_list]
+     return normalize_mark_list(mark_list)
+ 
+ 

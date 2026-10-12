@@ -1,0 +1,37 @@
+diff --git a/django/forms/models.py b/django/forms/models.py
+index 192d9fad94..625c2bb0dd 100644
+--- a/django/forms/models.py
++++ b/django/forms/models.py
+@@ -272,6 +272,14 @@ class ModelFormMetaclass(DeclarativeFieldsMetaclass):
+ 
+         opts = new_class._meta = ModelFormOptions(getattr(new_class, "Meta", None))
+ 
++        # Prefer a formfield_callback declared on the Meta class, then the
++        # one passed in as a class attribute, then the inherited one.
++        meta_formfield_callback = getattr(
++            getattr(new_class, "Meta", None), "formfield_callback", None
++        )
++        if meta_formfield_callback is not None:
++            formfield_callback = meta_formfield_callback
++
+         # We check if a string was passed to `fields` or `exclude`,
+         # which is likely to be a mistake where the user typed ('foo') instead
+         # of ('foo',)
+@@ -609,6 +617,8 @@ def modelform_factory(
+ 
+     # Build up a list of attributes that the Meta object will have.
+     attrs = {"model": model}
++    if formfield_callback is not None:
++        attrs["formfield_callback"] = staticmethod(formfield_callback)
+     if fields is not None:
+         attrs["fields"] = fields
+     if exclude is not None:
+@@ -630,8 +640,6 @@ def modelform_factory(
+     # creating needs to inherit from the parent's inner meta.
+     bases = (form.Meta,) if hasattr(form, "Meta") else ()
+     Meta = type("Meta", bases, attrs)
+-    if formfield_callback:
+-        Meta.formfield_callback = staticmethod(formfield_callback)
+     # Give this new form class a reasonable name.
+     class_name = model.__name__ + "Form"
+ 

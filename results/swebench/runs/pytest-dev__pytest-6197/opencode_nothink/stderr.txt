@@ -1,0 +1,831 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && git log --oneline -3 && grep -n "__init__" src/_pytest/main.py | head -50
+4eecc5156 SWE-bench
+e856638ba Preparing release version 5.2.3 (#6190)
+dd9a27cf5 Adjust CHANGELOG
+330:    def __init__(self, fspath, pm, remove_mods):
+369:    def __init__(self, config):
+370:        nodes.FSCollector.__init__(
+511:                    pkginit = parent.join("__init__.py")
+534:                    pkginit = dirpath.join("__init__.py")
+562:            # If __init__.py was the only file requested, then the matched node will be
+563:            # the corresponding Package, and the first yielded item will be the __init__
+566:            if argpath.basename == "__init__.py":
+570:                    # The package collects nothing with only an __init__.py
+642:                    "file or package not found: " + arg + " (missing __init__.py?)"
+[0m
+[0m$ [0mcd /testbed && sed -n 440,520p src/_pytest/main.py
+self.config.pluginmanager.check_pending()
+            hook.pytest_collection_modifyitems(
+                session=self, config=self.config, items=items
+            )
+        finally:
+            hook.pytest_collection_finish(session=self)
+        self.testscollected = len(items)
+        return items
+
+    def _perform_collect(self, args, genitems):
+        if args is None:
+            args = self.config.args
+        self.trace("perform_collect", self, args)
+        self.trace.root.indent += 1
+        self._notfound = []
+        initialpaths = []
+        self._initialparts = []
+        self.items = items = []
+        for arg in args:
+            parts = self._parsearg(arg)
+            self._initialparts.append(parts)
+            initialpaths.append(parts[0])
+        self._initialpaths = frozenset(initialpaths)
+        rep = collect_one_node(self)
+        self.ihook.pytest_collectreport(report=rep)
+        self.trace.root.indent -= 1
+        if self._notfound:
+            errors = []
+            for arg, exc in self._notfound:
+                line = "(no name {!r} in any of {!r})".format(arg, exc.args[0])
+                errors.append("not found: {}\n{}".format(arg, line))
+                # XXX: test this
+            raise UsageError(*errors)
+        if not genitems:
+            return rep.result
+        else:
+            if rep.passed:
+                for node in rep.result:
+                    self.items.extend(self.genitems(node))
+            return items
+
+    def collect(self):
+        for initialpart in self._initialparts:
+            arg = "::".join(map(str, initialpart))
+            self.trace("processing argument", arg)
+            self.trace.root.indent += 1
+            try:
+                yield from self._collect(arg)
+            except NoMatch:
+                # we are inside a make_report hook so
+                # we cannot directly pass through the exception
+                self._notfound.append((arg, sys.exc_info()[1]))
+
+            self.trace.root.indent -= 1
+
+    def _collect(self, arg):
+        from _pytest.python import Package
+
+        names = self._parsearg(arg)
+        argpath = names.pop(0)
+
+        # Start with a Session root, and delve to argpath item (dir or file)
+        # and stack all Packages found on the way.
+        # No point in finding packages when collecting doctests
+        if not self.config.getoption("doctestmodules", False):
+            pm = self.config.pluginmanager
+            for parent in reversed(argpath.parts()):
+                if pm._confcutdir and pm._confcutdir.relto(parent):
+                    break
+
+                if parent.isdir():
+                    pkginit = parent.join("__init__.py")
+                    if pkginit.isfile():
+                        if pkginit not in self._node_cache:
+                            col = self._collectfile(pkginit, handle_dupes=False)
+                            if col:
+                                if isinstance(col[0], Package):
+                                    self._pkg_roots[parent] = col[0]
+                                # always store a list in the cache, matchnodes expects it
+                                self._node_cache[col[0].fspath] = [col[0]]
+[0m
+[0m$ [0mcd /testbed && sed -n 370,420p src/_pytest/main.py && sed -n 520,560p src/_pytest/main.py && grep -n "def _collectfile" -A25 src/_pytest/main.py && grep -n "def pytest_collect_file" -A12 src/_pytest/python.py
+nodes.FSCollector.__init__(
+            self, config.rootdir, parent=None, config=config, session=self, nodeid=""
+        )
+        self.testsfailed = 0
+        self.testscollected = 0
+        self.shouldstop = False
+        self.shouldfail = False
+        self.trace = config.trace.root.get("collection")
+        self._norecursepatterns = config.getini("norecursedirs")
+        self.startdir = config.invocation_dir
+        self._initialpaths = frozenset()
+        # Keep track of any collected nodes in here, so we don't duplicate fixtures
+        self._node_cache = {}
+        self._bestrelpathcache = _bestrelpath_cache(config.rootdir)
+        # Dirnames of pkgs with dunder-init files.
+        self._pkg_roots = {}
+
+        self.config.pluginmanager.register(self, name="session")
+
+    def __repr__(self):
+        return "<%s %s exitstatus=%r testsfailed=%d testscollected=%d>" % (
+            self.__class__.__name__,
+            self.name,
+            getattr(self, "exitstatus", "<UNSET>"),
+            self.testsfailed,
+            self.testscollected,
+        )
+
+    def _node_location_to_relpath(self, node_path):
+        # bestrelpath is a quite slow function
+        return self._bestrelpathcache[node_path]
+
+    @hookimpl(tryfirst=True)
+    def pytest_collectstart(self):
+        if self.shouldfail:
+            raise self.Failed(self.shouldfail)
+        if self.shouldstop:
+            raise self.Interrupted(self.shouldstop)
+
+    @hookimpl(tryfirst=True)
+    def pytest_runtest_logreport(self, report):
+        if report.failed and not hasattr(report, "wasxfail"):
+            self.testsfailed += 1
+            maxfail = self.config.getvalue("maxfail")
+            if maxfail and self.testsfailed >= maxfail:
+                self.shouldfail = "stopping after %d failures" % (self.testsfailed)
+
+    pytest_collectreport = pytest_runtest_logreport
+
+    def isinitpath(self, path):
+        return path in self._initialpaths
+
+        # If it's a directory argument, recurse and look for any Subpackages.
+        # Let the Package collector deal with subnodes, don't collect here.
+        if argpath.check(dir=1):
+            assert not names, "invalid arg {!r}".format(arg)
+
+            seen_dirs = set()
+            for path in argpath.visit(
+                fil=self._visit_filter, rec=self._recurse, bf=True, sort=True
+            ):
+                dirpath = path.dirpath()
+                if dirpath not in seen_dirs:
+                    # Collect packages first.
+                    seen_dirs.add(dirpath)
+                    pkginit = dirpath.join("__init__.py")
+                    if pkginit.exists():
+                        for x in self._collectfile(pkginit):
+                            yield x
+                            if isinstance(x, Package):
+                                self._pkg_roots[dirpath] = x
+                if dirpath in self._pkg_roots:
+                    # Do not collect packages here.
+                    continue
+
+                for x in self._collectfile(path):
+                    key = (type(x), x.fspath)
+                    if key in self._node_cache:
+                        yield self._node_cache[key]
+                    else:
+                        self._node_cache[key] = x
+                        yield x
+        else:
+            assert argpath.check(file=1)
+
+            if argpath in self._node_cache:
+                col = self._node_cache[argpath]
+            else:
+                collect_root = self._pkg_roots.get(argpath.dirname, self)
+                col = collect_root._collectfile(argpath, handle_dupes=False)
+                if col:
+                    self._node_cache[argpath] = col
+577:    def _collectfile(self, path, handle_dupes=True):
+578-        assert (
+579-            path.isfile()
+580-        ), "{!r} is not a file (isdir={!r}, exists={!r}, islink={!r})".format(
+581-            path, path.isdir(), path.exists(), path.islink()
+582-        )
+583-        ihook = self.gethookproxy(path)
+584-        if not self.isinitpath(path):
+585-            if ihook.pytest_ignore_collect(path=path, config=self.config):
+586-                return ()
+587-
+588-        if handle_dupes:
+589-            keepduplicates = self.config.getoption("keepduplicates")
+590-            if not keepduplicates:
+591-                duplicate_paths = self.config.pluginmanager._duplicatepaths
+592-                if path in duplicate_paths:
+593-                    return ()
+594-                else:
+595-                    duplicate_paths.add(path)
+596-
+597-        return ihook.pytest_collect_file(path=path, parent=self)
+598-
+599-    def _recurse(self, dirpath):
+600-        if dirpath.basename == "__pycache__":
+601-            return False
+602-        ihook = self.gethookproxy(dirpath.dirpath())
+176:def pytest_collect_file(path, parent):
+177-    ext = path.ext
+178-    if ext == ".py":
+179-        if not parent.session.isinitpath(path):
+180-            if not path_matches_patterns(
+181-                path, parent.config.getini("python_files") + ["__init__.py"]
+182-            ):
+183-                return
+184-        ihook = parent.session.gethookproxy(path)
+185-        return ihook.pytest_pycollect_makemodule(path=path, parent=parent)
+186-
+187-
+188-def path_matches_patterns(path, patterns):
+[0m
+[0m$ [0mcd /testbed && git show e856638ba --stat | head; git log --oneline -8 -- src/_pytest/main.py; git log -1 -p --format=%H -S"pkginit.exists()" -- src/_pytest/main.py | head -80
+commit e856638ba086fcf5bebf1bebea32d5cf78de87b4
+Merge: d4e4ab5b3 dd9a27cf5
+Author: Bruno Oliveira <nicoddemus@gmail.com>
+Date:   Thu Nov 14 18:17:28 2019 -0300
+
+    Preparing release version 5.2.3 (#6190)
+    
+    Preparing release version 5.2.3
+
+ CHANGELOG.rst                     | 16 ++++++++++++++++
+abc890079 typos
+0383d4364 Add missing version added/changed markers to docs
+aa06e6c8f Merge master into features
+198fcd8a6 Fix RuntimeError when trying to collect package with "__init__.py" only
+7e58defc1 Remove 'pytest.config'
+3e0e31a36 Don't crash with --pyargs and a filename that looks like a module
+4cd08f9b5 Switch from deprecated imp to importlib
+0627d92df fix typos in the resolution of #5125
+[0m
+[0m$ [0mcd /testbed && git show 198fcd8a6 -- src/_pytest/main.py src/_pytest/python.py | head -150
+commit 198fcd8a6f442e67b309e4ee2015944d93c6497e
+Author: Daniel Hahler <git@thequod.de>
+Date:   Mon Aug 5 17:51:51 2019 +0200
+
+    Fix RuntimeError when trying to collect package with "__init__.py" only
+    
+    Fixes https://github.com/pytest-dev/pytest/issues/4344.
+
+diff --git a/src/_pytest/main.py b/src/_pytest/main.py
+index f28bc68db..8d3f9f234 100644
+--- a/src/_pytest/main.py
++++ b/src/_pytest/main.py
+@@ -584,7 +584,13 @@ class Session(nodes.FSCollector):
+             # Module itself, so just use that. If this special case isn't taken, then all
+             # the files in the package will be yielded.
+             if argpath.basename == "__init__.py":
+-                yield next(m[0].collect())
++                try:
++                    yield next(m[0].collect())
++                except StopIteration:
++                    # The package collects nothing with only an __init__.py
++                    # file in it, which gets ignored by the default
++                    # "python_files" option.
++                    pass
+                 return
+             yield from m
+[0m
+[0m$ [0mcd /testbed && git diff 5.2.2 HEAD -- src/_pytest/main.py 2>/dev/null | head -200 || true; git tag | tail -5
+diff --git a/src/_pytest/main.py b/src/_pytest/main.py
+index ad65ed299..3c205027d 100644
+--- a/src/_pytest/main.py
++++ b/src/_pytest/main.py
+@@ -429,7 +429,7 @@ class Session(nodes.FSCollector):
+             # one or more conftests are not in use at this fspath
+             proxy = FSHookProxy(fspath, pm, remove_mods)
+         else:
+-            # all plugis are active for this fspath
++            # all plugins are active for this fspath
+             proxy = self.config.hook
+         return proxy
+ 
+5.1.3
+5.2.0
+5.2.1
+5.2.2
+5.2.3
+[0m
+[0m$ [0mcd /testbed && git diff 5.2.2 5.2.3 -- src/_pytest/main.py src/_pytest/python.py
+diff --git a/src/_pytest/main.py b/src/_pytest/main.py
+index ad65ed299..3c205027d 100644
+--- a/src/_pytest/main.py
++++ b/src/_pytest/main.py
+@@ -429,7 +429,7 @@ class Session(nodes.FSCollector):
+             # one or more conftests are not in use at this fspath
+             proxy = FSHookProxy(fspath, pm, remove_mods)
+         else:
+-            # all plugis are active for this fspath
++            # all plugins are active for this fspath
+             proxy = self.config.hook
+         return proxy
+ 
+diff --git a/src/_pytest/python.py b/src/_pytest/python.py
+index 913a93bc0..306e5f217 100644
+--- a/src/_pytest/python.py
++++ b/src/_pytest/python.py
+@@ -210,8 +210,8 @@ def pytest_pycollect_makeitem(collector, name, obj):
+         # mock seems to store unbound methods (issue473), normalize it
+         obj = getattr(obj, "__func__", obj)
+         # We need to try and unwrap the function if it's a functools.partial
+-        # or a funtools.wrapped.
+-        # We musn't if it's been wrapped with mock.patch (python 2 only)
++        # or a functools.wrapped.
++        # We mustn't if it's been wrapped with mock.patch (python 2 only)
+         if not (inspect.isfunction(obj) or inspect.isfunction(get_real_func(obj))):
+             filename, lineno = getfslineno(obj)
+             warnings.warn_explicit(
+@@ -251,18 +251,21 @@ class PyobjMixin(PyobjContext):
+     @property
+     def obj(self):
+         """Underlying Python object."""
++        self._mount_obj_if_needed()
++        return self._obj
++
++    @obj.setter
++    def obj(self, value):
++        self._obj = value
++
++    def _mount_obj_if_needed(self):
+         obj = getattr(self, "_obj", None)
+         if obj is None:
+             self._obj = obj = self._getobj()
+             # XXX evil hack
+             # used to avoid Instance collector marker duplication
+             if self._ALLOW_MARKERS:
+-                self.own_markers.extend(get_unpacked_marks(self.obj))
+-        return obj
+-
+-    @obj.setter
+-    def obj(self, value):
+-        self._obj = value
++                self.own_markers.extend(get_unpacked_marks(obj))
+ 
+     def _getobj(self):
+         """Gets the underlying Python object. May be overwritten by subclasses."""
+@@ -429,6 +432,14 @@ class PyCollector(PyobjMixin, nodes.Collector):
+ class Module(nodes.File, PyCollector):
+     """ Collector for test classes and functions. """
+ 
++    def __init__(self, fspath, parent=None, config=None, session=None, nodeid=None):
++        if fspath.basename == "__init__.py":
++            self._ALLOW_MARKERS = False
++
++        nodes.FSCollector.__init__(
++            self, fspath, parent=parent, config=config, session=session, nodeid=nodeid
++        )
++
+     def _getobj(self):
+         return self._importtestmodule()
+ 
+@@ -595,7 +606,7 @@ class Package(Module):
+             # one or more conftests are not in use at this fspath
+             proxy = FSHookProxy(fspath, pm, remove_mods)
+         else:
+-            # all plugis are active for this fspath
++            # all plugins are active for this fspath
+             proxy = self.config.hook
+         return proxy
+ 
+@@ -628,6 +639,7 @@ class Package(Module):
+         return path in self.session._initialpaths
+ 
+     def collect(self):
++        self._mount_obj_if_needed()
+         this_path = self.fspath.dirpath()
+         init_module = this_path.join("__init__.py")
+         if init_module.check(file=1) and path_matches_patterns(
+@@ -965,6 +977,12 @@ class Metafunc(fixtures.FuncargnamesCompatAttr):
+         )
+         del argvalues
+ 
++        if "request" in argnames:
++            fail(
++                "'request' is a reserved name and cannot be used in @pytest.mark.parametrize",
++                pytrace=False,
++            )
++
+         if scope is None:
+             scope = _find_parametrized_scope(argnames, self._arg2fixturedefs, indirect)
+[0m
+[0m$ [0mcd /testbed && grep -n "class Package" -A60 src/_pytest/python.py; grep -n "_mount_obj_if_needed\|_ALLOW_MARKERS" src/_pytest/python.py
+559:class Package(Module):
+560-    def __init__(self, fspath, parent=None, config=None, session=None, nodeid=None):
+561-        session = parent.session
+562-        nodes.FSCollector.__init__(
+563-            self, fspath, parent=parent, config=config, session=session, nodeid=nodeid
+564-        )
+565-        self.name = fspath.dirname
+566-        self.trace = session.trace
+567-        self._norecursepatterns = session._norecursepatterns
+568-        self.fspath = fspath
+569-
+570-    def setup(self):
+571-        # not using fixtures to call setup_module here because autouse fixtures
+572-        # from packages are not called automatically (#4085)
+573-        setup_module = _get_first_non_fixture_func(
+574-            self.obj, ("setUpModule", "setup_module")
+575-        )
+576-        if setup_module is not None:
+577-            _call_with_optional_argument(setup_module, self.obj)
+578-
+579-        teardown_module = _get_first_non_fixture_func(
+580-            self.obj, ("tearDownModule", "teardown_module")
+581-        )
+582-        if teardown_module is not None:
+583-            func = partial(_call_with_optional_argument, teardown_module, self.obj)
+584-            self.addfinalizer(func)
+585-
+586-    def _recurse(self, dirpath):
+587-        if dirpath.basename == "__pycache__":
+588-            return False
+589-        ihook = self.gethookproxy(dirpath.dirpath())
+590-        if ihook.pytest_ignore_collect(path=dirpath, config=self.config):
+591-            return
+592-        for pat in self._norecursepatterns:
+593-            if dirpath.check(fnmatch=pat):
+594-                return False
+595-        ihook = self.gethookproxy(dirpath)
+596-        ihook.pytest_collect_directory(path=dirpath, parent=self)
+597-        return True
+598-
+599-    def gethookproxy(self, fspath):
+600-        # check if we have the common case of running
+601-        # hooks with all conftest.py filesall conftest.py
+602-        pm = self.config.pluginmanager
+603-        my_conftestmodules = pm._getconftestmodules(fspath)
+604-        remove_mods = pm._conftest_plugins.difference(my_conftestmodules)
+605-        if remove_mods:
+606-            # one or more conftests are not in use at this fspath
+607-            proxy = FSHookProxy(fspath, pm, remove_mods)
+608-        else:
+609-            # all plugins are active for this fspath
+610-            proxy = self.config.hook
+611-        return proxy
+612-
+613-    def _collectfile(self, path, handle_dupes=True):
+614-        assert (
+615-            path.isfile()
+616-        ), "{!r} is not a file (isdir={!r}, exists={!r}, islink={!r})".format(
+617-            path, path.isdir(), path.exists(), path.islink()
+618-        )
+619-        ihook = self.gethookproxy(path)
+249:    _ALLOW_MARKERS = True
+254:        self._mount_obj_if_needed()
+261:    def _mount_obj_if_needed(self):
+267:            if self._ALLOW_MARKERS:
+437:            self._ALLOW_MARKERS = False
+642:        self._mount_obj_if_needed()
+777:    _ALLOW_MARKERS = False  # hack, destroy later
+1358:    _ALLOW_MARKERS = False
+[0m
+[0m$ [0mcd /tmp && rm -rf repro && mkdir repro && cd repro && mkdir foobar && echo 'assert False' > foobar/__init__.py && echo 'def test_x(): pass' > test_foo.py && python -m pytest -p no:cacheprovider 2>&1 | tail -15
+============================= test session starts ==============================
+platform linux -- Python 3.9.20, pytest-5.2.4.dev6+ge856638ba, py-1.11.0, pluggy-0.13.1
+rootdir: /tmp/repro
+collected 1 item / 1 errors
+
+==================================== ERRORS ====================================
+_____________________ ERROR collecting foobar/__init__.py ______________________
+foobar/__init__.py:1: in <module>
+    assert False
+E   AssertionError
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 errors during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.07s ===============================
+[0m
+[0m$ [0mcd /testbed && sed -n 174,186p src/_pytest/python.py; git show 5.2.2:src/_pytest/python.py | sed -n 174,186p; git show 5.2.2:src/_pytest/main.py | grep -n "pkginit" -B3 -A8
+def pytest_collect_file(path, parent):
+    ext = path.ext
+    if ext == ".py":
+        if not parent.session.isinitpath(path):
+            if not path_matches_patterns(
+                path, parent.config.getini("python_files") + ["__init__.py"]
+            ):
+                return
+        ihook = parent.session.gethookproxy(path)
+        return ihook.pytest_pycollect_makemodule(path=path, parent=parent)
+
+
+
+def pytest_collect_file(path, parent):
+    ext = path.ext
+    if ext == ".py":
+        if not parent.session.isinitpath(path):
+            if not path_matches_patterns(
+                path, parent.config.getini("python_files") + ["__init__.py"]
+            ):
+                return
+        ihook = parent.session.gethookproxy(path)
+        return ihook.pytest_pycollect_makemodule(path=path, parent=parent)
+
+508-                    break
+509-
+510-                if parent.isdir():
+511:                    pkginit = parent.join("__init__.py")
+512:                    if pkginit.isfile():
+513:                        if pkginit not in self._node_cache:
+514:                            col = self._collectfile(pkginit, handle_dupes=False)
+515-                            if col:
+516-                                if isinstance(col[0], Package):
+517-                                    self._pkg_roots[parent] = col[0]
+518-                                # always store a list in the cache, matchnodes expects it
+519-                                self._node_cache[col[0].fspath] = [col[0]]
+520-
+521-        # If it's a directory argument, recurse and look for any Subpackages.
+522-        # Let the Package collector deal with subnodes, don't collect here.
+--
+531-                if dirpath not in seen_dirs:
+532-                    # Collect packages first.
+533-                    seen_dirs.add(dirpath)
+534:                    pkginit = dirpath.join("__init__.py")
+535:                    if pkginit.exists():
+536:                        for x in self._collectfile(pkginit):
+537-                            yield x
+538-                            if isinstance(x, Package):
+539-                                self._pkg_roots[dirpath] = x
+540-                if dirpath in self._pkg_roots:
+541-                    # Do not collect packages here.
+542-                    continue
+543-
+544-                for x in self._collectfile(path):
+[0m
+[0m$ [0mcd /testbed && git diff 5.2.2 HEAD -- src/_pytest/ | grep -v "^ " | head -300
+diff --git a/src/_pytest/_code/code.py b/src/_pytest/_code/code.py
+index 534bfe2a8..19d2a0e70 100644
+--- a/src/_pytest/_code/code.py
++++ b/src/_pytest/_code/code.py
+@@ -4,6 +4,7 @@ import sys
++from io import StringIO
+@@ -136,7 +137,7 @@ class Frame:
+-            'vars' are optiona; additional local variables
++            'vars' are optional; additional local variables
+@@ -206,7 +207,7 @@ class TracebackEntry:
+-        """ locals of underlaying frame """
++        """ locals of underlying frame """
+@@ -273,7 +274,7 @@ class TracebackEntry:
+-        """ co_name of underlaying code """
++        """ co_name of underlying code """
+@@ -301,7 +302,7 @@ class Traceback(list):
+-            by provding any combination of path, lineno and firstlineno, the
++            by providing any combination of path, lineno and firstlineno, the
+@@ -865,7 +866,7 @@ class TerminalRepr:
+-        io = py.io.TextIO()
++        io = StringIO()
+@@ -1002,7 +1003,7 @@ class ReprFileLocation(TerminalRepr):
+-        # using an output format that most editors unterstand
++        # using an output format that most editors understand
+diff --git a/src/_pytest/assertion/util.py b/src/_pytest/assertion/util.py
+index c2a4e446f..d1a11d0bf 100644
+--- a/src/_pytest/assertion/util.py
++++ b/src/_pytest/assertion/util.py
+@@ -31,7 +31,6 @@ def format_explanation(explanation):
+-    explanation = explanation
+diff --git a/src/_pytest/debugging.py b/src/_pytest/debugging.py
+index 2e3d49c37..3f3c58b16 100644
+--- a/src/_pytest/debugging.py
++++ b/src/_pytest/debugging.py
+@@ -1,5 +1,6 @@
++import functools
+@@ -274,13 +275,16 @@ class PdbTrace:
+-    pyfuncitem.obj = _pdb.runcall
+-    if "func" in pyfuncitem._fixtureinfo.argnames:  # pragma: no branch
+-        raise ValueError("--trace can't be used with a fixture named func!")
+-    pyfuncitem.funcargs["func"] = testfunction
+-    new_list = list(pyfuncitem._fixtureinfo.argnames)
+-    new_list.append("func")
+-    pyfuncitem._fixtureinfo.argnames = tuple(new_list)
++
++    # we can't just return `partial(pdb.runcall, testfunction)` because (on
++    # python < 3.7.4) runcall's first param is `func`, which means we'd get
++    # an exception if one of the kwargs to testfunction was called `func`
++    @functools.wraps(testfunction)
++    def wrapper(*args, **kwargs):
++        func = functools.partial(testfunction, *args, **kwargs)
++        _pdb.runcall(func)
++
++    pyfuncitem.obj = wrapper
+diff --git a/src/_pytest/junitxml.py b/src/_pytest/junitxml.py
+index ba0f48ed3..fb951106f 100644
+--- a/src/_pytest/junitxml.py
++++ b/src/_pytest/junitxml.py
+@@ -513,7 +513,7 @@ class LogXML:
+-            # TODO: breasks for --dist=each
++            # TODO: breaks for --dist=each
+diff --git a/src/_pytest/logging.py b/src/_pytest/logging.py
+index 054bfc866..de8576910 100644
+--- a/src/_pytest/logging.py
++++ b/src/_pytest/logging.py
+@@ -2,8 +2,7 @@
+-
+-import py
++from io import StringIO
+@@ -218,7 +217,7 @@ class LogCaptureHandler(logging.StreamHandler):
+-        logging.StreamHandler.__init__(self, py.io.TextIO())
++        logging.StreamHandler.__init__(self, StringIO())
+@@ -228,7 +227,7 @@ class LogCaptureHandler(logging.StreamHandler):
+-        self.stream = py.io.TextIO()
++        self.stream = StringIO()
+diff --git a/src/_pytest/main.py b/src/_pytest/main.py
+index ad65ed299..3c205027d 100644
+--- a/src/_pytest/main.py
++++ b/src/_pytest/main.py
+@@ -429,7 +429,7 @@ class Session(nodes.FSCollector):
+-            # all plugis are active for this fspath
++            # all plugins are active for this fspath
+diff --git a/src/_pytest/mark/evaluate.py b/src/_pytest/mark/evaluate.py
+index b9f2d61f8..53822e98f 100644
+--- a/src/_pytest/mark/evaluate.py
++++ b/src/_pytest/mark/evaluate.py
+@@ -28,7 +28,7 @@ class MarkEvaluator:
+-        # dont cache here to prevent staleness
++        # don't cache here to prevent staleness
+diff --git a/src/_pytest/mark/legacy.py b/src/_pytest/mark/legacy.py
+index d14ea3a82..3721e3b02 100644
+--- a/src/_pytest/mark/legacy.py
++++ b/src/_pytest/mark/legacy.py
+@@ -1,6 +1,6 @@
+-we hope ot remove
++we hope to remove
+diff --git a/src/_pytest/pytester.py b/src/_pytest/pytester.py
+index 0f3460741..e1db9b17b 100644
+--- a/src/_pytest/pytester.py
++++ b/src/_pytest/pytester.py
+@@ -10,6 +10,7 @@ import time
++from io import StringIO
+@@ -1218,7 +1219,7 @@ def getdecoded(out):
+-        self.stringio = py.io.TextIO()
++        self.stringio = StringIO()
+diff --git a/src/_pytest/python.py b/src/_pytest/python.py
+index 913a93bc0..306e5f217 100644
+--- a/src/_pytest/python.py
++++ b/src/_pytest/python.py
+@@ -210,8 +210,8 @@ def pytest_pycollect_makeitem(collector, name, obj):
+-        # or a funtools.wrapped.
+-        # We musn't if it's been wrapped with mock.patch (python 2 only)
++        # or a functools.wrapped.
++        # We mustn't if it's been wrapped with mock.patch (python 2 only)
+@@ -251,18 +251,21 @@ class PyobjMixin(PyobjContext):
++        self._mount_obj_if_needed()
++        return self._obj
++
++    @obj.setter
++    def obj(self, value):
++        self._obj = value
++
++    def _mount_obj_if_needed(self):
+-                self.own_markers.extend(get_unpacked_marks(self.obj))
+-        return obj
+-
+-    @obj.setter
+-    def obj(self, value):
+-        self._obj = value
++                self.own_markers.extend(get_unpacked_marks(obj))
+@@ -429,6 +432,14 @@ class PyCollector(PyobjMixin, nodes.Collector):
++    def __init__(self, fspath, parent=None, config=None, session=None, nodeid=None):
++        if fspath.basename == "__init__.py":
++            self._ALLOW_MARKERS = False
++
++        nodes.FSCollector.__init__(
++            self, fspath, parent=parent, config=config, session=session, nodeid=nodeid
++        )
++
+@@ -595,7 +606,7 @@ class Package(Module):
+-            # all plugis are active for this fspath
++            # all plugins are active for this fspath
+@@ -628,6 +639,7 @@ class Package(Module):
++        self._mount_obj_if_needed()
+@@ -965,6 +977,12 @@ class Metafunc(fixtures.FuncargnamesCompatAttr):
++        if "request" in argnames:
++            fail(
++                "'request' is a reserved name and cannot be used in @pytest.mark.parametrize",
++                pytrace=False,
++            )
++
+diff --git a/src/_pytest/reports.py b/src/_pytest/reports.py
+index d8030b926..49eec6129 100644
+--- a/src/_pytest/reports.py
++++ b/src/_pytest/reports.py
+@@ -1,3 +1,4 @@
++from io import StringIO
+@@ -180,7 +181,7 @@ class BaseReport:
+-    stream = py.io.TextIO()
++    stream = StringIO()
+diff --git a/src/_pytest/skipping.py b/src/_pytest/skipping.py
+index 53737816f..d18f61ef4 100644
+--- a/src/_pytest/skipping.py
++++ b/src/_pytest/skipping.py
+@@ -122,7 +122,7 @@ def pytest_runtest_makereport(item, call):
+-    # unitttest special case, see setting of _unexpectedsuccess
++    # unittest special case, see setting of _unexpectedsuccess
+@@ -132,7 +132,7 @@ def pytest_runtest_makereport(item, call):
+-        pass  # don't interefere
++        pass  # don't interfere
+[0m
+[0m← [0mEdit src/_pytest/main.py
+Index: /testbed/src/_pytest/main.py
+===================================================================
+--- /testbed/src/_pytest/main.py
++++ /testbed/src/_pytest/main.py
+@@ -531,9 +531,9 @@
+ if dirpath not in seen_dirs:
+     # Collect packages first.
+     seen_dirs.add(dirpath)
+     pkginit = dirpath.join("__init__.py")
+-    if pkginit.exists():
++    if pkginit.isfile():
+         for x in self._collectfile(pkginit):
+             yield x
+             if isinstance(x, Package):
+                 self._pkg_roots[dirpath] = x
+
+[0m
+[0m$ [0mcd /tmp/repro && python -m pytest -p no:cacheprovider 2>&1 | tail -4; cd /testbed && grep -n "def pytest_pycollect_makemodule" -A12 src/_pytest/python.py
+assert False
+E   AssertionError
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 errors during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.03s ===============================
+193:def pytest_pycollect_makemodule(path, parent):
+194-    if path.basename == "__init__.py":
+195-        return Package(path, parent)
+196-    return Module(path, parent)
+197-
+198-
+199-@hookimpl(hookwrapper=True)
+200-def pytest_pycollect_makeitem(collector, name, obj):
+201-    outcome = yield
+202-    res = outcome.get_result()
+203-    if res is not None:
+204-        return
+205-    # nothing was collected elsewhere, let's do it here
+[0m
+[0m$ [0mcd /testbed && sed -n 636,660p src/_pytest/python.py
+return ihook.pytest_collect_file(path=path, parent=self)
+
+    def isinitpath(self, path):
+        return path in self.session._initialpaths
+
+    def collect(self):
+        self._mount_obj_if_needed()
+        this_path = self.fspath.dirpath()
+        init_module = this_path.join("__init__.py")
+        if init_module.check(file=1) and path_matches_patterns(
+            init_module, self.config.getini("python_files")
+        ):
+            yield Module(init_module, self)
+        pkg_prefixes = set()
+        for path in this_path.visit(rec=self._recurse, bf=True, sort=True):
+            # We will visit our own __init__.py file, in which case we skip it.
+            is_file = path.isfile()
+            if is_file:
+                if path.basename == "__init__.py" and path.dirpath() == this_path:
+                    continue
+
+            parts_ = parts(path.strpath)
+            if any(
+                pkg_prefix in parts_ and pkg_prefix.join("__init__.py") != path
+                for pkg_prefix in pkg_prefixes
+[0m
+[0m← [0mEdit src/_pytest/python.py
+Index: /testbed/src/_pytest/python.py
+===================================================================
+--- /testbed/src/_pytest/python.py
++++ /testbed/src/_pytest/python.py
+@@ -638,9 +638,8 @@
+ def isinitpath(self, path):
+     return path in self.session._initialpaths
+ 
+ def collect(self):
+-    self._mount_obj_if_needed()
+     this_path = self.fspath.dirpath()
+     init_module = this_path.join("__init__.py")
+     if init_module.check(file=1) and path_matches_patterns(
+         init_module, self.config.getini("python_files")
+
+[0m
+[0m$ [0mcd /testbed && git checkout src/_pytest/main.py && cd /tmp/repro && python -m pytest -p no:cacheprovider 2>&1 | tail -4
+Updated 1 path from the index
+
+test_foo.py .                                                            [100%]
+
+============================== 1 passed in 0.01s ===============================
+[0m
+[0m$ [0mcd /testbed && python -m pytest -p no:cacheprovider testing/test_collection.py testing/test_main.py testing/python/collect.py -q 2>&1 | tail -15
+no tests ran in 0.00s
+ERROR: file not found: testing/test_main.py
+[0m
+[0m$ [0mcd /testbed && python -m pytest -p no:cacheprovider testing/test_collection.py testing/python/collect.py testing/test_session.py -q 2>&1 | tail -15
+>   warnings.warn(
+        "pkg_resources is deprecated as an API. "
+        "See https://setuptools.pypa.io/en/latest/pkg_resources.html",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+E   DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html
+
+/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/pkg_resources/__init__.py:103: DeprecationWarning
+=========================== short test summary info ============================
+XFAIL testing/test_collection.py::TestPrunetraceback::test_collect_report_postprocessing
+  other mechanism for adding to reporting needed
+FAILED testing/python/collect.py::TestModule::test_import_prepend_append - De...
+FAILED testing/python/collect.py::TestTracebackCutting::test_filter_traceback_path_no_longer_valid
+2 failed, 166 passed, 1 xfailed in 11.99s
+[0m
+[0m$ [0mcd /testbed && git stash -q && python -m pytest -p no:cacheprovider testing/python/collect.py -q 2>&1 | tail -3; git stash pop -q && git status --short
+FAILED testing/python/collect.py::TestModule::test_import_prepend_append - De...
+FAILED testing/python/collect.py::TestTracebackCutting::test_filter_traceback_path_no_longer_valid
+2 failed, 72 passed in 5.12s
+ M src/_pytest/python.py
+[0m

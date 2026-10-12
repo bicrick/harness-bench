@@ -1,0 +1,483 @@
+2026-10-11 17:36:34,167 - INFO - rex-deploy - Building image docker.io/swebench/sweb.eval.x86_64.django_1776_django-16454:latest to install a standalone python to /root. This might take a while (but you only have to do it once). To skip this step, set `python_standalone_dir` to None.
+2026-10-11 17:37:20,819 - INFO - rex-deploy - Starting container docker.ioswebenchsweb.eval.x86_64.django_1776_django-16454latest-fb3d12eb-25ea-43e0-9ad5-c6fea214b253 with image docker.io/swebench/sweb.eval.x86_64.django_1776_django-16454:latest serving on port 36201
+2026-10-11 17:37:20,825 - INFO - rex-deploy - Starting runtime at 36201
+2026-10-11 17:37:22,016 - INFO - rex-deploy - Runtime started in 1.19s
+2026-10-11 17:37:22,915 - INFO - swea-env - Environment Initialized
+2026-10-11 17:37:24,273 - INFO - swea-agent - Setting up agent for instance django__django-16454
+2026-10-11 17:37:24,275 - INFO - swea-agent - Trajectory will be saved to /home/box/context-shaping/results/swebench/runs/django__django-16454/swe_agent_nothink/out/django__django-16454/django__django-16454.traj
+2026-10-11 17:37:28,019 - INFO - swea-tools - Resetting tools
+2026-10-11 17:37:28,375 - INFO - swea-agent - SYSTEM (main)
+You are a helpful assistant that can interact with a computer to solve tasks.
+2026-10-11 17:37:28,523 - INFO - swea-agent - 🤖 MODEL INPUT
+<uploaded_files>
+/testbed
+</uploaded_files>
+I've uploaded a python code repository in the directory /testbed. Consider the following PR description:
+
+<pr_description>
+Management command subparsers don’t retain error formatting
+Description
+	
+Django management commands use a subclass of argparse.ArgumentParser, CommandParser, that takes some extra arguments to improve error formatting. These arguments are not copied into subparsers, created via CommandParser.add_subparsers().add_parser(). Missing arguments to subparsers thus end as stack traces on the CLI, rather than human-facing usage messages.
+For example take this command with a subparser:
+from django.core.management.base import BaseCommand
+class Command(BaseCommand):
+	def add_arguments(self, parser):
+		subparsers = parser.add_subparsers(required=True)
+		create = subparsers.add_parser("create")
+		create.add_argument("name")
+	def handle(self, *args, **options):
+		pass
+Missing the required subparser name argument gives the usage message, as for any normal argument:
+$ ./manage.py cheeses
+usage: manage.py cheeses [-h] [--version] [-v {0,1,2,3}] [--settings SETTINGS] [--pythonpath PYTHONPATH] [--traceback] [--no-color] [--force-color] [--skip-checks] {create} ...
+manage.py cheeses: error: the following arguments are required: {create}
+But missing the name argument to create fails with a stacktrace:
+$ ./manage.py cheeses create
+Traceback (most recent call last):
+ File "/Users/chainz/tmp/subparserstest/./manage.py", line 21, in <module>
+	main()
+...
+ File "/Users/chainz/.pyenv/versions/3.11.0/lib/python3.11/argparse.py", line 2131, in _parse_known_args
+	self.error(_('the following arguments are required: %s') %
+ File "/Users/chainz/Documents/Projects/django/django/core/management/base.py", line 72, in error
+	raise CommandError("Error: %s" % message)
+django.core.management.base.CommandError: Error: the following arguments are required: name
+We can correct this by ensuring that the subparser action returned by add_subparsers() copies the relevant arguments through to constructed subparsers.
+(Originally reported by Mark Gregson on django-developers: ​https://groups.google.com/g/django-developers/c/oWcaxkxQ-KI/m/4NUhLjddBwAJ )
+
+</pr_description>
+
+Can you help me implement the necessary changes to the repository so that the requirements specified in the <pr_description> are met?
+I've already taken care of all changes to any of the test files described in the <pr_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!
+Your task is to make the minimal changes to non-tests files in the /testbed directory to ensure the <pr_description> is satisfied.
+Follow these steps to resolve the issue:
+1. As a first step, it might be a good idea to find and read code relevant to the <pr_description>
+2. Create a script to reproduce the error and execute it with `python <filename.py>` using the bash tool, to confirm the error
+3. Edit the sourcecode of the repo to resolve the issue
+4. Rerun your reproduce script and confirm that the error is fixed!
+5. Think about edgecases and make sure your fix handles them as well
+Your thinking should be thorough and so it's fine if it's very long.
+2026-10-11 17:37:28,528 - INFO - swea-agent - ========================= STEP 1 =========================
+2026-10-11 17:37:28,638 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:37:29,705 - INFO - swea-agent - 💭 THOUGHT
+I'll look at the relevant code in `django/core/management/base.py`.
+
+🎬 ACTION
+cd /testbed && grep -n "class CommandParser" -A 40 django/core/management/base.py
+2026-10-11 17:37:29,991 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+46:class CommandParser(ArgumentParser):
+47-    """
+48-    Customized ArgumentParser class to improve some error messages and prevent
+49-    SystemExit in several occasions, as SystemExit is unacceptable when a
+50-    command is called programmatically.
+51-    """
+52-
+53-    def __init__(
+54-        self, *, missing_args_message=None, called_from_command_line=None, **kwargs
+55-    ):
+56-        self.missing_args_message = missing_args_message
+57-        self.called_from_command_line = called_from_command_line
+58-        super().__init__(**kwargs)
+59-
+60-    def parse_args(self, args=None, namespace=None):
+61-        # Catch missing argument for a better error message
+62-        if self.missing_args_message and not (
+63-            args or any(not arg.startswith("-") for arg in args)
+64-        ):
+65-            self.error(self.missing_args_message)
+66-        return super().parse_args(args, namespace)
+67-
+68-    def error(self, message):
+69-        if self.called_from_command_line:
+70-            super().error(message)
+71-        else:
+72-            raise CommandError("Error: %s" % message)
+73-
+74-
+75-def handle_default_options(options):
+76-    """
+77-    Include any default options that all commands should accept here
+78-    so that ManagementUtility can handle them before searching for
+79-    user commands.
+80-    """
+81-    if options.settings:
+82-        os.environ["DJANGO_SETTINGS_MODULE"] = options.settings
+83-    if options.pythonpath:
+84-        sys.path.insert(0, options.pythonpath)
+85-
+86-
+
+2026-10-11 17:37:29,995 - INFO - swea-agent - ========================= STEP 2 =========================
+2026-10-11 17:37:30,000 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:37:31,878 - INFO - swea-agent - 💭 THOUGHT
+Argparse's `add_subparsers` uses `parser_class` (defaulting to the type of the parent parser) for `add_parser`, passing `**kwargs` through. The cleanest fix is to override `add_subparsers` in `CommandParser` so it sets `parser_class` to a factory that forwards the `CommandParser`-specific kwargs.
+
+Let me confirm the argparse behavior first.
+
+🎬 ACTION
+cd /testbed && python - <<'EOF'
+import argparse, inspect
+src = inspect.getsource(argparse._SubParsersAction.add_parser)
+print(src[:300])
+print(inspect.getsource(argparse._ActionsContainer.add_argument_group)[:0])
+EOF
+grep -n "def add_subparsers" -A 25 $(python -c "import argparse;print(argparse.__file__)") | grep -n "parser_class\|kwargs"
+2026-10-11 17:37:32,325 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+    def add_parser(self, name, **kwargs):
+        # set prog from the existing prefix
+        if kwargs.get('prog') is None:
+            kwargs['prog'] = '%s %s' % (self._prog_prefix, name)
+
+        aliases = kwargs.pop('aliases', ())
+
+        if name in self._name_parser_map:
+            raise Argu
+
+1:1822:    def add_subparsers(self, **kwargs):
+6:1827-        kwargs.setdefault('parser_class', type(self))
+8:1829-        if 'title' in kwargs or 'description' in kwargs:
+9:1830-            title = _(kwargs.pop('title', 'subcommands'))
+10:1831-            description = _(kwargs.pop('description', None))
+17:1838-        if kwargs.get('prog') is None:
+22:1843-            kwargs['prog'] = formatter.format_help().strip()
+25:1846-        parsers_class = self._pop_action_class(kwargs, 'parsers')
+26:1847-        action = parsers_class(option_strings=[], **kwargs)
+
+2026-10-11 17:37:32,329 - INFO - swea-agent - ========================= STEP 3 =========================
+2026-10-11 17:37:32,335 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:37:34,827 - INFO - swea-agent - 💭 THOUGHT
+Confirmed: argparse sets `parser_class` to `type(self)` and `add_parser` passes only the explicit kwargs. So I'll override `add_subparsers` to inject the `CommandParser` error-formatting kwargs into each subparser.
+
+Here's the reproduction first:
+
+🎬 ACTION
+cd /testbed && mkdir -p /tmp/repro/myapp/management/commands && touch /tmp/repro/myapp/__init__.py /tmp/repro/myapp/management/__init__.py /tmp/repro/myapp/management/commands/__init__.py && cat > /tmp/repro/myapp/management/commands/cheeses.py <<'EOF'
+from django.core.management.base import BaseCommand
+class Command(BaseCommand):
+    def add_arguments(self, parser):
+        subparsers = parser.add_subparsers(required=True)
+        create = subparsers.add_parser("create")
+        create.add_argument("name")
+    def handle(self, *args, **options):
+        pass
+EOF
+cat > /tmp/repro/repro.py <<'EOF'
+import sys, django
+from django.conf import settings
+settings.configure(INSTALLED_APPS=["myapp"])
+django.setup()
+from django.core.management import call_command
+from django.core.management.base import CommandError
+try:
+    call_command("cheeses", "create")
+except CommandError as e:
+    print("CommandError (good):", e)
+except SystemExit as e:
+    print("SystemExit (good):", e)
+EOF
+cd /tmp/repro && PYTHONPATH=/testbed:/tmp/repro python repro.py
+2026-10-11 17:37:35,745 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+CommandError (good): Error: the following arguments are required: name
+
+2026-10-11 17:37:35,748 - INFO - swea-agent - ========================= STEP 4 =========================
+2026-10-11 17:37:35,753 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:37:37,338 - INFO - swea-agent - 💭 THOUGHT
+That's the reproduction via `call_command`, which already raises `CommandError`. The bug shows on the CLI path, where `called_from_command_line=True` should produce a usage message via `SystemExit`. Let me reproduce that directly:
+
+🎬 ACTION
+cd /tmp/repro && cat > cli.py <<'EOF'
+import sys, django
+from django.conf import settings
+settings.configure(INSTALLED_APPS=["myapp"])
+django.setup()
+from django.core.management import ManagementUtility
+ManagementUtility(["manage.py", "cheeses", "create"]).execute()
+EOF
+PYTHONPATH=/testbed:/tmp/repro python cli.py 2>&1 | tail -2
+2026-10-11 17:37:37,957 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+    raise CommandError("Error: %s" % message)
+django.core.management.base.CommandError: Error: the following arguments are required: name
+
+2026-10-11 17:37:37,960 - INFO - swea-agent - ========================= STEP 5 =========================
+2026-10-11 17:37:37,966 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:37:39,866 - INFO - swea-agent - 💭 THOUGHT
+Reproduced: the subparser raises a `CommandError` traceback on the CLI instead of printing usage. Now the fix:
+
+🎬 ACTION
+str_replace_editor str_replace /testbed/django/core/management/base.py   --old_str '    def error(self, message):
+        if self.called_from_command_line:
+            super().error(message)
+        else:
+            raise CommandError("Error: %s" % message)' --new_str '    def add_subparsers(self, **kwargs):
+        # Ensure subparsers created via add_parser() inherit the custom
+        # error handling options of this parser.
+        parser_class = kwargs.get("parser_class", type(self))
+        if issubclass(parser_class, CommandParser):
+            kwargs["parser_class"] = partial(
+                parser_class,
+                called_from_command_line=self.called_from_command_line,
+                missing_args_message=self.missing_args_message,
+            )
+        return super().add_subparsers(**kwargs)
+
+    def error(self, message):
+        if self.called_from_command_line:
+            super().error(message)
+        else:
+            raise CommandError("Error: %s" % message)'
+2026-10-11 17:37:40,193 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+The file /testbed/django/core/management/base.py has been edited. Here's the result of running `cat -n` on a snippet of /testbed/django/core/management/base.py:
+    63	            args or any(not arg.startswith("-") for arg in args)
+    64	        ):
+    65	            self.error(self.missing_args_message)
+    66	        return super().parse_args(args, namespace)
+    67	
+    68	    def add_subparsers(self, **kwargs):
+    69	        # Ensure subparsers created via add_parser() inherit the custom
+    70	        # error handling options of this parser.
+    71	        parser_class = kwargs.get("parser_class", type(self))
+    72	        if issubclass(parser_class, CommandParser):
+    73	            kwargs["parser_class"] = partial(
+    74	                parser_class,
+    75	                called_from_command_line=self.called_from_command_line,
+    76	                missing_args_message=self.missing_args_message,
+    77	            )
+    78	        return super().add_subparsers(**kwargs)
+    79	
+    80	    def error(self, message):
+    81	        if self.called_from_command_line:
+    82	            super().error(message)
+    83	        else:
+    84	            raise CommandError("Error: %s" % message)
+    85	
+    86	
+    87	def handle_default_options(options):
+Review the changes and make sure they are as expected. Edit the file again if necessary.
+
+2026-10-11 17:37:40,199 - INFO - swea-agent - ========================= STEP 6 =========================
+2026-10-11 17:37:40,206 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:37:41,335 - INFO - swea-agent - 💭 THOUGHT
+I need to import `partial`, and check whether `add_parser` would then receive a duplicate `parser_class` kwarg conflict (it doesn't — `add_parser` calls `parser_class(**kwargs)`, and the partial supplies the extra kwargs).
+
+🎬 ACTION
+cd /testbed && sed -n 1,12p django/core/management/base.py
+2026-10-11 17:37:41,602 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+"""
+Base classes for writing management commands (named commands which can
+be executed through ``django-admin`` or ``manage.py``).
+"""
+import argparse
+import os
+import sys
+from argparse import ArgumentParser, HelpFormatter
+from io import TextIOBase
+
+import django
+from django.core import checks
+
+2026-10-11 17:37:41,609 - INFO - swea-agent - ========================= STEP 7 =========================
+2026-10-11 17:37:41,616 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:37:42,879 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+cd /testbed && sed -i 's/^from argparse import ArgumentParser, HelpFormatter$/from argparse import ArgumentParser, HelpFormatter\nfrom functools import partial/' django/core/management/base.py && sed -n 5,10p django/core/management/base.py && cd /tmp/repro && echo "--- CLI:" && PYTHONPATH=/testbed:/tmp/repro python cli.py 2>&1 | tail -3; echo "--- call_command:" && PYTHONPATH=/testbed:/tmp/repro python repro.py
+2026-10-11 17:37:43,613 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+import argparse
+import os
+import sys
+from argparse import ArgumentParser, HelpFormatter
+from functools import partial
+from io import TextIOBase
+--- CLI:
+usage: manage.py cheeses create [-h] name
+manage.py cheeses create: error: the following arguments are required: name
+--- call_command:
+CommandError (good): Error: the following arguments are required: name
+
+2026-10-11 17:37:43,618 - INFO - swea-agent - ========================= STEP 8 =========================
+2026-10-11 17:37:43,623 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:37:44,597 - INFO - swea-agent - 💭 THOUGHT
+The CLI now prints a proper usage message and `call_command` still raises `CommandError`. Let me run the existing management tests to check for regressions.
+
+🎬 ACTION
+cd /testbed/tests && python runtests.py admin_scripts user_commands 2>&1 | tail -4
+2026-10-11 17:38:10,502 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+
+2026-10-11 17:38:10,508 - INFO - swea-agent - ========================= STEP 9 =========================
+2026-10-11 17:38:10,517 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:38:11,506 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+cd /testbed/tests && python runtests.py admin_scripts user_commands 2>&1 | grep -E "^(Ran|OK|FAILED)"
+2026-10-11 17:38:37,989 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+Ran 254 tests in 25.677s
+OK
+
+2026-10-11 17:38:38,002 - INFO - swea-agent - ========================= STEP 10 =========================
+2026-10-11 17:38:38,014 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:48:03,178 - WARNING - swea-lm - Retrying LM query: attempt 1 (slept for 10.00s) due to InternalServerError: litellm.InternalServerError: AnthropicException - Server disconnected without sending a response.. Handle with `litellm.InternalServerError`.
+2026-10-11 17:48:13,213 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:48:15,731 - WARNING - swea-agent - Requerying model after FunctionCallingFormatError (1th requery)
+2026-10-11 17:48:15,745 - WARNING - swea-agent - Your last output did not use any tool calls!
+Please make sure your output includes exactly _ONE_ function call!
+You must invoke the function directly using the function call format.
+You cannot invoke commands with ```, you have to use the function call format.
+If you think you have already resolved the issue, please submit your changes by running the `submit` command.
+If you think you cannot solve the problem, please run `exit_forfeit` (if available) or `submit`.
+Else, please continue with a new tool call!
+2026-10-11 17:48:15,752 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:48:16,807 - INFO - swea-agent - 💭 THOUGHT
+The fix is in place and verified, so I'm submitting it now.
+
+🎬 ACTION
+submit
+2026-10-11 17:48:19,201 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+Thank you for your work on this issue. Please carefully follow the steps below to help review your changes.
+
+1. If you made any changes to your code after running the reproduction script, please run the reproduction script again.
+  If the reproduction script is failing, please revisit your changes and make sure they are correct.
+  If you have already removed your reproduction script, please ignore this step.
+2. Remove your reproduction script (if you haven't done so already).
+3. If you have modified any TEST files, please revert them to the state they had before you started fixing the issue.
+  You can do this with `git checkout -- /path/to/test/file.py`. Use below <diff> to find the files you need to revert.
+4. Run the submit command again to confirm.
+
+Here is a list of all of your changes:
+
+<diff>
+diff --git a/django/core/management/base.py b/django/core/management/base.py
+index abc6f79a15..4f5a78a2b4 100644
+--- a/django/core/management/base.py
++++ b/django/core/management/base.py
+@@ -6,6 +6,7 @@ import argparse
+ import os
+ import sys
+ from argparse import ArgumentParser, HelpFormatter
++from functools import partial
+ from io import TextIOBase
+ 
+ import django
+@@ -65,6 +66,18 @@ class CommandParser(ArgumentParser):
+             self.error(self.missing_args_message)
+         return super().parse_args(args, namespace)
+ 
++    def add_subparsers(self, **kwargs):
++        # Ensure subparsers created via add_parser() inherit the custom
++        # error handling options of this parser.
++        parser_class = kwargs.get("parser_class", type(self))
++        if issubclass(parser_class, CommandParser):
++            kwargs["parser_class"] = partial(
++                parser_class,
++                called_from_command_line=self.called_from_command_line,
++                missing_args_message=self.missing_args_message,
++            )
++        return super().add_subparsers(**kwargs)
++
+     def error(self, message):
+         if self.called_from_command_line:
+             super().error(message)
+
+</diff>
+
+
+2026-10-11 17:48:19,217 - INFO - swea-agent - ========================= STEP 12 =========================
+2026-10-11 17:48:19,224 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:48:22,130 - WARNING - swea-agent - Requerying model after FunctionCallingFormatError (1th requery)
+2026-10-11 17:48:22,134 - WARNING - swea-agent - Your last output did not use any tool calls!
+Please make sure your output includes exactly _ONE_ function call!
+You must invoke the function directly using the function call format.
+You cannot invoke commands with ```, you have to use the function call format.
+If you think you have already resolved the issue, please submit your changes by running the `submit` command.
+If you think you cannot solve the problem, please run `exit_forfeit` (if available) or `submit`.
+Else, please continue with a new tool call!
+2026-10-11 17:48:22,143 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:48:23,314 - INFO - swea-agent - 💭 THOUGHT
+The fix was already submitted in my previous turn, so there's nothing left to change. Submitting again to confirm the final state.
+
+🎬 ACTION
+submit
+2026-10-11 17:48:23,745 - INFO - swea-agent - Found submission: diff --git a/django/core/management/base.py b/django/core/management/base.py
+index abc6f79a15..4f5a78a2b4 100644
+--- a/django/core/management/base.py
++++ b/django/core/management/base.py
+@@ -6,6 +6,7 @@ import argparse
+ import os
+ import sys
+ from argparse import ArgumentParser, HelpFormatter
++from functools import partial
+ from io import TextIOBase
+ 
+ import django
+@@ -65,6 +66,18 @@ class CommandParser(ArgumentParser):
+             self.error(self.missing_args_message)
+         return super().parse_args(args, namespace)
+ 
++    def add_subparsers(self, **kwargs):
++        # Ensure subparsers created via add_parser() inherit the custom
++        # error handling options of this parser.
++        parser_class = kwargs.get("parser_class", type(self))
++        if issubclass(parser_class, CommandParser):
++            kwargs["parser_class"] = partial(
++                parser_class,
++                called_from_command_line=self.called_from_command_line,
++                missing_args_message=self.missing_args_message,
++            )
++        return super().add_subparsers(**kwargs)
++
+     def error(self, message):
+         if self.called_from_command_line:
+             super().error(message)
+
+2026-10-11 17:48:23,750 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+diff --git a/django/core/management/base.py b/django/core/management/base.py
+index abc6f79a15..4f5a78a2b4 100644
+--- a/django/core/management/base.py
++++ b/django/core/management/base.py
+@@ -6,6 +6,7 @@ import argparse
+ import os
+ import sys
+ from argparse import ArgumentParser, HelpFormatter
++from functools import partial
+ from io import TextIOBase
+ 
+ import django
+@@ -65,6 +66,18 @@ class CommandParser(ArgumentParser):
+             self.error(self.missing_args_message)
+         return super().parse_args(args, namespace)
+ 
++    def add_subparsers(self, **kwargs):
++        # Ensure subparsers created via add_parser() inherit the custom
++        # error handling options of this parser.
++        parser_class = kwargs.get("parser_class", type(self))
++        if issubclass(parser_class, CommandParser):
++            kwargs["parser_class"] = partial(
++                parser_class,
++                called_from_command_line=self.called_from_command_line,
++                missing_args_message=self.missing_args_message,
++            )
++        return super().add_subparsers(**kwargs)
++
+     def error(self, message):
+         if self.called_from_command_line:
+             super().error(message)
+
+2026-10-11 17:48:23,777 - INFO - swea-agent - Trajectory saved to /home/box/context-shaping/results/swebench/runs/django__django-16454/swe_agent_nothink/out/django__django-16454/django__django-16454.traj
+2026-10-11 17:48:23,782 - INFO - swea-env - Beginning environment shutdown...

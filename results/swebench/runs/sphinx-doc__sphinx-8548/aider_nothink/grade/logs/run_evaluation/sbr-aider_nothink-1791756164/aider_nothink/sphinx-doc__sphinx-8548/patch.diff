@@ -1,0 +1,51 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..2e125d783 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -584,6 +584,26 @@ class Documenter:
+         else:
+             return 'docstring of %s' % fullname
+ 
++    def _find_attr_doc_key(self, attr_docs: Dict[Tuple[str, str], List[str]],
++                           attrname: str) -> Optional[Tuple[str, str]]:
++        """Find the key of attribute documentation for *attrname* of the object.
++
++        The attribute documentation may be stored under the namespace of a base
++        class (for inherited attributes), so look through the MRO of the parent.
++        """
++        namespace = '.'.join(self.objpath[:-1])
++        if (namespace, attrname) in attr_docs:
++            return (namespace, attrname)
++
++        parent = self.parent
++        if inspect.isclass(parent):
++            for cls in inspect.getmro(parent)[1:]:
++                qualname = safe_getattr(cls, '__qualname__', None)
++                if qualname and (qualname, attrname) in attr_docs:
++                    return (qualname, attrname)
++
++        return None
++
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         """Add content from docstrings, attribute documentation and user."""
+@@ -597,8 +617,8 @@ class Documenter:
+         if self.analyzer:
+             attr_docs = self.analyzer.find_attr_docs()
+             if self.objpath:
+-                key = ('.'.join(self.objpath[:-1]), self.objpath[-1])
+-                if key in attr_docs:
++                key = self._find_attr_doc_key(attr_docs, self.objpath[-1])
++                if key is not None:
+                     no_docstring = True
+                     # make a copy of docstring for attributes to avoid cache
+                     # the change of autodoc-process-docstring event.
+@@ -746,7 +766,7 @@ class Documenter:
+                         keep = has_doc or self.options.undoc_members
+                 else:
+                     keep = False
+-            elif (namespace, membername) in attr_docs:
++            elif self._find_attr_doc_key(attr_docs, membername) is not None:
+                 if want_all and isprivate:
+                     if self.options.private_members is None:
+                         keep = False

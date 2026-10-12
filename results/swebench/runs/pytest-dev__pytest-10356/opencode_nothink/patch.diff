@@ -1,0 +1,35 @@
+diff --git a/changelog/8016.bugfix.rst b/changelog/8016.bugfix.rst
+new file mode 100644
+index 000000000..1b08fdece
+--- /dev/null
++++ b/changelog/8016.bugfix.rst
+@@ -0,0 +1 @@
++Fixed marks being lost when a class inherits from multiple base classes that each define marks; marks are now collected across the whole MRO.
+diff --git a/src/_pytest/mark/structures.py b/src/_pytest/mark/structures.py
+index 800a25c92..edaf87894 100644
+--- a/src/_pytest/mark/structures.py
++++ b/src/_pytest/mark/structures.py
+@@ -356,7 +356,22 @@ class MarkDecorator:
+ 
+ 
+ def get_unpacked_marks(obj: object) -> Iterable[Mark]:
+-    """Obtain the unpacked marks that are stored on an object."""
++    """Obtain the unpacked marks that are stored on an object.
++
++    For classes, marks are collected from the whole MRO (base classes
++    included), so that marks from multiple base classes are not lost.
++    """
++    if inspect.isclass(obj):
++        mark_list: List[Any] = []
++        for klass in reversed(obj.__mro__):
++            # Use the class' own __dict__ to avoid picking up inherited
++            # attributes multiple times.
++            own = vars(klass).get("pytestmark", [])
++            if not isinstance(own, list):
++                own = [own]
++            mark_list.extend(own)
++        return normalize_mark_list(mark_list)
++
+     mark_list = getattr(obj, "pytestmark", [])
+     if not isinstance(mark_list, list):
+         mark_list = [mark_list]

@@ -1,0 +1,107 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..4950f164e8 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -55,6 +55,38 @@ FORBIDDEN_ALIAS_PATTERN = _lazy_re_compile(r"['`\"\]\[;\s]|--|/\*|\*/")
+ EXPLAIN_OPTIONS_PATTERN = _lazy_re_compile(r"[\w\-]+")
+ 
+ 
++def _collect_refs(node, referenced):
++    """
++    Collect the annotation aliases referenced by an expression or WHERE node.
++    Also collect the ids of referenced expressions so that annotations embedded
++    directly into a filter (rather than referenced by alias) are detected.
++    """
++    if node is None:
++        return
++    if isinstance(node, str):
++        referenced.add(node)
++        return
++    if isinstance(node, Query):
++        return
++    if isinstance(node, tuple) and len(node) == 2:
++        _collect_refs(node[1], referenced)
++        return
++    if isinstance(node, Ref):
++        referenced.add(node.refs)
++    if isinstance(node, WhereNode):
++        for child in node.children:
++            _collect_refs(child, referenced)
++        return
++    if isinstance(node, BaseExpression):
++        referenced.add(id(node))
++        for expr in node.get_source_expressions():
++            _collect_refs(expr, referenced)
++        return
++    for attr in ("lhs", "rhs"):
++        if hasattr(node, attr):
++            _collect_refs(getattr(node, attr), referenced)
++
++
+ def get_field_names_from_opts(opts):
+     if opts is None:
+         return set()
+@@ -550,9 +582,63 @@ class Query(BaseExpression):
+         Perform a COUNT() query using the current filter constraints.
+         """
+         obj = self.clone()
++        obj.strip_unused_annotations()
+         obj.add_annotation(Count("*"), alias="__count", is_summary=True)
+         return obj.get_aggregation(using, ["__count"])["__count"]
+ 
++    def strip_unused_annotations(self):
++        """
++        Remove annotations that cannot affect the result of a count() query:
++        those not referenced by the WHERE clause, ordering, grouping, or other
++        retained annotations. Annotations are only stripped when the query has
++        no grouping, distinct, slicing or combinators, since those depend on
++        the annotated row set.
++        """
++        if (
++            not self.annotations
++            or isinstance(self.group_by, tuple)
++            or self.distinct
++            or self.is_sliced
++            or self.combinator
++        ):
++            return
++        referenced = set()
++        _collect_refs(self.where, referenced)
++        for item in self.order_by or ():
++            if isinstance(item, str):
++                referenced.add(item.lstrip("-"))
++            else:
++                _collect_refs(item, referenced)
++        # Iterate to a fixed point: annotations referenced by a retained
++        # annotation must be retained too.
++        retained = set()
++        changed = True
++        while changed:
++            changed = False
++            for alias, annotation in self.annotations.items():
++                if alias in retained:
++                    continue
++                if alias in referenced or id(annotation) in referenced:
++                    retained.add(alias)
++                    _collect_refs(annotation, referenced)
++                    changed = True
++        for alias, annotation in list(self.annotations.items()):
++            # Aggregates (and window functions) may change the number of rows
++            # produced by the query, so they must be preserved.
++            if alias not in retained and not (
++                getattr(annotation, "contains_aggregate", False)
++                or getattr(annotation, "contains_over_clause", False)
++            ):
++                del self.annotations[alias]
++                if self.annotation_select_mask is not None:
++                    self.annotation_select_mask.discard(alias)
++        if self.annotation_select_mask is not None:
++            self.set_annotation_mask(
++                alias
++                for alias in self.annotations
++                if alias in self.annotation_select_mask
++            )
++
+     def has_filters(self):
+         return self.where
+ 

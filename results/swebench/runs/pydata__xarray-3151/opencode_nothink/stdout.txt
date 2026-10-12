@@ -1,0 +1,13 @@
+I'll look at the combine code to find where the monotonic check happens.
+The problem: the monotonicity check in `combine_by_coords` (line 504-511) runs on dimensions that are shared/identical across datasets (non-varying), which should be ignored. The fix is to only enforce monotonicity on dimensions that were actually concatenated (`concat_dims`). Non-varying coordinates, like `y` here, are left as-is.
+
+Let me check the existing test expectation around line 617 to make sure the fix keeps the intended error for varying dims.
+That existing test uses a varying dimension `x`, so restricting the check to `concat_dims` keeps it working. I'll make the change.
+Now let me verify the reproduction case and the existing combine tests.
+The fix is in place. `xr.combine_by_coords` no longer raises on the issue's example, and all 66 tests in `test_combine.py` still pass.
+
+**Cause:** In `combine_by_coords` (`xarray/core/combine.py`), the final monotonicity check looped over every dimension of the concatenated result. That included dimensions like `y` whose coordinates are identical across all datasets, which the docstring says should be ignored.
+
+**Fix:** The check now only runs over `concat_dims`, the dimensions that were actually concatenated along. Non-varying dimensions are left alone. The existing test `test_check_for_impossible_ordering` still raises as expected, because it uses a varying dimension `x`.
+
+I didn't add or change any tests, per the instructions.

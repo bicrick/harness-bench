@@ -1,0 +1,182 @@
+2026-10-11 18:06:37,031 - INFO - Creating container for pylint-dev__pylint-4551...
+2026-10-11 18:06:37,081 - INFO - Container for pylint-dev__pylint-4551 created: c7e834d99317e4673ece10ad33066b7b02f0648e7ac6f9efe44a9db19aa0e739
+2026-10-11 18:06:37,321 - INFO - Container for pylint-dev__pylint-4551 started: c7e834d99317e4673ece10ad33066b7b02f0648e7ac6f9efe44a9db19aa0e739
+2026-10-11 18:06:37,321 - INFO - Intermediate patch for pylint-dev__pylint-4551 written to logs/run_evaluation/sbr-aider_nothink-1791759995/aider_nothink/pylint-dev__pylint-4551/patch.diff, now applying to container...
+2026-10-11 18:06:37,412 - INFO - >>>>> Applied Patch:
+Checking patch pylint/pyreverse/inspector.py...
+Applied patch pylint/pyreverse/inspector.py cleanly.
+
+2026-10-11 18:06:37,657 - INFO - Git diff before:
+diff --git a/pylint/pyreverse/inspector.py b/pylint/pyreverse/inspector.py
+index 8fa12202..42a2e938 100644
+--- a/pylint/pyreverse/inspector.py
++++ b/pylint/pyreverse/inspector.py
+@@ -223,6 +223,61 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+         except astroid.InferenceError:
+             pass
+ 
++    @staticmethod
++    def _annotation_types(node):
++        """return the types declared by a PEP 484 annotation node, if any
++
++        ``Optional[X]`` and ``X`` (with a ``None`` default) are both reduced to
++        ``X`` so that the diagram shows the meaningful type.
++        """
++        if node is None:
++            return []
++        if isinstance(node, astroid.Const) and node.value is None:
++            return []
++        if isinstance(node, astroid.Subscript):
++            value = node.value
++            name = getattr(value, "attrname", None) or getattr(value, "name", None)
++            if name == "Optional":
++                return Linker._annotation_types(node.slice)
++            if name == "Union":
++                elts = getattr(node.slice, "elts", None)
++                if elts is None and hasattr(node.slice, "value"):
++                    elts = getattr(node.slice.value, "elts", None)
++                result = []
++                for elt in elts or []:
++                    result.extend(Linker._annotation_types(elt))
++                return result
++            return []
++        if isinstance(node, (astroid.Name, astroid.Attribute)):
++            try:
++                return [next(node.infer())]
++            except (astroid.InferenceError, StopIteration):
++                return []
++        return []
++
++    @staticmethod
++    def _annotated_argument_types(assignattr_value):
++        """if the assigned value is an annotated function argument, return the
++        types from its annotation instead of the (possibly ``None``) inferred value
++        """
++        if not isinstance(assignattr_value, astroid.Name):
++            return None
++        frame = assignattr_value.frame()
++        if not isinstance(frame, astroid.FunctionDef):
++            return None
++        args = frame.args
++        if args is None or args.args is None:
++            return None
++        for idx, arg in enumerate(args.args):
++            if arg.name != assignattr_value.name:
++                continue
++            annotation = arg.annotation
++            if annotation is None:
++                return None
++            types = Linker._annotation_types(annotation)
++            return types or None
++        return None
++
+     @staticmethod
+     def handle_assignattr_type(node, parent):
+         """handle an astroid.assignattr node
+@@ -230,7 +285,13 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+         handle instance_attrs_type
+         """
+         try:
+-            values = set(node.infer())
++            assign_node = node.parent
++            value = getattr(assign_node, "value", None)
++            types = Linker._annotated_argument_types(value)
++            if types is None:
++                values = set(node.infer())
++            else:
++                values = set(types)
+             current = set(parent.instance_attrs_type[node.attrname])
+             parent.instance_attrs_type[node.attrname] = list(current | values)
+         except astroid.InferenceError:
+2026-10-11 18:06:37,658 - INFO - Eval script for pylint-dev__pylint-4551 written to logs/run_evaluation/sbr-aider_nothink-1791759995/aider_nothink/pylint-dev__pylint-4551/eval.sh; copying to container...
+2026-10-11 18:06:41,609 - INFO - Test runtime: 3.86 seconds
+2026-10-11 18:06:41,610 - INFO - Test output for pylint-dev__pylint-4551 written to logs/run_evaluation/sbr-aider_nothink-1791759995/aider_nothink/pylint-dev__pylint-4551/test_output.txt
+2026-10-11 18:06:41,681 - INFO - Git diff after:
+diff --git a/pylint/pyreverse/inspector.py b/pylint/pyreverse/inspector.py
+index 8fa12202..42a2e938 100644
+--- a/pylint/pyreverse/inspector.py
++++ b/pylint/pyreverse/inspector.py
+@@ -223,6 +223,61 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+         except astroid.InferenceError:
+             pass
+ 
++    @staticmethod
++    def _annotation_types(node):
++        """return the types declared by a PEP 484 annotation node, if any
++
++        ``Optional[X]`` and ``X`` (with a ``None`` default) are both reduced to
++        ``X`` so that the diagram shows the meaningful type.
++        """
++        if node is None:
++            return []
++        if isinstance(node, astroid.Const) and node.value is None:
++            return []
++        if isinstance(node, astroid.Subscript):
++            value = node.value
++            name = getattr(value, "attrname", None) or getattr(value, "name", None)
++            if name == "Optional":
++                return Linker._annotation_types(node.slice)
++            if name == "Union":
++                elts = getattr(node.slice, "elts", None)
++                if elts is None and hasattr(node.slice, "value"):
++                    elts = getattr(node.slice.value, "elts", None)
++                result = []
++                for elt in elts or []:
++                    result.extend(Linker._annotation_types(elt))
++                return result
++            return []
++        if isinstance(node, (astroid.Name, astroid.Attribute)):
++            try:
++                return [next(node.infer())]
++            except (astroid.InferenceError, StopIteration):
++                return []
++        return []
++
++    @staticmethod
++    def _annotated_argument_types(assignattr_value):
++        """if the assigned value is an annotated function argument, return the
++        types from its annotation instead of the (possibly ``None``) inferred value
++        """
++        if not isinstance(assignattr_value, astroid.Name):
++            return None
++        frame = assignattr_value.frame()
++        if not isinstance(frame, astroid.FunctionDef):
++            return None
++        args = frame.args
++        if args is None or args.args is None:
++            return None
++        for idx, arg in enumerate(args.args):
++            if arg.name != assignattr_value.name:
++                continue
++            annotation = arg.annotation
++            if annotation is None:
++                return None
++            types = Linker._annotation_types(annotation)
++            return types or None
++        return None
++
+     @staticmethod
+     def handle_assignattr_type(node, parent):
+         """handle an astroid.assignattr node
+@@ -230,7 +285,13 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
+         handle instance_attrs_type
+         """
+         try:
+-            values = set(node.infer())
++            assign_node = node.parent
++            value = getattr(assign_node, "value", None)
++            types = Linker._annotated_argument_types(value)
++            if types is None:
++                values = set(node.infer())
++            else:
++                values = set(types)
+             current = set(parent.instance_attrs_type[node.attrname])
+             parent.instance_attrs_type[node.attrname] = list(current | values)
+         except astroid.InferenceError:
+2026-10-11 18:06:41,681 - INFO - Grading answer for pylint-dev__pylint-4551...
+2026-10-11 18:06:41,682 - INFO - report: {'pylint-dev__pylint-4551': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'infra_failure': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['tests/unittest_pyreverse_writer.py::test_dot_files[packages_No_Name.dot]', 'tests/unittest_pyreverse_writer.py::test_dot_files[classes_No_Name.dot]', 'tests/unittest_pyreverse_writer.py::test_get_visibility[names0-special]', 'tests/unittest_pyreverse_writer.py::test_get_visibility[names1-private]', 'tests/unittest_pyreverse_writer.py::test_get_visibility[names2-public]', 'tests/unittest_pyreverse_writer.py::test_get_visibility[names3-protected]', 'tests/unittest_pyreverse_writer.py::test_get_annotation_annassign[a:', 'tests/unittest_pyreverse_writer.py::test_get_annotation_assignattr[def', 'tests/unittest_pyreverse_writer.py::test_infer_node_1', 'tests/unittest_pyreverse_writer.py::test_infer_node_2']}, 'PASS_TO_PASS': {'success': [], 'failure': []}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for pylint-dev__pylint-4551: resolved: False
+2026-10-11 18:06:41,682 - INFO - Attempting to stop container sweb.eval.pylint-dev__pylint-4551.sbr-aider_nothink-1791759995...
+2026-10-11 18:06:56,977 - INFO - Container sweb.eval.pylint-dev__pylint-4551.sbr-aider_nothink-1791759995 stopped successfully.
+2026-10-11 18:06:56,977 - INFO - Attempting to remove container sweb.eval.pylint-dev__pylint-4551.sbr-aider_nothink-1791759995...
+2026-10-11 18:06:57,005 - INFO - Container sweb.eval.pylint-dev__pylint-4551.sbr-aider_nothink-1791759995 removed successfully.

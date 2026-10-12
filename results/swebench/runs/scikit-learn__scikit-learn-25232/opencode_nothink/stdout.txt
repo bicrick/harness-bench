@@ -1,0 +1,26 @@
+I'll look at the current IterativeImputer implementation.
+The docstring already references `fill_value`, so the parameter was apparently removed. I'll add it: docstring, constraints, `__init__`, and pass it to the SimpleImputer. The `np.isnan(statistics_)` check would be affected by a `np.nan` fill value, so I'll check that too.
+The `valid_mask` logic uses `statistics_` being NaN to detect empty features. With `fill_value=np.nan`, every statistic would be NaN and all features would be dropped, so I need to handle that. Let me check how SimpleImputer handles it and the `keep_empty_features` case.
+SimpleImputer already has `fill_value`, and it computes `valid_mask` from `statistics_` via `_get_mask`. For the constant strategy, empty features are kept with `fill_value` as their statistic. Here, IterativeImputer should use the same logic: only treat features as empty when the strategy is not constant. I'll make the `valid_mask` check depend on the strategy, so a `np.nan` fill value doesn't drop all features.
+Here the `valid_mask` only excludes NaN statistics. With `fill_value=np.nan` and a constant strategy, all statistics would be NaN, so I'll base the empty-feature detection on the strategy: only the non-constant strategies produce NaN for empty features.
+Now I'll verify the behavior, including the `np.nan` case and the existing tests.
+The `fill_value=-1` case works. The `np.nan` case fails because the default BayesianRidge estimator can't accept NaN in the filled data. The issue asks for NaN to be allowed for tree-based estimators, so this is expected with a non-tree estimator. I'll confirm with a tree-based estimator and run the test suite.
+The existing impute tests pass (301). The NaN case still fails in this example because the imputer leaves NaN in the *target* column of the training data: the initial fill is NaN, and the imputation loop only fills features that are not yet imputed. Estimators need the other feature columns to be NaN-free. Let me look at how the loop builds the training matrix to see whether the NaN leaks into the predictors.
+The training data for each feature is built from `X_filled` columns. The NaN fill persists only in the *predictor* columns that are still missing. My example uses BayesianRidge in the first place, but the decision tree also fails. That is expected for this design: a tree can only accept NaN if the estimator itself supports missing values, such as `HistGradientBoostingRegressor` or a tree with missing-value support in this scikit-learn version. Let me verify with an estimator that supports NaN.
+The fix works. With `fill_value=np.nan` and a NaN-aware estimator (`HistGradientBoostingRegressor`), the imputer runs and produces finite output, and the existing impute test suite passes (301 tests).
+
+## Summary
+
+I added a `fill_value` parameter to `IterativeImputer` in `sklearn/impute/_iterative.py`:
+
+- **Constructor and constraints:** `fill_value=None` is added to `__init__` and `_parameter_constraints` (unvalidated, so `np.nan` is allowed).
+- **Forwarding:** `fill_value` is passed to the internal `SimpleImputer` used for the initial imputation.
+- **Docstring:** Documented, with `versionadded:: 1.3`.
+- **Empty-feature detection:** The original code dropped features where the initial statistic was NaN. With `fill_value=np.nan` every statistic is NaN, which would wrongly drop all features. For the `"constant"` strategy, empty features are now detected from the missing-value mask instead.
+
+Verified:
+- `fill_value=-1` with `initial_strategy="constant"` works.
+- `fill_value=np.nan` works with an estimator that accepts NaN (`HistGradientBoostingRegressor`).
+- `sklearn/impute` tests: 301 passed.
+
+Note: `fill_value=np.nan` only helps with estimators that handle NaN natively, as the issue indicates. Estimators like `BayesianRidge` or `DecisionTreeRegressor` will still reject NaN in the predictors.

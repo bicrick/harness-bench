@@ -1,0 +1,701 @@
+2026-10-11 16:08:24,792 - INFO - rex-deploy - Building image docker.io/swebench/sweb.eval.x86_64.django_1776_django-14011:latest to install a standalone python to /root. This might take a while (but you only have to do it once). To skip this step, set `python_standalone_dir` to None.
+2026-10-11 16:09:12,700 - INFO - rex-deploy - Starting container docker.ioswebenchsweb.eval.x86_64.django_1776_django-14011latest-f2b969dc-9589-41a0-b74a-4cf9f952701e with image docker.io/swebench/sweb.eval.x86_64.django_1776_django-14011:latest serving on port 50947
+2026-10-11 16:09:12,705 - INFO - rex-deploy - Starting runtime at 50947
+2026-10-11 16:09:13,739 - INFO - rex-deploy - Runtime started in 1.03s
+2026-10-11 16:09:14,625 - INFO - swea-env - Environment Initialized
+2026-10-11 16:09:15,927 - INFO - swea-agent - Setting up agent for instance django__django-14011
+2026-10-11 16:09:15,929 - INFO - swea-agent - Trajectory will be saved to /home/box/context-shaping/results/swebench/runs/django__django-14011/swe_agent_nothink/out/django__django-14011/django__django-14011.traj
+2026-10-11 16:09:18,984 - INFO - swea-tools - Resetting tools
+2026-10-11 16:09:19,335 - INFO - swea-agent - SYSTEM (main)
+You are a helpful assistant that can interact with a computer to solve tasks.
+2026-10-11 16:09:19,499 - INFO - swea-agent - 🤖 MODEL INPUT
+<uploaded_files>
+/testbed
+</uploaded_files>
+I've uploaded a python code repository in the directory /testbed. Consider the following PR description:
+
+<pr_description>
+LiveServerTestCase's ThreadedWSGIServer doesn't close database connections after each thread
+Description
+	
+In Django 2.2.17, I'm seeing the reappearance of #22414 after it was fixed in 1.11. #22414 is the issue where the following error will occur at the conclusion of a test run when destroy_test_db() is called:
+OperationalError: database "test_myapp" is being accessed by other users
+This error happens when not all of the database connections are closed. In my case today, I'm seeing this when running a single test that is a LiveServerTestCase. I see it in approximately half of my test runs, so it's not wholly deterministic (it's a race condition).
+There weren't a whole lot of changes in the LiveServerTestCase-related code between 1.11 and 2.2, so I looked at them individually.
+Issue #20238 added threading support to LiveServerTestCase. One of the changes it made ​was changing LiveServerThread to use ThreadedWSGIServer instead of WSGIServer. LiveServerThread is used by LiveServerTestCase.
+When I tried modifying LiveServerThread to use the old WSGIServer, I could no longer reproduce the above error. My changes were as follows:
+class NonThreadedLiveServerThread(LiveServerThread):
+	def _create_server(self):
+		return WSGIServer((self.host, self.port), QuietWSGIRequestHandler, allow_reuse_address=False)
+class MyTest(LiveServerTestCase):
+	server_thread_class = NonThreadedLiveServerThread
+The CPython docs ​describe ThreadingMixIn as defining an attribute "which indicates whether or not the server should wait for thread termination."
+Consistent with what I described above, Aymeric said the following on ticket #20238, seeming to foreshadow issues like this one:
+more threading will certainly create more race conditions on shutdown, especially when it comes to the database connections — it's taken months to eliminate most from LiveServerTestCase, and I'm sure there are still some left,
+
+</pr_description>
+
+Can you help me implement the necessary changes to the repository so that the requirements specified in the <pr_description> are met?
+I've already taken care of all changes to any of the test files described in the <pr_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!
+Your task is to make the minimal changes to non-tests files in the /testbed directory to ensure the <pr_description> is satisfied.
+Follow these steps to resolve the issue:
+1. As a first step, it might be a good idea to find and read code relevant to the <pr_description>
+2. Create a script to reproduce the error and execute it with `python <filename.py>` using the bash tool, to confirm the error
+3. Edit the sourcecode of the repo to resolve the issue
+4. Rerun your reproduce script and confirm that the error is fixed!
+5. Think about edgecases and make sure your fix handles them as well
+Your thinking should be thorough and so it's fine if it's very long.
+2026-10-11 16:09:19,504 - INFO - swea-agent - ========================= STEP 1 =========================
+2026-10-11 16:09:19,620 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:09:20,947 - INFO - swea-agent - 💭 THOUGHT
+I'll look at the relevant code first.
+
+🎬 ACTION
+cd /testbed && cat django/test/testcases.py | sed -n 1,40p && grep -n "ThreadedWSGIServer\|class LiveServerThread\|_create_server\|daemon_threads\|class QuietWSGIRequestHandler\|close_old_connections\|def run\|connections" django/test/testcases.py django/core/servers/basehttp.py
+2026-10-11 16:09:21,221 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+import asyncio
+import difflib
+import json
+import logging
+import posixpath
+import sys
+import threading
+import unittest
+import warnings
+from collections import Counter
+from contextlib import contextmanager
+from copy import copy, deepcopy
+from difflib import get_close_matches
+from functools import wraps
+from unittest.suite import _DebugResult
+from unittest.util import safe_repr
+from urllib.parse import (
+    parse_qsl, unquote, urlencode, urljoin, urlparse, urlsplit, urlunparse,
+)
+from urllib.request import url2pathname
+
+from asgiref.sync import async_to_sync
+
+from django.apps import apps
+from django.conf import settings
+from django.core import mail
+from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.core.files import locks
+from django.core.handlers.wsgi import WSGIHandler, get_path_info
+from django.core.management import call_command
+from django.core.management.color import no_style
+from django.core.management.sql import emit_post_migrate_signal
+from django.core.servers.basehttp import ThreadedWSGIServer, WSGIRequestHandler
+from django.db import DEFAULT_DB_ALIAS, connection, connections, transaction
+from django.forms.fields import CharField
+from django.http import QueryDict
+from django.http.request import split_domain_port, validate_host
+from django.test.client import AsyncClient, Client
+from django.test.html import HTMLParseError, parse_html
+from django.test.signals import setting_changed, template_rendered
+django/test/testcases.py:33:from django.core.servers.basehttp import ThreadedWSGIServer, WSGIRequestHandler
+django/test/testcases.py:34:from django.db import DEFAULT_DB_ALIAS, connection, connections, transaction
+django/test/testcases.py:170:        ('connect', 'connections'),
+django/test/testcases.py:171:        ('temporary_connection', 'connections'),
+django/test/testcases.py:190:            return frozenset(connections)
+django/test/testcases.py:192:            if alias not in connections:
+django/test/testcases.py:198:                close_matches = get_close_matches(alias, list(connections))
+django/test/testcases.py:207:        for alias in connections:
+django/test/testcases.py:210:            connection = connections[alias]
+django/test/testcases.py:222:        for alias in connections:
+django/test/testcases.py:225:            connection = connections[alias]
+django/test/testcases.py:975:            connections[db_name].queries_log.clear()
+django/test/testcases.py:981:            alias for alias in connections
+django/test/testcases.py:983:                include_mirrors or not connections[alias].settings_dict['TEST']['MIRROR']
+django/test/testcases.py:988:        conn = connections[db_name]
+django/test/testcases.py:1005:            if self.serialized_rollback and hasattr(connections[db_name], "_test_serialized_contents"):
+django/test/testcases.py:1008:                connections[db_name].creation.deserialize_db_from_string(
+django/test/testcases.py:1009:                    connections[db_name]._test_serialized_contents
+django/test/testcases.py:1020:    def _should_reload_connections(self):
+django/test/testcases.py:1033:            if self._should_reload_connections():
+django/test/testcases.py:1040:                for conn in connections.all():
+django/test/testcases.py:1060:                    hasattr(connections[db_name], '_test_serialized_contents')
+django/test/testcases.py:1102:        conn = connections[using]
+django/test/testcases.py:1112:def connections_support_transactions(aliases=None):
+django/test/testcases.py:1114:    Return whether or not all (or specified) connections support
+django/test/testcases.py:1117:    conns = connections.all() if aliases is None else (connections[alias] for alias in aliases)
+django/test/testcases.py:1205:        return connections_support_transactions(cls.databases)
+django/test/testcases.py:1245:            for conn in connections.all():
+django/test/testcases.py:1254:    def _should_reload_connections(self):
+django/test/testcases.py:1257:        return super()._should_reload_connections()
+django/test/testcases.py:1274:                if self._should_check_constraints(connections[db_name]):
+django/test/testcases.py:1275:                    connections[db_name].check_constraints()
+django/test/testcases.py:1290:        start_count = len(connections[using].run_on_commit)
+django/test/testcases.py:1294:            run_on_commit = connections[using].run_on_commit[start_count:]
+django/test/testcases.py:1395:class QuietWSGIRequestHandler(WSGIRequestHandler):
+django/test/testcases.py:1476:class LiveServerThread(threading.Thread):
+django/test/testcases.py:1479:    server_class = ThreadedWSGIServer
+django/test/testcases.py:1481:    def __init__(self, host, static_handler, connections_override=None, port=0):
+django/test/testcases.py:1487:        self.connections_override = connections_override
+django/test/testcases.py:1490:    def run(self):
+django/test/testcases.py:1495:        if self.connections_override:
+django/test/testcases.py:1496:            # Override this thread's database connections with the ones
+django/test/testcases.py:1498:            for alias, conn in self.connections_override.items():
+django/test/testcases.py:1499:                connections[alias] = conn
+django/test/testcases.py:1503:            self.httpd = self._create_server()
+django/test/testcases.py:1514:            connections.close_all()
+django/test/testcases.py:1516:    def _create_server(self):
+django/test/testcases.py:1558:        connections_override = {}
+django/test/testcases.py:1559:        for conn in connections.all():
+django/test/testcases.py:1560:            # If using in-memory sqlite databases, pass the connections to
+django/test/testcases.py:1565:                connections_override[conn.alias] = conn
+django/test/testcases.py:1571:        cls.server_thread = cls._create_server_thread(connections_override)
+django/test/testcases.py:1584:    def _create_server_thread(cls, connections_override):
+django/test/testcases.py:1588:            connections_override=connections_override,
+django/test/testcases.py:1596:        # Restore sqlite in-memory database connections' non-shareability.
+django/test/testcases.py:1597:        for conn in cls.server_thread.connections_override.values():
+django/core/servers/basehttp.py:80:class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):
+django/core/servers/basehttp.py:82:    daemon_threads = True
+django/core/servers/basehttp.py:103:        # HTTP/1.1 requires support for persistent connections. Send 'close' if
+django/core/servers/basehttp.py:108:        # Persistent connections require threading server.
+django/core/servers/basehttp.py:199:def run(addr, port, wsgi_handler, ipv6=False, threading=False, server_cls=WSGIServer):
+django/core/servers/basehttp.py:207:        # ThreadingMixIn.daemon_threads indicates how threads will behave on an
+django/core/servers/basehttp.py:213:        httpd.daemon_threads = True
+
+2026-10-11 16:09:21,231 - INFO - swea-agent - ========================= STEP 2 =========================
+2026-10-11 16:09:21,239 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:09:22,221 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+cd /testbed && sed -n 75,90p django/core/servers/basehttp.py && sed -n 1476,1530p django/test/testcases.py && git log --oneline -1
+2026-10-11 16:09:22,504 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+            logger.info("- Broken pipe from %s\n", client_address)
+        else:
+            super().handle_error(request, client_address)
+
+
+class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):
+    """A threaded version of the WSGIServer"""
+    daemon_threads = True
+
+
+class ServerHandler(simple_server.ServerHandler):
+    http_version = '1.1'
+
+    def __init__(self, stdin, stdout, stderr, environ, **kwargs):
+        """
+        Use a LimitedStream so that unread request data will be ignored at
+class LiveServerThread(threading.Thread):
+    """Thread for running a live http server while the tests are running."""
+
+    server_class = ThreadedWSGIServer
+
+    def __init__(self, host, static_handler, connections_override=None, port=0):
+        self.host = host
+        self.port = port
+        self.is_ready = threading.Event()
+        self.error = None
+        self.static_handler = static_handler
+        self.connections_override = connections_override
+        super().__init__()
+
+    def run(self):
+        """
+        Set up the live server and databases, and then loop over handling
+        HTTP requests.
+        """
+        if self.connections_override:
+            # Override this thread's database connections with the ones
+            # provided by the main thread.
+            for alias, conn in self.connections_override.items():
+                connections[alias] = conn
+        try:
+            # Create the handler for serving static and media files
+            handler = self.static_handler(_MediaFilesHandler(WSGIHandler()))
+            self.httpd = self._create_server()
+            # If binding to port zero, assign the port allocated by the OS.
+            if self.port == 0:
+                self.port = self.httpd.server_address[1]
+            self.httpd.set_app(handler)
+            self.is_ready.set()
+            self.httpd.serve_forever()
+        except Exception as e:
+            self.error = e
+            self.is_ready.set()
+        finally:
+            connections.close_all()
+
+    def _create_server(self):
+        return self.server_class(
+            (self.host, self.port),
+            QuietWSGIRequestHandler,
+            allow_reuse_address=False,
+        )
+
+    def terminate(self):
+        if hasattr(self, 'httpd'):
+            # Stop the WSGI server
+            self.httpd.shutdown()
+            self.httpd.server_close()
+        self.join()
+
+
+e4430f22c8 (HEAD) Fixed #31937 -- Eased translation of time strings in some languages.
+
+2026-10-11 16:09:22,509 - INFO - swea-agent - ========================= STEP 3 =========================
+2026-10-11 16:09:22,516 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:09:24,667 - INFO - swea-agent - 💭 THOUGHT
+The upstream fix (Django ticket #32416 / commit) makes `ThreadedWSGIServer` close database connections at the end of each request thread, via a `process_request_thread` override. I'll implement that in `basehttp.py`, then make the `ThreadedWSGIServer` used by live server correctly drop connections.
+
+🎬 ACTION
+str_replace_editor str_replace /testbed/django/core/servers/basehttp.py   --old_str 'class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):
+    """A threaded version of the WSGIServer"""
+    daemon_threads = True' --new_str 'class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):
+    """A threaded version of the WSGIServer"""
+    daemon_threads = True
+
+    def process_request_thread(self, request, client_address):
+        """
+        Ensure database connections opened by a request thread are closed
+        when the thread finishes, so they don'"'"'t outlive the thread.
+        """
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            from django.db import connections
+            connections.close_all()'
+2026-10-11 16:09:24,980 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+The file /testbed/django/core/servers/basehttp.py has been edited. Here's the result of running `cat -n` on a snippet of /testbed/django/core/servers/basehttp.py:
+    75	            logger.info("- Broken pipe from %s\n", client_address)
+    76	        else:
+    77	            super().handle_error(request, client_address)
+    78	
+    79	
+    80	class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):
+    81	    """A threaded version of the WSGIServer"""
+    82	    daemon_threads = True
+    83	
+    84	    def process_request_thread(self, request, client_address):
+    85	        """
+    86	        Ensure database connections opened by a request thread are closed
+    87	        when the thread finishes, so they don't outlive the thread.
+    88	        """
+    89	        try:
+    90	            super().process_request_thread(request, client_address)
+    91	        finally:
+    92	            from django.db import connections
+    93	            connections.close_all()
+    94	
+    95	
+    96	class ServerHandler(simple_server.ServerHandler):
+Review the changes and make sure they are as expected. Edit the file again if necessary.
+
+2026-10-11 16:09:24,987 - INFO - swea-agent - ========================= STEP 4 =========================
+2026-10-11 16:09:24,994 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:09:25,924 - INFO - swea-agent - 💭 THOUGHT
+I'll move the import to the top-level for cleanliness, checking for circular-import risk first.
+
+🎬 ACTION
+cd /testbed && sed -n 1,20p django/core/servers/basehttp.py
+2026-10-11 16:09:26,190 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+"""
+HTTP server that implements the Python WSGI protocol (PEP 333, rev 1.21).
+
+Based on wsgiref.simple_server which is part of the standard library since 2.5.
+
+This is a simple server for use in testing or debugging Django apps. It hasn't
+been reviewed for security issues. DON'T USE IT FOR PRODUCTION USE!
+"""
+
+import logging
+import socket
+import socketserver
+import sys
+from wsgiref import simple_server
+
+from django.core.exceptions import ImproperlyConfigured
+from django.core.handlers.wsgi import LimitedStream
+from django.core.wsgi import get_wsgi_application
+from django.utils.module_loading import import_string
+
+
+2026-10-11 16:09:26,194 - INFO - swea-agent - ========================= STEP 5 =========================
+2026-10-11 16:09:26,201 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:09:27,690 - INFO - swea-agent - 💭 THOUGHT
+`django.db` is safe to import here (`core.handlers.wsgi` already loads it transitively), so I'll import at module level.
+
+🎬 ACTION
+cd /testbed && python - <<'EOF'
+import re
+p='django/core/servers/basehttp.py'
+s=open(p).read()
+s=s.replace("from django.core.wsgi import get_wsgi_application\n","from django.core.wsgi import get_wsgi_application\nfrom django.db import connections\n",1)
+s=s.replace("            from django.db import connections\n            connections.close_all()","            connections.close_all()",1)
+open(p,'w').write(s)
+EOF
+python -c "import django; django.setup(); import django.core.servers.basehttp" && echo OK
+2026-10-11 16:09:28,579 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/testbed/django/__init__.py", line 19, in setup
+    configure_logging(settings.LOGGING_CONFIG, settings.LOGGING)
+  File "/testbed/django/conf/__init__.py", line 67, in __getattr__
+    self._setup(name)
+  File "/testbed/django/conf/__init__.py", line 48, in _setup
+    raise ImproperlyConfigured(
+django.core.exceptions.ImproperlyConfigured: Requested setting LOGGING_CONFIG, but settings are not configured. You must either define the environment variable DJANGO_SETTINGS_MODULE or call settings.configure() before accessing settings.
+
+2026-10-11 16:09:28,584 - INFO - swea-agent - ========================= STEP 6 =========================
+2026-10-11 16:09:28,591 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:09:31,261 - INFO - swea-agent - 💭 THOUGHT
+That error is just my ad-hoc check lacking settings. Let me write a reproduction that exercises the threaded server directly with a real DB connection in a request thread, and run the existing live server tests.
+
+🎬 ACTION
+cd /testbed && cat > /tmp/repro.py <<'EOF'
+import threading, django
+from django.conf import settings
+settings.configure(DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}, INSTALLED_APPS=[])
+django.setup()
+from django.core.servers.basehttp import ThreadedWSGIServer, WSGIRequestHandler
+from django.db import connections
+from socketserver import ThreadingMixIn
+from django.core.servers.basehttp import WSGIServer
+import socket, urllib.request
+
+def app(environ, start_response):
+    # Open a connection in the request thread
+    connections['default'].ensure_connection()
+    start_response('200 OK', [('Content-Type', 'text/plain')])
+    return [b'ok']
+
+httpd = ThreadedWSGIServer(('127.0.0.1', 0), WSGIRequestHandler)
+httpd.set_app(app)
+t = threading.Thread(target=httpd.serve_forever, daemon=True); t.start()
+port = httpd.server_address[1]
+urllib.request.urlopen(f'http://127.0.0.1:{port}/').read()
+import time; time.sleep(0.5)
+httpd.shutdown()
+# Connections opened in request threads should have been closed
+print("open connection in request thread closed:", connections['default'].connection is None)
+EOF
+python /tmp/repro.py; git stash -q; python /tmp/repro.py; git stash pop -q
+2026-10-11 16:09:34,309 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+[11/Oct/2026 21:09:31] "GET / HTTP/1.1" 200 2
+open connection in request thread closed: True
+[11/Oct/2026 21:09:32] "GET / HTTP/1.1" 200 2
+open connection in request thread closed: True
+
+2026-10-11 16:09:34,314 - INFO - swea-agent - ========================= STEP 7 =========================
+2026-10-11 16:09:34,320 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:09:36,748 - INFO - swea-agent - 💭 THOUGHT
+My repro's check is weak: the main thread's connection is always None, so it doesn't reflect the request thread's connection. A stronger check is to inspect the thread-local connection inside the request thread after the handler finishes. Let me verify directly by recording the connection object the request thread created.
+
+🎬 ACTION
+cd /testbed && cat > /tmp/repro2.py <<'EOF'
+import threading, django, time, urllib.request
+from django.conf import settings
+settings.configure(DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}, INSTALLED_APPS=[])
+django.setup()
+from django.core.servers.basehttp import ThreadedWSGIServer, WSGIRequestHandler
+from django.db import connections
+
+seen = []
+def app(environ, start_response):
+    c = connections['default']
+    c.ensure_connection()
+    seen.append(c)
+    start_response('200 OK', [('Content-Type', 'text/plain')])
+    return [b'ok']
+
+httpd = ThreadedWSGIServer(('127.0.0.1', 0), WSGIRequestHandler)
+httpd.set_app(app)
+threading.Thread(target=httpd.serve_forever, daemon=True).start()
+urllib.request.urlopen(f'http://127.0.0.1:{httpd.server_address[1]}/').read()
+time.sleep(0.5)
+httpd.shutdown()
+print("request-thread connection closed:", seen[0].connection is None)
+EOF
+python /tmp/repro2.py 2>/dev/null | tail -1; git stash -q; python /tmp/repro2.py 2>/dev/null | tail -1; git stash pop -q
+2026-10-11 16:09:39,756 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+request-thread connection closed: False
+request-thread connection closed: False
+
+2026-10-11 16:09:39,761 - INFO - swea-agent - ========================= STEP 8 =========================
+2026-10-11 16:09:39,768 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:09:41,303 - INFO - swea-agent - 💭 THOUGHT
+The check is still false with my fix. The `connections` handler is thread-local, and `close_all()` runs in the request thread, so it should close that thread's connection. Let me investigate why it isn't closing.
+
+🎬 ACTION
+cd /testbed && sed -n 1,30p django/db/utils.py | head -0; grep -n "def close_all" -A12 django/db/utils.py; grep -n "def close\b" -A15 django/db/backends/base/base.py | head -30; grep -n "def connect\|in_memory\|_thread_sharing" django/db/backends/sqlite3/base.py | head
+2026-10-11 16:09:41,576 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+sed: couldn't flush stdout: Broken pipe
+207:    def close_all(self):
+208-        for alias in self:
+209-            try:
+210-                connection = getattr(self._connections, alias)
+211-            except AttributeError:
+212-                continue
+213-            connection.close()
+214-
+215-
+216-class ConnectionRouter:
+217-    def __init__(self, routers=None):
+218-        """
+219-        If routers is not specified, default to settings.DATABASE_ROUTERS.
+283:    def close(self):
+284-        """Close the connection to the database."""
+285-        self.validate_thread_sharing()
+286-        self.run_on_commit = []
+287-
+288-        # Don't call validate_no_atomic_block() to avoid making it difficult
+289-        # to get rid of a connection in an invalid state. The next connect()
+290-        # will reset the transaction state anyway.
+291-        if self.closed_in_transaction or self.connection is None:
+292-            return
+293-        try:
+294-            self._close()
+295-        finally:
+296-            if self.in_atomic_block:
+297-                self.closed_in_transaction = True
+298-                self.needs_rollback = True
+188:        # higher level by the `BaseDatabaseWrapper.allow_thread_sharing`
+196:                '`DatabaseWrapper.allow_thread_sharing` property instead '
+271:        self.validate_thread_sharing()
+275:        if not self.is_in_memory_db():
+399:    def is_in_memory_db(self):
+400:        return self.creation.is_in_memory_db(self.settings_dict['NAME'])
+
+2026-10-11 16:09:41,583 - INFO - swea-agent - ========================= STEP 9 =========================
+2026-10-11 16:09:41,590 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:09:43,308 - INFO - swea-agent - 💭 THOUGHT
+The sqlite `:memory:` case in my script is a red herring: `close()` returns early for in-memory DBs, and `close` may raise on thread sharing. The real `LiveServerTestCase` scenario is a file or server DB. Let me switch my repro to a file-based sqlite DB, which is what the PR is about, and check the result there.
+
+🎬 ACTION
+cd /testbed && sed -i "s|'NAME': ':memory:'|'NAME': '/tmp/repro.sqlite3'|" /tmp/repro2.py && python /tmp/repro2.py 2>/dev/null | tail -1; git stash -q; python /tmp/repro2.py 2>/dev/null | tail -1; git stash pop -q
+2026-10-11 16:09:46,140 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+request-thread connection closed: True
+request-thread connection closed: False
+
+2026-10-11 16:09:46,147 - INFO - swea-agent - ========================= STEP 10 =========================
+2026-10-11 16:09:46,154 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:09:47,431 - INFO - swea-agent - 💭 THOUGHT
+With a file-based database the behavior is now correct: without the fix the request-thread connection leaks (`False`), and with the fix it is closed (`True`). Now let me run the existing live server and servers test suites to check for regressions.
+
+🎬 ACTION
+cd /testbed/tests && python runtests.py servers test_client test_utils --parallel 1 2>&1 | tail -15
+2026-10-11 16:09:53,141 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+  File "<frozen importlib._bootstrap>", line 1014, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 991, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 961, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 219, in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1014, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 991, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 973, in _find_and_load_unlocked
+ModuleNotFoundError: No module named 'tests'
+
+----------------------------------------------------------------------
+Ran 270 tests in 4.758s
+
+FAILED (errors=2, skipped=2)
+Destroying test database for alias 'default'...
+Destroying test database for alias 'other'...
+
+2026-10-11 16:09:53,151 - INFO - swea-agent - ========================= STEP 11 =========================
+2026-10-11 16:09:53,159 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:09:54,323 - INFO - swea-agent - 💭 THOUGHT
+Two errors; let me see which tests they are and whether they predate my change.
+
+🎬 ACTION
+cd /testbed/tests && python runtests.py servers test_client test_utils --parallel 1 2>&1 | grep -E "^(ERROR|FAIL):"; echo ---; git stash -q; python runtests.py servers test_client test_utils --parallel 1 2>&1 | grep -E "^(ERROR|FAIL):|^Ran|^FAILED|^OK"; git stash pop -q
+2026-10-11 16:10:05,251 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+ERROR: test_response_resolver_match_middleware_urlconf (test_client.tests.AsyncClientTest)
+ERROR: test_response_resolver_match_middleware_urlconf (test_client.tests.ClientTest)
+---
+ERROR: test_response_resolver_match_middleware_urlconf (test_client.tests.AsyncClientTest)
+ERROR: test_response_resolver_match_middleware_urlconf (test_client.tests.ClientTest)
+Ran 270 tests in 4.717s
+FAILED (errors=2, skipped=2)
+
+2026-10-11 16:10:05,258 - INFO - swea-agent - ========================= STEP 12 =========================
+2026-10-11 16:10:05,266 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:10:06,347 - INFO - swea-agent - 💭 THOUGHT
+Both errors are pre-existing (identical without my change, caused by a missing `tests` module path in an unrelated urlconf test), so there are no regressions. The live server tests pass.
+
+Final diff:
+
+🎬 ACTION
+cd /testbed && git diff; rm -f /tmp/repro.sqlite3
+2026-10-11 16:10:06,619 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+diff --git a/django/core/servers/basehttp.py b/django/core/servers/basehttp.py
+index 14dab517c9..07c984001f 100644
+--- a/django/core/servers/basehttp.py
++++ b/django/core/servers/basehttp.py
+@@ -16,6 +16,7 @@ from wsgiref import simple_server
+ from django.core.exceptions import ImproperlyConfigured
+ from django.core.handlers.wsgi import LimitedStream
+ from django.core.wsgi import get_wsgi_application
++from django.db import connections
+ from django.utils.module_loading import import_string
+ 
+ __all__ = ('WSGIServer', 'WSGIRequestHandler')
+@@ -81,6 +82,16 @@ class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):
+     """A threaded version of the WSGIServer"""
+     daemon_threads = True
+ 
++    def process_request_thread(self, request, client_address):
++        """
++        Ensure database connections opened by a request thread are closed
++        when the thread finishes, so they don't outlive the thread.
++        """
++        try:
++            super().process_request_thread(request, client_address)
++        finally:
++            connections.close_all()
++
+ 
+ class ServerHandler(simple_server.ServerHandler):
+     http_version = '1.1'
+
+2026-10-11 16:10:06,629 - INFO - swea-agent - ========================= STEP 13 =========================
+2026-10-11 16:10:06,637 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:10:09,805 - WARNING - swea-agent - Requerying model after FunctionCallingFormatError (1th requery)
+2026-10-11 16:10:09,809 - WARNING - swea-agent - Your last output did not use any tool calls!
+Please make sure your output includes exactly _ONE_ function call!
+You must invoke the function directly using the function call format.
+You cannot invoke commands with ```, you have to use the function call format.
+If you think you have already resolved the issue, please submit your changes by running the `submit` command.
+If you think you cannot solve the problem, please run `exit_forfeit` (if available) or `submit`.
+Else, please continue with a new tool call!
+2026-10-11 16:10:09,821 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:10:10,856 - INFO - swea-agent - 💭 THOUGHT
+The fix is in place and verified, so I'll submit it now.
+
+🎬 ACTION
+submit
+2026-10-11 16:10:11,255 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+Thank you for your work on this issue. Please carefully follow the steps below to help review your changes.
+
+1. If you made any changes to your code after running the reproduction script, please run the reproduction script again.
+  If the reproduction script is failing, please revisit your changes and make sure they are correct.
+  If you have already removed your reproduction script, please ignore this step.
+2. Remove your reproduction script (if you haven't done so already).
+3. If you have modified any TEST files, please revert them to the state they had before you started fixing the issue.
+  You can do this with `git checkout -- /path/to/test/file.py`. Use below <diff> to find the files you need to revert.
+4. Run the submit command again to confirm.
+
+Here is a list of all of your changes:
+
+<diff>
+diff --git a/django/core/servers/basehttp.py b/django/core/servers/basehttp.py
+index 14dab517c9..07c984001f 100644
+--- a/django/core/servers/basehttp.py
++++ b/django/core/servers/basehttp.py
+@@ -16,6 +16,7 @@ from wsgiref import simple_server
+ from django.core.exceptions import ImproperlyConfigured
+ from django.core.handlers.wsgi import LimitedStream
+ from django.core.wsgi import get_wsgi_application
++from django.db import connections
+ from django.utils.module_loading import import_string
+ 
+ __all__ = ('WSGIServer', 'WSGIRequestHandler')
+@@ -81,6 +82,16 @@ class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):
+     """A threaded version of the WSGIServer"""
+     daemon_threads = True
+ 
++    def process_request_thread(self, request, client_address):
++        """
++        Ensure database connections opened by a request thread are closed
++        when the thread finishes, so they don't outlive the thread.
++        """
++        try:
++            super().process_request_thread(request, client_address)
++        finally:
++            connections.close_all()
++
+ 
+ class ServerHandler(simple_server.ServerHandler):
+     http_version = '1.1'
+
+</diff>
+
+
+2026-10-11 16:10:11,301 - INFO - swea-agent - ========================= STEP 15 =========================
+2026-10-11 16:10:11,322 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 16:10:12,714 - INFO - swea-agent - 💭 THOUGHT
+Following the submit instructions: I did not modify any test files, and my reproduction scripts lived in `/tmp` (the sqlite file was removed). The latest change is the one reviewed above, and I re-ran verification after it, so nothing else needs to change. Submitting again to confirm.
+
+🎬 ACTION
+submit
+2026-10-11 16:10:13,109 - INFO - swea-agent - Found submission: diff --git a/django/core/servers/basehttp.py b/django/core/servers/basehttp.py
+index 14dab517c9..07c984001f 100644
+--- a/django/core/servers/basehttp.py
++++ b/django/core/servers/basehttp.py
+@@ -16,6 +16,7 @@ from wsgiref import simple_server
+ from django.core.exceptions import ImproperlyConfigured
+ from django.core.handlers.wsgi import LimitedStream
+ from django.core.wsgi import get_wsgi_application
++from django.db import connections
+ from django.utils.module_loading import import_string
+ 
+ __all__ = ('WSGIServer', 'WSGIRequestHandler')
+@@ -81,6 +82,16 @@ class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):
+     """A threaded version of the WSGIServer"""
+     daemon_threads = True
+ 
++    def process_request_thread(self, request, client_address):
++        """
++        Ensure database connections opened by a request thread are closed
++        when the thread finishes, so they don't outlive the thread.
++        """
++        try:
++            super().process_request_thread(request, client_address)
++        finally:
++            connections.close_all()
++
+ 
+ class ServerHandler(simple_server.ServerHandler):
+     http_version = '1.1'
+
+2026-10-11 16:10:13,134 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+diff --git a/django/core/servers/basehttp.py b/django/core/servers/basehttp.py
+index 14dab517c9..07c984001f 100644
+--- a/django/core/servers/basehttp.py
++++ b/django/core/servers/basehttp.py
+@@ -16,6 +16,7 @@ from wsgiref import simple_server
+ from django.core.exceptions import ImproperlyConfigured
+ from django.core.handlers.wsgi import LimitedStream
+ from django.core.wsgi import get_wsgi_application
++from django.db import connections
+ from django.utils.module_loading import import_string
+ 
+ __all__ = ('WSGIServer', 'WSGIRequestHandler')
+@@ -81,6 +82,16 @@ class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):
+     """A threaded version of the WSGIServer"""
+     daemon_threads = True
+ 
++    def process_request_thread(self, request, client_address):
++        """
++        Ensure database connections opened by a request thread are closed
++        when the thread finishes, so they don't outlive the thread.
++        """
++        try:
++            super().process_request_thread(request, client_address)
++        finally:
++            connections.close_all()
++
+ 
+ class ServerHandler(simple_server.ServerHandler):
+     http_version = '1.1'
+
+2026-10-11 16:10:13,292 - INFO - swea-agent - Trajectory saved to /home/box/context-shaping/results/swebench/runs/django__django-14011/swe_agent_nothink/out/django__django-14011/django__django-14011.traj
+2026-10-11 16:10:13,299 - INFO - swea-env - Beginning environment shutdown...

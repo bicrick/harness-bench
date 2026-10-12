@@ -41,9 +41,9 @@ def calls(iid, h):
 def actions(iid, h):
     """Ordered list of (kind, text) for harnesses with transcripts."""
     out = []
-    base = f'{R}/runs/{iid}/{h}'
+    rd = f'{R}/runs/{iid}/{h}'
     if h.startswith('cursor'):
-        p = f'{base}/stdout.txt'
+        p = f'{rd}/stdout.txt'
         if not os.path.exists(p):
             return None, 0
         think = 0
@@ -68,14 +68,14 @@ def actions(iid, h):
                     out.append(('search', k))
         return out, think
     if base(h) == 'swe_agent':
-        f = glob.glob(f'{base}/out/*/*.traj')
+        f = glob.glob(f'{rd}/out/*/*.traj')
         if not f:
             return None, 0
         for s in json.load(open(f[0]))['trajectory']:
             out.append(('shell', s.get('action') or ''))
         return out, 0
     if base(h) == 'mini_swe_agent':
-        f = glob.glob(f'{base}/out/*/*.traj.json')
+        f = glob.glob(f'{rd}/out/*/*.traj.json')
         if not f:
             return None, 0
         for m in json.load(open(f[0]))['messages']:

@@ -1,0 +1,1859 @@
+2026-10-11 17:33:52,219 - INFO - rex-deploy - Building image docker.io/swebench/sweb.eval.x86_64.mwaskom_1776_seaborn-3187:latest to install a standalone python to /root. This might take a while (but you only have to do it once). To skip this step, set `python_standalone_dir` to None.
+2026-10-11 17:34:49,536 - INFO - rex-deploy - Starting container docker.ioswebenchsweb.eval.x86_64.mwaskom_1776_seaborn-3187latest-9f781678-1830-4b42-9b9a-54a4d73d556f with image docker.io/swebench/sweb.eval.x86_64.mwaskom_1776_seaborn-3187:latest serving on port 42505
+2026-10-11 17:34:49,543 - INFO - rex-deploy - Starting runtime at 42505
+2026-10-11 17:34:51,026 - INFO - rex-deploy - Runtime started in 1.48s
+2026-10-11 17:34:52,032 - INFO - swea-env - Environment Initialized
+2026-10-11 17:34:52,710 - INFO - swea-agent - Setting up agent for instance mwaskom__seaborn-3187
+2026-10-11 17:34:52,713 - INFO - swea-agent - Trajectory will be saved to /home/box/context-shaping/results/swebench/runs/mwaskom__seaborn-3187/swe_agent_nothink/out/mwaskom__seaborn-3187/mwaskom__seaborn-3187.traj
+2026-10-11 17:34:56,592 - INFO - swea-tools - Resetting tools
+2026-10-11 17:34:56,956 - INFO - swea-agent - SYSTEM (main)
+You are a helpful assistant that can interact with a computer to solve tasks.
+2026-10-11 17:34:57,118 - INFO - swea-agent - 🤖 MODEL INPUT
+<uploaded_files>
+/testbed
+</uploaded_files>
+I've uploaded a python code repository in the directory /testbed. Consider the following PR description:
+
+<pr_description>
+Wrong legend values of large ranges
+As of 0.12.1, legends describing large numbers that were created using `ScalarFormatter` with an offset are formatted without their multiplicative offset value. An example:
+```python
+import seaborn as sns
+import seaborn.objects as so
+
+penguins = sns.load_dataset("Penguins")
+penguins["body_mass_mg"] = penguins["body_mass_g"]*1000
+(
+    so.Plot(
+        penguins, x="bill_length_mm", y="bill_depth_mm",
+        color="species", pointsize="body_mass_mg",
+    )
+    .add(so.Dot())
+)
+```
+The code creates the following plot:
+![image](https://user-images.githubusercontent.com/13831112/205512305-778966db-f8d8-43f3-a2c0-5e5ce95bae39.png)
+which is wrong because `body_mass_mg` is in the order of 1E6. The issue also reproduces if you create the mentioned plot using `scatterplot`.
+ 
+I believe the issue stems from not using the offset value of the `ScalarFormatter` used to generate the tick labels:
+https://github.com/mwaskom/seaborn/blob/ba786bc14eb255f6b4fb7619c8210c5a8016a26f/seaborn/_core/scales.py#L377-L382
+Examining the code of `ScalarFormatter` suggests the issue also depends on the following rcParam settings:
+`mpl.rcParams['axes.formatter.useoffset']`
+`mpl.rcParams['axes.formatter.offset_threshold']`
+However, I did not test it. 
+
+The offset value can be safely retrieved from all formatters and based on that it can be used to create the legend title and/or labels.
+
+</pr_description>
+
+Can you help me implement the necessary changes to the repository so that the requirements specified in the <pr_description> are met?
+I've already taken care of all changes to any of the test files described in the <pr_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!
+Your task is to make the minimal changes to non-tests files in the /testbed directory to ensure the <pr_description> is satisfied.
+Follow these steps to resolve the issue:
+1. As a first step, it might be a good idea to find and read code relevant to the <pr_description>
+2. Create a script to reproduce the error and execute it with `python <filename.py>` using the bash tool, to confirm the error
+3. Edit the sourcecode of the repo to resolve the issue
+4. Rerun your reproduce script and confirm that the error is fixed!
+5. Think about edgecases and make sure your fix handles them as well
+Your thinking should be thorough and so it's fine if it's very long.
+2026-10-11 17:34:57,121 - INFO - swea-agent - ========================= STEP 1 =========================
+2026-10-11 17:34:57,264 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:34:58,781 - WARNING - swea-agent - Requerying model after FunctionCallingFormatError (1th requery)
+2026-10-11 17:34:58,785 - WARNING - swea-agent - Your last output included multiple tool calls!
+Please make sure your output includes a thought and exactly _ONE_ function call.
+2026-10-11 17:34:58,789 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:34:59,785 - INFO - swea-agent - 💭 THOUGHT
+Understood. Let me look at the scales code around the referenced lines.
+
+🎬 ACTION
+sed -n 340,420p /testbed/seaborn/_core/scales.py
+2026-10-11 17:35:00,070 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+        mpl_scale.set_default_locators_and_formatters(axis)
+        new._matplotlib_scale = mpl_scale
+
+        normalize: Optional[Callable[[ArrayLike], ArrayLike]]
+        if prop.normed:
+            if new.norm is None:
+                vmin, vmax = data.min(), data.max()
+            else:
+                vmin, vmax = new.norm
+            vmin, vmax = axis.convert_units((vmin, vmax))
+            a = forward(vmin)
+            b = forward(vmax) - forward(vmin)
+
+            def normalize(x):
+                return (x - a) / b
+
+        else:
+            normalize = vmin = vmax = None
+
+        new._pipeline = [
+            axis.convert_units,
+            forward,
+            normalize,
+            prop.get_mapping(new, data)
+        ]
+
+        def spacer(x):
+            x = x.dropna().unique()
+            if len(x) < 2:
+                return np.nan
+            return np.min(np.diff(np.sort(x)))
+        new._spacer = spacer
+
+        # TODO How to allow disabling of legend for all uses of property?
+        # Could add a Scale parameter, or perhaps Scale.suppress()?
+        # Are there other useful parameters that would be in Scale.legend()
+        # besides allowing Scale.legend(False)?
+        if prop.legend:
+            axis.set_view_interval(vmin, vmax)
+            locs = axis.major.locator()
+            locs = locs[(vmin <= locs) & (locs <= vmax)]
+            labels = axis.major.formatter.format_ticks(locs)
+            new._legend = list(locs), list(labels)
+
+        return new
+
+    def _get_transform(self):
+
+        arg = self.trans
+
+        def get_param(method, default):
+            if arg == method:
+                return default
+            return float(arg[len(method):])
+
+        if arg is None:
+            return _make_identity_transforms()
+        elif isinstance(arg, tuple):
+            return arg
+        elif isinstance(arg, str):
+            if arg == "ln":
+                return _make_log_transforms()
+            elif arg == "logit":
+                base = get_param("logit", 10)
+                return _make_logit_transforms(base)
+            elif arg.startswith("log"):
+                base = get_param("log", 10)
+                return _make_log_transforms(base)
+            elif arg.startswith("symlog"):
+                c = get_param("symlog", 1)
+                return _make_symlog_transforms(c)
+            elif arg.startswith("pow"):
+                exp = get_param("pow", 2)
+                return _make_power_transforms(exp)
+            elif arg == "sqrt":
+                return _make_sqrt_transforms()
+            else:
+                raise ValueError(f"Unknown value provided for trans: {arg!r}")
+
+
+@dataclass
+
+2026-10-11 17:35:00,080 - INFO - swea-agent - ========================= STEP 3 =========================
+2026-10-11 17:35:00,085 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:35:01,358 - INFO - swea-agent - 💭 THOUGHT
+The legend is built from `format_ticks`, which ignores the offset. Let me check how legend labels and titles are consumed, and whether the formatter exposes `get_offset()`.
+
+🎬 ACTION
+cd /testbed && grep -rn "_legend\|get_offset\|format_ticks" seaborn/ | grep -v tests; python -c "import matplotlib; print(matplotlib.__version__)"
+2026-10-11 17:35:02,260 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+seaborn/categorical.py:53:    _legend_func = "scatter"
+seaborn/categorical.py:54:    _legend_attributes = ["color"]
+seaborn/categorical.py:311:            show_legend = not self._redundant_hue and self.input_format != "wide"
+seaborn/categorical.py:313:            show_legend = bool(self.legend)
+seaborn/categorical.py:315:        if show_legend:
+seaborn/categorical.py:316:            self.add_legend_data(ax)
+seaborn/categorical.py:317:            handles, _ = ax.get_legend_handles_labels()
+seaborn/categorical.py:373:            if points.get_offsets().shape[0] > 1:
+seaborn/categorical.py:403:            show_legend = not self._redundant_hue and self.input_format != "wide"
+seaborn/categorical.py:405:            show_legend = bool(self.legend)
+seaborn/categorical.py:407:        if show_legend:
+seaborn/categorical.py:408:            self.add_legend_data(ax)
+seaborn/categorical.py:409:            handles, _ = ax.get_legend_handles_labels()
+seaborn/categorical.py:769:    def add_legend_data(self, ax, color, label):
+seaborn/categorical.py:835:                        self.add_legend_data(ax, self.colors[j], hue_level)
+seaborn/categorical.py:1206:                        self.add_legend_data(ax, self.colors[j], hue_level)
+seaborn/categorical.py:2016:                        self.add_legend_data(ax, self.colors[j], hue_level)
+seaborn/categorical.py:3147:            g._update_legend_data(ax)
+seaborn/categorical.py:3151:            g.add_legend(title=hue, label_order=hue_order)
+seaborn/categorical.py:3260:        g.add_legend(title=hue, label_order=hue_order)
+seaborn/categorical.py:3370:        orig_xy_data = points.get_offsets()
+seaborn/_core/properties.py:304:    _legend = False
+seaborn/_core/properties.py:309:    _legend = False
+seaborn/_core/plot.py:853:        plotter._make_legend(self)
+seaborn/_core/plot.py:878:        self._legend_contents: list[tuple[
+seaborn/_core/plot.py:1367:            self._update_legend_contents(p, mark, data, scales)
+seaborn/_core/plot.py:1540:    def _update_legend_contents(
+seaborn/_core/plot.py:1562:            var_legend = scales[var]._legend
+seaborn/_core/plot.py:1563:            if var_legend is not None:
+seaborn/_core/plot.py:1564:                values, labels = var_legend
+seaborn/_core/plot.py:1580:                artist = mark._legend_artist(variables, val, scales)
+seaborn/_core/plot.py:1586:        self._legend_contents.extend(contents)
+seaborn/_core/plot.py:1588:    def _make_legend(self, p: Plot) -> None:
+seaborn/_core/plot.py:1596:        for key, new_artists, labels in self._legend_contents:
+seaborn/_core/plot.py:1614:        base_legend = None
+seaborn/_core/plot.py:1626:            if base_legend:
+seaborn/_core/plot.py:1630:                base_legend_box = base_legend.get_children()[0]
+seaborn/_core/plot.py:1631:                this_legend_box = legend.get_children()[0]
+seaborn/_core/plot.py:1632:                base_legend_box.get_children().extend(this_legend_box.get_children())
+seaborn/_core/plot.py:1634:                base_legend = legend
+seaborn/_core/scales.py:63:    _legend: tuple[list[str], list[Any]] | None
+seaborn/_core/scales.py:69:        self._legend = None
+seaborn/_core/scales.py:137:            _legend = None
+seaborn/_core/scales.py:232:            new._legend = units_seed, list(stringify(units_seed))
+seaborn/_core/scales.py:381:            labels = axis.major.formatter.format_ticks(locs)
+seaborn/_core/scales.py:382:            new._legend = list(locs), list(labels)
+seaborn/distributions.py:138:    def _add_legend(
+seaborn/distributions.py:166:            ax_obj.add_legend(
+seaborn/distributions.py:740:            self._add_legend(
+seaborn/distributions.py:897:            self._add_legend(
+seaborn/distributions.py:1032:            self._add_legend(
+seaborn/distributions.py:1218:            self._add_legend(
+seaborn/distributions.py:1287:            self._add_legend(
+seaborn/distributions.py:1321:                self._add_legend(
+seaborn/relational.py:12:    locator_to_legend_entries,
+seaborn/relational.py:13:    adjust_legend_subtitles,
+seaborn/relational.py:193:    def add_legend_data(self, ax):
+seaborn/relational.py:246:            hue_levels, hue_formatted_levels = locator_to_legend_entries(
+seaborn/relational.py:278:            size_levels, size_formatted_levels = locator_to_legend_entries(
+seaborn/relational.py:321:        func = getattr(ax, self._legend_func)
+seaborn/relational.py:332:            for attr in self._legend_attributes + ["visible"]:
+seaborn/relational.py:336:            if self._legend_func == "plot":
+seaborn/relational.py:348:    _legend_attributes = ["color", "linewidth", "marker", "dashes"]
+seaborn/relational.py:349:    _legend_func = "plot"
+seaborn/relational.py:517:            self.add_legend_data(ax)
+seaborn/relational.py:518:            handles, _ = ax.get_legend_handles_labels()
+seaborn/relational.py:521:                adjust_legend_subtitles(legend)
+seaborn/relational.py:526:    _legend_attributes = ["color", "s", "marker"]
+seaborn/relational.py:527:    _legend_func = "scatter"
+seaborn/relational.py:596:            self.add_legend_data(ax)
+seaborn/relational.py:597:            handles, _ = ax.get_legend_handles_labels()
+seaborn/relational.py:600:                adjust_legend_subtitles(legend)
+seaborn/relational.py:966:        p.add_legend_data(g.axes.flat[0])
+seaborn/relational.py:968:            g.add_legend(legend_data=p.legend_data,
+seaborn/_marks/bar.py:91:    def _legend_artist(
+seaborn/_marks/base.py:217:    def _legend_artist(
+seaborn/_marks/line.py:83:    def _legend_artist(self, variables, value, scales):
+seaborn/_marks/line.py:202:    def _legend_artist(self, variables, value, scales):
+seaborn/_marks/area.py:71:    def _legend_artist(self, variables, value, scales):
+seaborn/_marks/dot.py:87:    def _legend_artist(
+seaborn/regression.py:640:        facets.add_legend()
+seaborn/axisgrid.py:16:    adjust_legend_subtitles, _check_argument, _draw_figure, _disable_autolayout
+seaborn/axisgrid.py:101:    _legend_out = True
+seaborn/axisgrid.py:110:        self._extract_legend_handles = False
+seaborn/axisgrid.py:121:    def add_legend(self, legend_data=None, title=None, label_order=None,
+seaborn/axisgrid.py:130:            default reads from ``self._legend_data``.
+seaborn/axisgrid.py:151:            legend_data = self._legend_data
+seaborn/axisgrid.py:175:        if self._legend_out:
+seaborn/axisgrid.py:183:            self._legend = figlegend
+seaborn/axisgrid.py:187:                adjust_legend_subtitles(figlegend)
+seaborn/axisgrid.py:218:            self._legend = leg
+seaborn/axisgrid.py:221:                adjust_legend_subtitles(leg)
+seaborn/axisgrid.py:225:    def _update_legend_data(self, ax):
+seaborn/axisgrid.py:231:        if ax.legend_ is not None and self._extract_legend_handles:
+seaborn/axisgrid.py:236:        handles, labels = ax.get_legend_handles_labels()
+seaborn/axisgrid.py:239:        self._legend_data.update(data)
+seaborn/axisgrid.py:278:            return self._legend
+seaborn/axisgrid.py:493:        self._legend = None
+seaborn/axisgrid.py:514:        self._legend_out = legend_out
+seaborn/axisgrid.py:515:        self._legend_data = {}
+seaborn/axisgrid.py:851:        self._update_legend_data(ax)
+seaborn/axisgrid.py:1334:        self._legend_data = {}
+seaborn/axisgrid.py:1559:            self._extract_legend_handles = True
+seaborn/axisgrid.py:1572:            self.hue_names = list(self._legend_data)
+seaborn/axisgrid.py:1611:        self._update_legend_data(ax)
+seaborn/axisgrid.py:1655:        self._update_legend_data(ax)
+seaborn/axisgrid.py:2172:        grid.add_legend()
+seaborn/axisgrid.py:2331:        x, y = grid.ax_joint.collections[0].get_offsets().T
+seaborn/_testing.py:50:def assert_legends_equal(leg1, leg2):
+seaborn/utils.py:20:__all__ = ["desaturate", "saturate", "set_hls_values", "move_legend",
+seaborn/utils.py:400:def move_legend(obj, loc, **kwargs):
+seaborn/utils.py:425:    .. include:: ../docstrings/move_legend.rst
+seaborn/utils.py:436:        old_legend = obj.legend
+seaborn/utils.py:439:        old_legend = obj.legend_
+seaborn/utils.py:443:            old_legend = obj.legends[-1]
+seaborn/utils.py:445:            old_legend = None
+seaborn/utils.py:451:    if old_legend is None:
+seaborn/utils.py:456:    handles = old_legend.legendHandles
+seaborn/utils.py:457:    labels = [t.get_text() for t in old_legend.get_texts()]
+seaborn/utils.py:462:    props = {k: v for k, v in old_legend.properties().items() if k in legend_kws}
+seaborn/utils.py:477:    kwargs.setdefault("frameon", old_legend.legendPatch.get_visible())
+seaborn/utils.py:481:    old_legend.remove()
+seaborn/utils.py:482:    new_legend = legend_func(handles, labels, loc=loc, **props)
+seaborn/utils.py:483:    new_legend.set_title(title.get_text(), title.get_fontproperties())
+seaborn/utils.py:487:        obj._legend = new_legend
+seaborn/utils.py:687:def locator_to_legend_entries(locator, limits, dtype):
+seaborn/utils.py:706:    # formatted_levels = formatter.format_ticks(raw_levels)
+seaborn/utils.py:811:def adjust_legend_subtitles(legend):
+3.7.2
+
+2026-10-11 17:35:02,267 - INFO - swea-agent - ========================= STEP 4 =========================
+2026-10-11 17:35:02,273 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:35:03,526 - INFO - swea-agent - 💭 THOUGHT
+Let me look at `locator_to_legend_entries` in utils, since the scatterplot path also reproduces the bug, and at the plot-side legend assembly.
+
+🎬 ACTION
+cd /testbed && sed -n 680,730p seaborn/utils.py; echo ----; sed -n 1540,1600p seaborn/_core/plot.py; echo ----; sed -n 236,260p seaborn/relational.py
+2026-10-11 17:35:03,841 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+        True when the labels on that axis overlap.
+
+    """
+    return (axis_ticklabels_overlap(ax.get_xticklabels()),
+            axis_ticklabels_overlap(ax.get_yticklabels()))
+
+
+def locator_to_legend_entries(locator, limits, dtype):
+    """Return levels and formatted levels for brief numeric legends."""
+    raw_levels = locator.tick_values(*limits).astype(dtype)
+
+    # The locator can return ticks outside the limits, clip them here
+    raw_levels = [l for l in raw_levels if l >= limits[0] and l <= limits[1]]
+
+    class dummy_axis:
+        def get_view_interval(self):
+            return limits
+
+    if isinstance(locator, mpl.ticker.LogLocator):
+        formatter = mpl.ticker.LogFormatter()
+    else:
+        formatter = mpl.ticker.ScalarFormatter()
+    formatter.axis = dummy_axis()
+
+    # TODO: The following two lines should be replaced
+    # once pinned matplotlib>=3.1.0 with:
+    # formatted_levels = formatter.format_ticks(raw_levels)
+    formatter.set_locs(raw_levels)
+    formatted_levels = [formatter(x) for x in raw_levels]
+
+    return raw_levels, formatted_levels
+
+
+def relative_luminance(color):
+    """Calculate the relative luminance of a color according to W3C standards
+
+    Parameters
+    ----------
+    color : matplotlib color or sequence of matplotlib colors
+        Hex code, rgb-tuple, or html color name.
+
+    Returns
+    -------
+    luminance : float(s) between 0 and 1
+
+    """
+    rgb = mpl.colors.colorConverter.to_rgba_array(color)[:, :3]
+    rgb = np.where(rgb <= .03928, rgb / 12.92, ((rgb + .055) / 1.055) ** 2.4)
+    lum = rgb.dot([.2126, .7152, .0722])
+    try:
+        return lum.item()
+----
+    def _update_legend_contents(
+        self,
+        p: Plot,
+        mark: Mark,
+        data: PlotData,
+        scales: dict[str, Scale],
+    ) -> None:
+        """Add legend artists / labels for one layer in the plot."""
+        if data.frame.empty and data.frames:
+            legend_vars: list[str] = []
+            for frame in data.frames.values():
+                frame_vars = frame.columns.intersection(list(scales))
+                legend_vars.extend(v for v in frame_vars if v not in legend_vars)
+        else:
+            legend_vars = list(data.frame.columns.intersection(list(scales)))
+
+        # First pass: Identify the values that will be shown for each variable
+        schema: list[tuple[
+            tuple[str, str | int], list[str], tuple[list, list[str]]
+        ]] = []
+        schema = []
+        for var in legend_vars:
+            var_legend = scales[var]._legend
+            if var_legend is not None:
+                values, labels = var_legend
+                for (_, part_id), part_vars, _ in schema:
+                    if data.ids[var] == part_id:
+                        # Allow multiple plot semantics to represent same data variable
+                        part_vars.append(var)
+                        break
+                else:
+                    title = self._resolve_label(p, var, data.names[var])
+                    entry = (title, data.ids[var]), [var], (values, labels)
+                    schema.append(entry)
+
+        # Second pass, generate an artist corresponding to each value
+        contents: list[tuple[tuple[str, str | int], Any, list[str]]] = []
+        for key, variables, (values, labels) in schema:
+            artists = []
+            for val in values:
+                artist = mark._legend_artist(variables, val, scales)
+                if artist is not None:
+                    artists.append(artist)
+            if artists:
+                contents.append((key, artists, labels))
+
+        self._legend_contents.extend(contents)
+
+    def _make_legend(self, p: Plot) -> None:
+        """Create the legend artist(s) and add onto the figure."""
+        # Combine artists representing same information across layers
+        # Input list has an entry for each distinct variable in each layer
+        # Output dict has an entry for each distinct variable
+        merged_contents: dict[
+            tuple[str, str | int], tuple[list[Artist], list[str]],
+        ] = {}
+        for key, new_artists, labels in self._legend_contents:
+            # Key is (name, id); we need the id to resolve variable uniqueness,
+            # but will need the name in the next step to title the legend
+            if key in merged_contents:
+                # Copy so inplace updates don't propagate back to legend_contents
+----
+        brief_hue = self._hue_map.map_type == "numeric" and (
+            verbosity == "brief"
+            or (verbosity == "auto" and len(self._hue_map.levels) > brief_ticks)
+        )
+        if brief_hue:
+            if isinstance(self._hue_map.norm, mpl.colors.LogNorm):
+                locator = mpl.ticker.LogLocator(numticks=brief_ticks)
+            else:
+                locator = mpl.ticker.MaxNLocator(nbins=brief_ticks)
+            limits = min(self._hue_map.levels), max(self._hue_map.levels)
+            hue_levels, hue_formatted_levels = locator_to_legend_entries(
+                locator, limits, self.plot_data["hue"].infer_objects().dtype
+            )
+        elif self._hue_map.levels is None:
+            hue_levels = hue_formatted_levels = []
+        else:
+            hue_levels = hue_formatted_levels = self._hue_map.levels
+
+        # Add the hue semantic subtitle
+        if not legend_title and self.variables.get("hue", None) is not None:
+            update((self.variables["hue"], "title"),
+                   self.variables["hue"], **title_kws)
+
+        # Add the hue semantic labels
+        for level, formatted_level in zip(hue_levels, hue_formatted_levels):
+
+2026-10-11 17:35:03,848 - INFO - swea-agent - ========================= STEP 5 =========================
+2026-10-11 17:35:03,855 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:35:06,400 - INFO - swea-agent - 💭 THOUGHT
+Now I'll reproduce the issue to confirm.
+
+🎬 ACTION
+cd /testbed && cat > /tmp/repro.py <<'EOF'
+import matplotlib
+matplotlib.use("Agg")
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import seaborn.objects as so
+from seaborn._core.scales import ContinuousBase
+from seaborn.utils import locator_to_legend_entries
+
+penguins = sns.load_dataset("penguins")
+penguins["body_mass_mg"] = penguins["body_mass_g"] * 1000
+p = (so.Plot(penguins, x="bill_length_mm", y="bill_depth_mm",
+             color="species", pointsize="body_mass_mg").add(so.Dot()))
+p.plot()
+for s in p._figure.legends: pass
+print("scales legend labels:")
+from seaborn._core.plot import Plot
+pl = p.plot()
+for key, artists, labels in pl._legend_contents:
+    print(key, labels)
+
+ax = plt.figure().add_subplot()
+ax.scatter([1,2,3],[1,2,3], s=[1e6,2e6,3e6])
+print("scatterplot:")
+sns.scatterplot(x=penguins.bill_length_mm, y=penguins.bill_depth_mm,
+                size=penguins.body_mass_mg*1, sizes=(20,200))
+plt.gcf().savefig("/tmp/out.png")
+EOF
+python /tmp/repro.py 2>&1 | tail -20
+2026-10-11 17:35:09,399 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+Traceback (most recent call last):
+  File "/tmp/repro.py", line 15, in <module>
+    for s in p._figure.legends: pass
+AttributeError: 'Plot' object has no attribute '_figure'
+
+2026-10-11 17:35:09,403 - INFO - swea-agent - ========================= STEP 6 =========================
+2026-10-11 17:35:09,410 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:35:11,260 - INFO - swea-agent - 💭 THOUGHT
+Let me simplify the script and print legend labels directly.
+
+🎬 ACTION
+cd /testbed && cat > /tmp/repro.py <<'EOF'
+import matplotlib
+matplotlib.use("Agg")
+import seaborn as sns
+import seaborn.objects as so
+from seaborn.utils import locator_to_legend_entries
+import matplotlib as mpl
+
+penguins = sns.load_dataset("penguins")
+penguins["body_mass_mg"] = penguins["body_mass_g"] * 1000
+p = (so.Plot(penguins, x="bill_length_mm", y="bill_depth_mm",
+             color="species", pointsize="body_mass_mg").add(so.Dot()))
+pl = p.plot()
+for key, artists, labels in pl._legend_contents:
+    print("objects:", key, labels)
+
+print("brief:", locator_to_legend_entries(mpl.ticker.MaxNLocator(nbins=6), (3e6, 6e6), float))
+EOF
+python /tmp/repro.py 2>&1 | tail -20
+2026-10-11 17:35:13,060 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+objects: ('species', 'species') ['Adelie', 'Chinstrap', 'Gentoo']
+objects: ('body_mass_mg', 'body_mass_mg') ['3', '4', '5', '6']
+brief: ([3000000.0, 3500000.0, 4000000.0, 4500000.0, 5000000.0, 5500000.0, 6000000.0], ['3.0', '3.5', '4.0', '4.5', '5.0', '5.5', '6.0'])
+
+2026-10-11 17:35:13,065 - INFO - swea-agent - ========================= STEP 7 =========================
+2026-10-11 17:35:13,075 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:35:14,996 - INFO - swea-agent - 💭 THOUGHT
+The reproduction confirms the bug: the `body_mass_mg` legend shows `3, 4, 5, 6` with no `1e6` multiplier. The fix needs to carry the formatter's offset into the legend title. I'll add a helper that retrieves `get_offset()` from the formatter and, in the `Continuous` scale, append it to the legend labels' title. Since the `_legend` tuple has no title slot, the cleanest minimal fix is to incorporate the offset into the stored `_legend` through the title mechanism. Let me check how the title is resolved in `_resolve_label`, since that is where a suffix could go.
+
+🎬 ACTION
+cd /testbed && grep -n "_resolve_label" -A12 seaborn/_core/plot.py | head -40; sed -n 60,75p seaborn/_core/scales.py
+2026-10-11 17:35:15,267 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+964:    def _resolve_label(self, p: Plot, var: str, auto_label: str | None) -> str:
+965-
+966-        label: str
+967-        if var in p._labels:
+968-            manual_label = p._labels[var]
+969-            if callable(manual_label) and auto_label is not None:
+970-                label = manual_label(auto_label)
+971-            else:
+972-                label = cast(str, manual_label)
+973-        elif auto_label is None:
+974-            label = ""
+975-        else:
+976-            label = auto_label
+--
+1020:                label = self._resolve_label(p, axis_key, auto_label)
+1021-                ax.set(**{f"{axis}label": label})
+1022-
+1023-                # ~~ Decoration visibility
+1024-
+1025-                # TODO there should be some override (in Plot.layout?) so that
+1026-                # axis / tick labels can be shown on interior shared axes if desired
+1027-
+1028-                axis_obj = getattr(ax, f"{axis}axis")
+1029-                visible_side = {"x": "bottom", "y": "left"}.get(axis)
+1030-                show_axis_label = (
+1031-                    sub[visible_side]
+1032-                    or not p._pair_spec.get("cross", True)
+--
+1056:                    val = self._resolve_label(p, "title", f"{sub[dim]}")
+1057-                    if dim in p._labels:
+1058:                        key = self._resolve_label(p, dim, common.names.get(dim))
+1059-                        val = f"{key} {val}"
+1060-                    title_parts.append(val)
+1061-
+1062-            has_col = sub["col"] is not None
+1063-            has_row = sub["row"] is not None
+1064-            show_title = (
+1065-                has_col and has_row
+1066-                or (has_col or has_row) and p._facet_spec.get("wrap")
+1067-                or (has_col and sub["top"])
+    _pipeline: Pipeline
+    _matplotlib_scale: ScaleBase
+    _spacer: staticmethod
+    _legend: tuple[list[str], list[Any]] | None
+
+    def __post_init__(self):
+
+        self._tick_params = None
+        self._label_params = None
+        self._legend = None
+
+    def tick(self):
+        raise NotImplementedError()
+
+    def label(self):
+        raise NotImplementedError()
+
+2026-10-11 17:35:15,277 - INFO - swea-agent - ========================= STEP 8 =========================
+2026-10-11 17:35:15,284 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:35:18,463 - INFO - swea-agent - 💭 THOUGHT
+The title is resolved in `_update_legend_contents` from the variable name. The cleanest place to apply the offset is there: store the offset alongside the legend in the scale, then append it to the title. I'll make the scale store the offset and apply it when building the legend title.
+
+Let me implement this in `scales.py` (store the offset in `_legend` via a new attribute) and `plot.py` (use it in the title).
+
+🎬 ACTION
+cd /testbed && python - <<'EOF'
+import re
+p = "seaborn/_core/scales.py"
+s = open(p).read()
+s = s.replace("""    _legend: tuple[list[str], list[Any]] | None
+
+    def __post_init__(self):
+
+        self._tick_params = None
+        self._label_params = None
+        self._legend = None
+""", """    _legend: tuple[list[str], list[Any]] | None
+
+    def __post_init__(self):
+
+        self._tick_params = None
+        self._label_params = None
+        self._legend = None
+        self._legend_offset = ""
+""", 1)
+s = s.replace("""            labels = axis.major.formatter.format_ticks(locs)
+            new._legend = list(locs), list(labels)
+""", """            formatter = axis.major.formatter
+            labels = formatter.format_ticks(locs)
+            new._legend = list(locs), list(labels)
+            offset = formatter.get_offset()
+            new._legend_offset = offset if offset else ""
+""", 1)
+open(p, "w").write(s)
+
+p = "seaborn/_core/plot.py"
+s = open(p).read()
+s = s.replace("""            var_legend = scales[var]._legend
+            if var_legend is not None:
+                values, labels = var_legend
+""", """            var_legend = scales[var]._legend
+            if var_legend is not None:
+                values, labels = var_legend
+                offset = getattr(scales[var], "_legend_offset", "")
+""", 1)
+s = s.replace("""                    title = self._resolve_label(p, var, data.names[var])
+                    entry = (title, data.ids[var]), [var], (values, labels)
+""", """                    title = self._resolve_label(p, var, data.names[var])
+                    if offset:
+                        title = f"{title} {offset}"
+                    entry = (title, data.ids[var]), [var], (values, labels)
+""", 1)
+open(p, "w").write(s)
+EOF
+git diff --stat; python /tmp/repro.py 2>&1 | tail -5
+2026-10-11 17:35:20,109 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+ seaborn/_core/plot.py   | 3 +++
+ seaborn/_core/scales.py | 6 +++++-
+ 2 files changed, 8 insertions(+), 1 deletion(-)
+objects: ('species', 'species') ['Adelie', 'Chinstrap', 'Gentoo']
+objects: ('body_mass_mg 1e6', 'body_mass_mg') ['3', '4', '5', '6']
+brief: ([3000000.0, 3500000.0, 4000000.0, 4500000.0, 5000000.0, 5500000.0, 6000000.0], ['3.0', '3.5', '4.0', '4.5', '5.0', '5.5', '6.0'])
+
+2026-10-11 17:35:20,114 - INFO - swea-agent - ========================= STEP 9 =========================
+2026-10-11 17:35:20,123 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:35:21,432 - INFO - swea-agent - 💭 THOUGHT
+The legend title now reads `body_mass_mg 1e6`. Now the `scatterplot` path: it uses `locator_to_legend_entries`, which discards the offset too. I'll make that helper return the offset as well, and have the relational legend incorporate it into the title. Let me check how the relational code builds its title.
+
+🎬 ACTION
+cd /testbed && sed -n 260,300p seaborn/relational.py; grep -rn "locator_to_legend_entries" seaborn tests | grep -v "def "
+2026-10-11 17:35:21,707 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+        for level, formatted_level in zip(hue_levels, hue_formatted_levels):
+            if level is not None:
+                color = self._hue_map(level)
+                update(self.variables["hue"], formatted_level, color=color)
+
+        # -- Add a legend for size semantics
+        brief_size = self._size_map.map_type == "numeric" and (
+            verbosity == "brief"
+            or (verbosity == "auto" and len(self._size_map.levels) > brief_ticks)
+        )
+        if brief_size:
+            # Define how ticks will interpolate between the min/max data values
+            if isinstance(self._size_map.norm, mpl.colors.LogNorm):
+                locator = mpl.ticker.LogLocator(numticks=brief_ticks)
+            else:
+                locator = mpl.ticker.MaxNLocator(nbins=brief_ticks)
+            # Define the min/max data values
+            limits = min(self._size_map.levels), max(self._size_map.levels)
+            size_levels, size_formatted_levels = locator_to_legend_entries(
+                locator, limits, self.plot_data["size"].infer_objects().dtype
+            )
+        elif self._size_map.levels is None:
+            size_levels = size_formatted_levels = []
+        else:
+            size_levels = size_formatted_levels = self._size_map.levels
+
+        # Add the size semantic subtitle
+        if not legend_title and self.variables.get("size", None) is not None:
+            update((self.variables["size"], "title"),
+                   self.variables["size"], **title_kws)
+
+        # Add the size semantic labels
+        for level, formatted_level in zip(size_levels, size_formatted_levels):
+            if level is not None:
+                size = self._size_map(level)
+                update(
+                    self.variables["size"],
+                    formatted_level,
+                    linewidth=size,
+                    s=size,
+                )
+grep: seaborn/__pycache__/relational.cpython-39.pyc: binary file matches
+seaborn/relational.py:12:    locator_to_legend_entries,
+seaborn/relational.py:246:            hue_levels, hue_formatted_levels = locator_to_legend_entries(
+seaborn/relational.py:278:            size_levels, size_formatted_levels = locator_to_legend_entries(
+grep: seaborn/__pycache__/utils.cpython-39.pyc: binary file matches
+tests/test_utils.py:310:    levels, str_levels = utils.locator_to_legend_entries(
+tests/test_utils.py:316:    levels, str_levels = utils.locator_to_legend_entries(
+tests/test_utils.py:322:    levels, str_levels = utils.locator_to_legend_entries(locator, limits, int)
+tests/test_utils.py:327:    levels, str_levels = utils.locator_to_legend_entries(locator, limits, int)
+tests/test_utils.py:332:    _, str_levels = utils.locator_to_legend_entries(locator, limits, float)
+
+2026-10-11 17:35:21,714 - INFO - swea-agent - ========================= STEP 10 =========================
+2026-10-11 17:35:21,721 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:35:27,688 - INFO - swea-agent - 💭 THOUGHT
+The existing tests unpack two return values from `locator_to_legend_entries`, so I must keep its signature. Instead, I'll fix the offset at the source: the formatted labels inside `locator_to_legend_entries` should include the offset. The simplest correct approach there is to append the offset to the title in `relational.py`, using the same formatter. To keep the signature, I'll have the relational code re-derive the offset from the formatter-side helper via a separate function.
+
+Actually, a cleaner minimal option: keep `locator_to_legend_entries` unchanged and add the offset in `relational.py` where the title is set. Let me add a small helper that returns the offset for the same locator/limits.
+
+🎬 ACTION
+cd /testbed && python - <<'EOF'
+p = "seaborn/utils.py"
+s = open(p).read()
+s = s.replace('''def relative_luminance(color):''', '''def locator_to_legend_offset(locator, limits):
+    """Return the multiplicative offset string of a ScalarFormatter, if any."""
+    if isinstance(locator, mpl.ticker.LogLocator):
+        return ""
+
+    class dummy_axis:
+        def get_view_interval(self):
+            return limits
+
+    formatter = mpl.ticker.ScalarFormatter()
+    formatter.axis = dummy_axis()
+    raw_levels = locator.tick_values(*limits)
+    formatter.set_locs(raw_levels)
+    return formatter.get_offset() or ""
+
+
+def relative_luminance(color):''', 1)
+open(p, "w").write(s)
+
+p = "seaborn/relational.py"
+s = open(p).read()
+s = s.replace("""    locator_to_legend_entries,
+""", """    locator_to_legend_entries,
+    locator_to_legend_offset,
+""", 1)
+s = s.replace("""        # Add the hue semantic subtitle
+        if not legend_title and self.variables.get("hue", None) is not None:
+            update((self.variables["hue"], "title"),
+                   self.variables["hue"], **title_kws)
+""", """        # Add the hue semantic subtitle
+        if not legend_title and self.variables.get("hue", None) is not None:
+            hue_title = self.variables["hue"]
+            if brief_hue:
+                hue_title = f"{hue_title} {hue_offset}".rstrip()
+            update((self.variables["hue"], "title"), hue_title, **title_kws)
+""", 1)
+s = s.replace("""        if brief_hue:
+            if isinstance(self._hue_map.norm, mpl.colors.LogNorm):
+                locator = mpl.ticker.LogLocator(numticks=brief_ticks)
+            else:
+                locator = mpl.ticker.MaxNLocator(nbins=brief_ticks)
+            limits = min(self._hue_map.levels), max(self._hue_map.levels)
+""", """        if brief_hue:
+            if isinstance(self._hue_map.norm, mpl.colors.LogNorm):
+                locator = mpl.ticker.LogLocator(numticks=brief_ticks)
+            else:
+                locator = mpl.ticker.MaxNLocator(nbins=brief_ticks)
+            limits = min(self._hue_map.levels), max(self._hue_map.levels)
+            hue_offset = locator_to_legend_offset(locator, limits)
+""", 1)
+s = s.replace("""        # Add the size semantic subtitle
+        if not legend_title and self.variables.get("size", None) is not None:
+            update((self.variables["size"], "title"),
+                   self.variables["size"], **title_kws)
+""", """        # Add the size semantic subtitle
+        if not legend_title and self.variables.get("size", None) is not None:
+            size_title = self.variables["size"]
+            if brief_size:
+                size_title = f"{size_title} {size_offset}".rstrip()
+            update((self.variables["size"], "title"), size_title, **title_kws)
+""", 1)
+s = s.replace("""            limits = min(self._size_map.levels), max(self._size_map.levels)
+            size_levels, size_formatted_levels = locator_to_legend_entries(
+""", """            limits = min(self._size_map.levels), max(self._size_map.levels)
+            size_offset = locator_to_legend_offset(locator, limits)
+            size_levels, size_formatted_levels = locator_to_legend_entries(
+""", 1)
+open(p, "w").write(s)
+EOF
+grep -n "hue_offset\|size_offset\|brief_hue\b" seaborn/relational.py | head; cat > /tmp/sc.py <<'EOF'
+import matplotlib; matplotlib.use("Agg")
+import seaborn as sns, matplotlib.pyplot as plt
+penguins = sns.load_dataset("penguins")
+penguins["body_mass_mg"] = penguins["body_mass_g"] * 1000
+ax = sns.scatterplot(x=penguins.bill_length_mm, y=penguins.bill_depth_mm,
+                     size=penguins.body_mass_mg, hue=penguins.body_mass_mg)
+print([t.get_text() for t in ax.get_legend().get_texts()], ax.get_legend().get_title().get_text())
+EOF
+python /tmp/sc.py
+2026-10-11 17:35:29,380 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+237:        brief_hue = self._hue_map.map_type == "numeric" and (
+241:        if brief_hue:
+247:            hue_offset = locator_to_legend_offset(locator, limits)
+259:            if brief_hue:
+260:                hue_title = f"{hue_title} {hue_offset}".rstrip()
+282:            size_offset = locator_to_legend_offset(locator, limits)
+295:                size_title = f"{size_title} {size_offset}".rstrip()
+['3.0', '3.6', '4.2', '4.8', '5.4', '6.0'] body_mass_mg
+
+2026-10-11 17:35:29,387 - INFO - swea-agent - ========================= STEP 11 =========================
+2026-10-11 17:35:29,394 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:35:31,035 - INFO - swea-agent - 💭 THOUGHT
+The scatterplot title still lacks the offset, because the title was set before... let me check: `hue_offset` is only defined when `brief_hue`, but the `size` title check uses `brief_size`, which is computed in a different branch. The result shows `body_mass_mg` with no offset — the size title is set *before* `size_offset` is computed? Let me inspect the ordering and the value of the offset directly.
+
+🎬 ACTION
+cd /testbed && python -c "
+import matplotlib as mpl
+from seaborn.utils import locator_to_legend_offset
+print(repr(locator_to_legend_offset(mpl.ticker.MaxNLocator(nbins=6), (3e6, 6e6))))
+print(repr(locator_to_legend_offset(mpl.ticker.MaxNLocator(nbins=6), (1, 6))))
+"
+2026-10-11 17:35:32,390 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+'1e6'
+''
+
+2026-10-11 17:35:32,398 - INFO - swea-agent - ========================= STEP 12 =========================
+2026-10-11 17:35:32,405 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:35:34,764 - INFO - swea-agent - 💭 THOUGHT
+The helper works. The issue in the scatterplot test is that its values (`3.0..6.0` labels) are not large enough to trigger the brief path for size with a `1e6` offset — here `brief_size` is false because the number of levels (6) is not greater than `brief_ticks`, so `size_offset`/`brief_size` path is skipped and it uses the raw levels. That case is actually the non-brief path, where labels are the raw values, so no offset is needed there. Let me verify with a case that forces the brief path, and check the existing tests still pass.
+
+🎬 ACTION
+cd /testbed && cat > /tmp/sc2.py <<'EOF'
+import matplotlib; matplotlib.use("Agg")
+import numpy as np, seaborn as sns
+rng = np.random.default_rng(0)
+x = rng.normal(size=100); y = rng.normal(size=100)
+s = rng.uniform(3e6, 6e6, size=100)
+ax = sns.scatterplot(x=x, y=y, size=s, sizes=(20,200), legend="brief")
+leg = ax.get_legend()
+print(leg.get_title().get_text(), [t.get_text() for t in leg.get_texts()])
+EOF
+python /tmp/sc2.py; python -m pytest -q tests/test_utils.py tests/test_relational.py tests/_core/test_plot.py tests/_core/test_scales.py 2>&1 | tail -5
+2026-10-11 17:36:04,867 - CRITICAL - rex-runtime - Traceback: 
+Traceback (most recent call last):
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/runtime/local.py", line 311, in _run_normal
+    expect_index = self.shell.expect(expect_strings, timeout=action.timeout)  # type: ignore
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/pexpect/spawnbase.py", line 354, in expect
+    return self.expect_list(compiled_pattern_list,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/pexpect/spawnbase.py", line 383, in expect_list
+    return exp.expect_loop(timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/pexpect/expect.py", line 181, in expect_loop
+    return self.timeout(e)
+           ^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/pexpect/expect.py", line 144, in timeout
+    raise exc
+pexpect.exceptions.TIMEOUT: Timeout exceeded.
+<pexpect.pty_spawn.spawn object at 0x7fe523db0a50>
+command: /usr/bin/env
+args: [b'/usr/bin/env', b'bash']
+buffer (last 100 chars): "SHELLPS1PREFIX ['3.5', '4.0', '4.5', '5.0', '5.5']\r\n"
+before (last 100 chars): "SHELLPS1PREFIX ['3.5', '4.0', '4.5', '5.0', '5.5']\r\n"
+after: <class 'pexpect.exceptions.TIMEOUT'>
+match: None
+match_index: None
+exitstatus: None
+flag_eof: False
+pid: 8
+child_fd: 10
+closed: False
+timeout: 30
+delimiter: <class 'pexpect.exceptions.EOF'>
+logfile: None
+logfile_read: None
+logfile_send: None
+maxread: 2000
+ignorecase: False
+searchwindowsize: None
+delaybeforesend: 0.05
+delayafterclose: 0.1
+delayafterterminate: 0.1
+searcher: searcher_re:
+    0: re.compile('UNIQUESTRING29234')
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/telemetry/_asgi.py", line 151, in __call__
+    await self.app(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 197, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/server.py", line 86, in handle_request_id
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 173, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 197, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/server.py", line 74, in authenticate
+    return await call_next(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 173, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/routing.py", line 676, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 2786, in app
+    await route.handle(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 1310, in handle
+    await super().handle(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/routing.py", line 282, in handle
+    await self.app(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 165, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/root/python3.11/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 151, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 727, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/fastapi/routing.py", line 360, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/server.py", line 139, in run
+    return serialize_model(await runtime.run_in_session(action))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/runtime/local.py", line 407, in run_in_session
+    return await self.sessions[action.session].run(action)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/runtime/local.py", line 236, in run
+    r = await self._run_normal(action)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/python3.11/lib/python3.11/site-packages/swerex/runtime/local.py", line 315, in _run_normal
+    raise CommandTimeoutError(msg) from e
+swerex.exceptions.CommandTimeoutError: timeout after 30.0 seconds while running command 'cd /testbed && cat > /tmp/sc2.py <<\'EOF\'\nimport matplotlib; matplotlib.use("Agg")\nimport numpy as np, seaborn as sns\nrng = np.random.default_rng(0)\nx = rng.normal(size=100); y = rng.normal(size=100)\ns = rng.uniform(3e6, 6e6, size=100)\nax = sns.scatterplot(x=x, y=y, size=s, sizes=(20,200), legend="brief")\nleg = ax.get_legend()\nprint(leg.get_title().get_text(), [t.get_text() for t in leg.get_texts()])\nEOF\npython /tmp/sc2.py; python -m pytest -q tests/test_utils.py tests/test_relational.py tests/_core/test_plot.py tests/_core/test_scales.py 2>&1 | tail -5\n TMPEXITCODE=$? ; sleep 0.1; echo -n \'UNIQUESTRING29234\' ; (exit $TMPEXITCODE)'
+
+2026-10-11 17:36:04,896 - ERROR - rex-runtime - Error making request e650e9f1-5e2b-4aa5-929f-f2332ed36c1a after 0 retries: timeout after 30.0 seconds while running command 'cd /testbed && cat > /tmp/sc2.py <<\'EOF\'\nimport matplotlib; matplotlib.use("Agg")\nimport numpy as np, seaborn as sns\nrng = np.random.default_rng(0)\nx = rng.normal(size=100); y = rng.normal(size=100)\ns = rng.uniform(3e6, 6e6, size=100)\nax = sns.scatterplot(x=x, y=y, size=s, sizes=(20,200), legend="brief")\nleg = ax.get_legend()\nprint(leg.get_title().get_text(), [t.get_text() for t in leg.get_texts()])\nEOF\npython /tmp/sc2.py; python -m pytest -q tests/test_utils.py tests/test_relational.py tests/_core/test_plot.py tests/_core/test_scales.py 2>&1 | tail -5\n TMPEXITCODE=$? ; sleep 0.1; echo -n \'UNIQUESTRING29234\' ; (exit $TMPEXITCODE)'
+2026-10-11 17:36:04,899 - INFO - swea-env - Interrupting session
+2026-10-11 17:36:05,524 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+The command 'cd /testbed && cat > /tmp/sc2.py <<'EOF'
+import matplotlib; matplotlib.use("Agg")
+import numpy as np, seaborn as sns
+rng = np.random.default_rng(0)
+x = rng.normal(size=100); y = rng.normal(size=100)
+s = rng.uniform(3e6, 6e6, size=100)
+ax = sns.scatterplot(x=x, y=y, size=s, sizes=(20,200), legend="brief")
+leg = ax.get_legend()
+print(leg.get_title().get_text(), [t.get_text() for t in leg.get_texts()])
+EOF
+python /tmp/sc2.py; python -m pytest -q tests/test_utils.py tests/test_relational.py tests/_core/test_plot.py tests/_core/test_scales.py 2>&1 | tail -5' was cancelled because it took more than 30 seconds. Please try a different command that completes more quickly. Note: A common source of this error is if the command is interactive or requires user input (it is impossible to receive user input in the current environment, so the command will never complete).
+2026-10-11 17:36:05,534 - INFO - swea-agent - ========================= STEP 13 =========================
+2026-10-11 17:36:05,542 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:36:06,556 - INFO - swea-agent - 💭 THOUGHT
+The command timed out, likely due to the test suite. Let me run the scatterplot check alone first, then the tests separately.
+
+🎬 ACTION
+cd /testbed && timeout 25 python /tmp/sc2.py
+2026-10-11 17:36:07,950 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+ ['3.5', '4.0', '4.5', '5.0', '5.5']
+
+2026-10-11 17:36:07,959 - INFO - swea-agent - ========================= STEP 14 =========================
+2026-10-11 17:36:07,968 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:36:09,610 - INFO - swea-agent - 💭 THOUGHT
+The brief scatterplot legend labels are correct, but the title is blank here because `sns.scatterplot` with no `size` name sets no title in this path. The labels show the values without a `1e6` multiplier, which is the bug. Let me check how the offset appears in this case.
+
+🎬 ACTION
+cd /testbed && timeout 25 python -c "
+import matplotlib as mpl
+from seaborn.utils import locator_to_legend_offset, locator_to_legend_entries
+loc = mpl.ticker.MaxNLocator(nbins=6)
+print(locator_to_legend_offset(loc,(3e6,6e6)), locator_to_legend_entries(loc,(3e6,6e6),float)[1])
+"
+2026-10-11 17:36:10,906 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+1e6 ['3.0', '3.5', '4.0', '4.5', '5.0', '5.5', '6.0']
+
+2026-10-11 17:36:10,917 - INFO - swea-agent - ========================= STEP 15 =========================
+2026-10-11 17:36:10,926 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:36:12,146 - INFO - swea-agent - 💭 THOUGHT
+The offset is computed correctly (`1e6`), but the title isn't reaching the legend in the scatterplot. Let me check how `update` handles the title for the size variable and whether `legend_title` / `title` gets overwritten later.
+
+🎬 ACTION
+cd /testbed && sed -n 200,232p seaborn/relational.py
+2026-10-11 17:36:12,415 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+        elif verbosity is True:
+            verbosity = "auto"
+
+        legend_kwargs = {}
+        keys = []
+
+        # Assign a legend title if there is only going to be one sub-legend,
+        # otherwise, subtitles will be inserted into the texts list with an
+        # invisible handle (which is a hack)
+        titles = {
+            title for title in
+            (self.variables.get(v, None) for v in ["hue", "size", "style"])
+            if title is not None
+        }
+        if len(titles) == 1:
+            legend_title = titles.pop()
+        else:
+            legend_title = ""
+
+        title_kws = dict(
+            visible=False, color="w", s=0, linewidth=0, marker="", dashes=""
+        )
+
+        def update(var_name, val_name, **kws):
+
+            key = var_name, val_name
+            if key in legend_kwargs:
+                legend_kwargs[key].update(**kws)
+            else:
+                keys.append(key)
+
+                legend_kwargs[key] = dict(**kws)
+
+
+2026-10-11 17:36:12,427 - INFO - swea-agent - ========================= STEP 16 =========================
+2026-10-11 17:36:12,436 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:36:13,747 - INFO - swea-agent - 💭 THOUGHT
+When there is a single title, `legend_title` is used as the legend title, and the `update` path for subtitles is skipped. So with both hue and size mapped to the same variable (a single title), my change to the subtitle is not used. The legend title is set via `legend_title`, so I need to apply the offset there too. Let me view how `legend_title` is consumed.
+
+🎬 ACTION
+cd /testbed && grep -n "legend_title" seaborn/relational.py
+2026-10-11 17:36:14,017 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+215:            legend_title = titles.pop()
+217:            legend_title = ""
+257:        if not legend_title and self.variables.get("hue", None) is not None:
+292:        if not legend_title and self.variables.get("size", None) is not None:
+312:        if not legend_title and self.variables.get("style", None) is not None:
+348:        self.legend_title = legend_title
+527:                legend = ax.legend(title=self.legend_title)
+606:                legend = ax.legend(title=self.legend_title)
+977:                         title=p.legend_title,
+
+2026-10-11 17:36:14,036 - INFO - swea-agent - ========================= STEP 17 =========================
+2026-10-11 17:36:14,050 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:36:17,311 - INFO - swea-agent - 💭 THOUGHT
+That explains the blank title: with one shared title, `legend_title` is passed to `ax.legend(title=...)`. I'll apply the offset there too, using the offset from whichever brief semantic is active. Let me make the change cleanly: compute a single offset-decorated title and use it in both places.
+
+🎬 ACTION
+cd /testbed && python - <<'EOF'
+p = "seaborn/relational.py"
+s = open(p).read()
+s = s.replace("""        if len(titles) == 1:
+            legend_title = titles.pop()
+        else:
+            legend_title = ""
+""", """        if len(titles) == 1:
+            legend_title = titles.pop()
+        else:
+            legend_title = ""
+
+        # Offsets from ScalarFormatter (e.g. "1e6") are stripped from brief
+        # numeric tick labels, so they are appended to the title instead
+        legend_offsets = []
+""", 1)
+s = s.replace("""            hue_offset = locator_to_legend_offset(locator, limits)
+""", """            hue_offset = locator_to_legend_offset(locator, limits)
+            if hue_offset:
+                legend_offsets.append(hue_offset)
+""", 1)
+s = s.replace("""            size_offset = locator_to_legend_offset(locator, limits)
+""", """            size_offset = locator_to_legend_offset(locator, limits)
+            if size_offset:
+                legend_offsets.append(size_offset)
+""", 1)
+s = s.replace("""        if brief_hue:
+            hue_title = f"{hue_title} {hue_offset}".rstrip()
+""", """        if brief_hue and hue_offset:
+            hue_title = f"{hue_title} {hue_offset}"
+""", 1)
+s = s.replace("""            if brief_size:
+                size_title = f"{size_title} {size_offset}".rstrip()
+""", """            if brief_size and size_offset:
+                size_title = f"{size_title} {size_offset}"
+""", 1)
+s = s.replace("""        self.legend_title = legend_title
+""", """        if legend_title and legend_offsets:
+            legend_title = f"{legend_title} {legend_offsets[-1]}"
+        self.legend_title = legend_title
+""", 1)
+open(p, "w").write(s)
+EOF
+timeout 25 python /tmp/sc2.py
+2026-10-11 17:36:18,877 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+ ['3.5', '4.0', '4.5', '5.0', '5.5']
+
+2026-10-11 17:36:18,891 - INFO - swea-agent - ========================= STEP 18 =========================
+2026-10-11 17:36:18,900 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:36:20,551 - INFO - swea-agent - 💭 THOUGHT
+Still blank. In `/tmp/sc2.py`, `size` is the only variable, so `legend_title` should be `"size"`... but the printed title is empty. Let me debug the actual title.
+
+🎬 ACTION
+cd /testbed && timeout 25 python -c "
+import matplotlib; matplotlib.use('Agg')
+import numpy as np, seaborn as sns
+rng = np.random.default_rng(0)
+x = rng.normal(size=100); y = rng.normal(size=100)
+s = rng.uniform(3e6, 6e6, size=100)
+ax = sns.scatterplot(x=x, y=y, size=s, sizes=(20,200), legend='brief')
+print(repr(ax.get_legend().get_title().get_text()))
+print(ax.get_legend().get_texts()[0].get_text())
+"
+2026-10-11 17:36:22,078 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+''
+3.5
+
+2026-10-11 17:36:22,094 - INFO - swea-agent - ========================= STEP 19 =========================
+2026-10-11 17:36:22,104 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:36:23,922 - INFO - swea-agent - 💭 THOUGHT
+The title is empty because in my test `size` is a bare array (unnamed), so `self.variables["size"]` is `None`. That means no title exists at all, a pre-existing behavior unrelated to the offset. Let me use a named Series to exercise the real case.
+
+🎬 ACTION
+cd /testbed && timeout 25 python -c "
+import matplotlib; matplotlib.use('Agg')
+import numpy as np, pandas as pd, seaborn as sns
+rng = np.random.default_rng(0)
+df = pd.DataFrame(dict(x=rng.normal(size=100), y=rng.normal(size=100), mass=rng.uniform(3e6,6e6,size=100)))
+ax = sns.scatterplot(data=df, x='x', y='y', size='mass', sizes=(20,200), legend='brief')
+leg = ax.get_legend()
+print(repr(leg.get_title().get_text()), [t.get_text() for t in leg.get_texts()])
+"
+2026-10-11 17:36:25,481 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+'mass 1e6' ['3.5', '4.0', '4.5', '5.0', '5.5']
+
+2026-10-11 17:36:25,499 - INFO - swea-agent - ========================= STEP 20 =========================
+2026-10-11 17:36:25,512 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:36:26,707 - INFO - swea-agent - 💭 THOUGHT
+The scatterplot title now reads `mass 1e6`. Next I'll run the relevant tests, in the background to avoid the timeout.
+
+🎬 ACTION
+cd /testbed && (timeout 600 python -m pytest -q -x tests/test_utils.py tests/test_relational.py tests/_core/test_plot.py tests/_core/test_scales.py > /tmp/test.log 2>&1 &); sleep 25; tail -3 /tmp/test.log
+2026-10-11 17:36:51,984 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+..........................................................
+2026-10-11 17:36:52,003 - INFO - swea-agent - ========================= STEP 21 =========================
+2026-10-11 17:36:52,014 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:36:52,759 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+sleep 28; tail -5 /tmp/test.log
+2026-10-11 17:37:21,120 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+........................................................................ [ 18%]
+.........................
+2026-10-11 17:37:21,145 - INFO - swea-agent - ========================= STEP 22 =========================
+2026-10-11 17:37:21,161 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:37:21,931 - INFO - swea-agent - 💭 THOUGHT
+
+
+🎬 ACTION
+sleep 29; tail -5 /tmp/test.log
+2026-10-11 17:37:51,237 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+  /testbed/seaborn/_core/properties.py:366: RuntimeWarning: invalid value encountered in cast
+    ixs = np.asarray(x, np.intp)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+377 passed, 6 xfailed, 457 warnings in 73.46s (0:01:13)
+
+2026-10-11 17:37:51,259 - INFO - swea-agent - ========================= STEP 23 =========================
+2026-10-11 17:37:51,271 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:37:52,138 - INFO - swea-agent - 💭 THOUGHT
+All 377 tests pass. Let me confirm the final diff is clean.
+
+🎬 ACTION
+cd /testbed && git diff
+2026-10-11 17:37:52,421 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+diff --git a/seaborn/_core/plot.py b/seaborn/_core/plot.py
+index 8915616b..19ece6f1 100644
+--- a/seaborn/_core/plot.py
++++ b/seaborn/_core/plot.py
+@@ -1562,6 +1562,7 @@ class Plotter:
+             var_legend = scales[var]._legend
+             if var_legend is not None:
+                 values, labels = var_legend
++                offset = getattr(scales[var], "_legend_offset", "")
+                 for (_, part_id), part_vars, _ in schema:
+                     if data.ids[var] == part_id:
+                         # Allow multiple plot semantics to represent same data variable
+@@ -1569,6 +1570,8 @@ class Plotter:
+                         break
+                 else:
+                     title = self._resolve_label(p, var, data.names[var])
++                    if offset:
++                        title = f"{title} {offset}"
+                     entry = (title, data.ids[var]), [var], (values, labels)
+                     schema.append(entry)
+ 
+diff --git a/seaborn/_core/scales.py b/seaborn/_core/scales.py
+index 55874bf2..c2f26988 100644
+--- a/seaborn/_core/scales.py
++++ b/seaborn/_core/scales.py
+@@ -67,6 +67,7 @@ class Scale:
+         self._tick_params = None
+         self._label_params = None
+         self._legend = None
++        self._legend_offset = ""
+ 
+     def tick(self):
+         raise NotImplementedError()
+@@ -378,8 +379,11 @@ class ContinuousBase(Scale):
+             axis.set_view_interval(vmin, vmax)
+             locs = axis.major.locator()
+             locs = locs[(vmin <= locs) & (locs <= vmax)]
+-            labels = axis.major.formatter.format_ticks(locs)
++            formatter = axis.major.formatter
++            labels = formatter.format_ticks(locs)
+             new._legend = list(locs), list(labels)
++            offset = formatter.get_offset()
++            new._legend_offset = offset if offset else ""
+ 
+         return new
+ 
+diff --git a/seaborn/relational.py b/seaborn/relational.py
+index 18e18bb6..11adc97d 100644
+--- a/seaborn/relational.py
++++ b/seaborn/relational.py
+@@ -10,6 +10,7 @@ from ._oldcore import (
+ )
+ from .utils import (
+     locator_to_legend_entries,
++    locator_to_legend_offset,
+     adjust_legend_subtitles,
+     _default_color,
+     _deprecate_ci,
+@@ -215,6 +216,10 @@ class _RelationalPlotter(VectorPlotter):
+         else:
+             legend_title = ""
+ 
++        # Offsets from ScalarFormatter (e.g. "1e6") are stripped from brief
++        # numeric tick labels, so they are appended to the title instead
++        legend_offsets = []
++
+         title_kws = dict(
+             visible=False, color="w", s=0, linewidth=0, marker="", dashes=""
+         )
+@@ -243,6 +248,9 @@ class _RelationalPlotter(VectorPlotter):
+             else:
+                 locator = mpl.ticker.MaxNLocator(nbins=brief_ticks)
+             limits = min(self._hue_map.levels), max(self._hue_map.levels)
++            hue_offset = locator_to_legend_offset(locator, limits)
++            if hue_offset:
++                legend_offsets.append(hue_offset)
+             hue_levels, hue_formatted_levels = locator_to_legend_entries(
+                 locator, limits, self.plot_data["hue"].infer_objects().dtype
+             )
+@@ -253,8 +261,10 @@ class _RelationalPlotter(VectorPlotter):
+ 
+         # Add the hue semantic subtitle
+         if not legend_title and self.variables.get("hue", None) is not None:
+-            update((self.variables["hue"], "title"),
+-                   self.variables["hue"], **title_kws)
++            hue_title = self.variables["hue"]
++            if brief_hue:
++                hue_title = f"{hue_title} {hue_offset}".rstrip()
++            update((self.variables["hue"], "title"), hue_title, **title_kws)
+ 
+         # Add the hue semantic labels
+         for level, formatted_level in zip(hue_levels, hue_formatted_levels):
+@@ -275,6 +285,9 @@ class _RelationalPlotter(VectorPlotter):
+                 locator = mpl.ticker.MaxNLocator(nbins=brief_ticks)
+             # Define the min/max data values
+             limits = min(self._size_map.levels), max(self._size_map.levels)
++            size_offset = locator_to_legend_offset(locator, limits)
++            if size_offset:
++                legend_offsets.append(size_offset)
+             size_levels, size_formatted_levels = locator_to_legend_entries(
+                 locator, limits, self.plot_data["size"].infer_objects().dtype
+             )
+@@ -285,8 +298,10 @@ class _RelationalPlotter(VectorPlotter):
+ 
+         # Add the size semantic subtitle
+         if not legend_title and self.variables.get("size", None) is not None:
+-            update((self.variables["size"], "title"),
+-                   self.variables["size"], **title_kws)
++            size_title = self.variables["size"]
++            if brief_size and size_offset:
++                size_title = f"{size_title} {size_offset}"
++            update((self.variables["size"], "title"), size_title, **title_kws)
+ 
+         # Add the size semantic labels
+         for level, formatted_level in zip(size_levels, size_formatted_levels):
+@@ -338,6 +353,8 @@ class _RelationalPlotter(VectorPlotter):
+             legend_data[key] = artist
+             legend_order.append(key)
+ 
++        if legend_title and legend_offsets:
++            legend_title = f"{legend_title} {legend_offsets[-1]}"
+         self.legend_title = legend_title
+         self.legend_data = legend_data
+         self.legend_order = legend_order
+diff --git a/seaborn/utils.py b/seaborn/utils.py
+index 2407853c..00b6f4dd 100644
+--- a/seaborn/utils.py
++++ b/seaborn/utils.py
+@@ -710,6 +710,22 @@ def locator_to_legend_entries(locator, limits, dtype):
+     return raw_levels, formatted_levels
+ 
+ 
++def locator_to_legend_offset(locator, limits):
++    """Return the multiplicative offset string of a ScalarFormatter, if any."""
++    if isinstance(locator, mpl.ticker.LogLocator):
++        return ""
++
++    class dummy_axis:
++        def get_view_interval(self):
++            return limits
++
++    formatter = mpl.ticker.ScalarFormatter()
++    formatter.axis = dummy_axis()
++    raw_levels = locator.tick_values(*limits)
++    formatter.set_locs(raw_levels)
++    return formatter.get_offset() or ""
++
++
+ def relative_luminance(color):
+     """Calculate the relative luminance of a color according to W3C standards
+ 
+
+2026-10-11 17:37:52,466 - INFO - swea-agent - ========================= STEP 24 =========================
+2026-10-11 17:37:52,482 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:37:56,497 - WARNING - swea-agent - Requerying model after FunctionCallingFormatError (1th requery)
+2026-10-11 17:37:56,501 - WARNING - swea-agent - Your last output did not use any tool calls!
+Please make sure your output includes exactly _ONE_ function call!
+You must invoke the function directly using the function call format.
+You cannot invoke commands with ```, you have to use the function call format.
+If you think you have already resolved the issue, please submit your changes by running the `submit` command.
+If you think you cannot solve the problem, please run `exit_forfeit` (if available) or `submit`.
+Else, please continue with a new tool call!
+2026-10-11 17:37:56,515 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:37:57,491 - INFO - swea-agent - 💭 THOUGHT
+The fix is in place and the relevant tests pass, so I'll submit it now.
+
+🎬 ACTION
+submit
+2026-10-11 17:37:57,854 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+Thank you for your work on this issue. Please carefully follow the steps below to help review your changes.
+
+1. If you made any changes to your code after running the reproduction script, please run the reproduction script again.
+  If the reproduction script is failing, please revisit your changes and make sure they are correct.
+  If you have already removed your reproduction script, please ignore this step.
+2. Remove your reproduction script (if you haven't done so already).
+3. If you have modified any TEST files, please revert them to the state they had before you started fixing the issue.
+  You can do this with `git checkout -- /path/to/test/file.py`. Use below <diff> to find the files you need to revert.
+4. Run the submit command again to confirm.
+
+Here is a list of all of your changes:
+
+<diff>
+diff --git a/seaborn/_core/plot.py b/seaborn/_core/plot.py
+index 8915616b..19ece6f1 100644
+--- a/seaborn/_core/plot.py
++++ b/seaborn/_core/plot.py
+@@ -1562,6 +1562,7 @@ class Plotter:
+             var_legend = scales[var]._legend
+             if var_legend is not None:
+                 values, labels = var_legend
++                offset = getattr(scales[var], "_legend_offset", "")
+                 for (_, part_id), part_vars, _ in schema:
+                     if data.ids[var] == part_id:
+                         # Allow multiple plot semantics to represent same data variable
+@@ -1569,6 +1570,8 @@ class Plotter:
+                         break
+                 else:
+                     title = self._resolve_label(p, var, data.names[var])
++                    if offset:
++                        title = f"{title} {offset}"
+                     entry = (title, data.ids[var]), [var], (values, labels)
+                     schema.append(entry)
+ 
+diff --git a/seaborn/_core/scales.py b/seaborn/_core/scales.py
+index 55874bf2..c2f26988 100644
+--- a/seaborn/_core/scales.py
++++ b/seaborn/_core/scales.py
+@@ -67,6 +67,7 @@ class Scale:
+         self._tick_params = None
+         self._label_params = None
+         self._legend = None
++        self._legend_offset = ""
+ 
+     def tick(self):
+         raise NotImplementedError()
+@@ -378,8 +379,11 @@ class ContinuousBase(Scale):
+             axis.set_view_interval(vmin, vmax)
+             locs = axis.major.locator()
+             locs = locs[(vmin <= locs) & (locs <= vmax)]
+-            labels = axis.major.formatter.format_ticks(locs)
++            formatter = axis.major.formatter
++            labels = formatter.format_ticks(locs)
+             new._legend = list(locs), list(labels)
++            offset = formatter.get_offset()
++            new._legend_offset = offset if offset else ""
+ 
+         return new
+ 
+diff --git a/seaborn/relational.py b/seaborn/relational.py
+index 18e18bb6..11adc97d 100644
+--- a/seaborn/relational.py
++++ b/seaborn/relational.py
+@@ -10,6 +10,7 @@ from ._oldcore import (
+ )
+ from .utils import (
+     locator_to_legend_entries,
++    locator_to_legend_offset,
+     adjust_legend_subtitles,
+     _default_color,
+     _deprecate_ci,
+@@ -215,6 +216,10 @@ class _RelationalPlotter(VectorPlotter):
+         else:
+             legend_title = ""
+ 
++        # Offsets from ScalarFormatter (e.g. "1e6") are stripped from brief
++        # numeric tick labels, so they are appended to the title instead
++        legend_offsets = []
++
+         title_kws = dict(
+             visible=False, color="w", s=0, linewidth=0, marker="", dashes=""
+         )
+@@ -243,6 +248,9 @@ class _RelationalPlotter(VectorPlotter):
+             else:
+                 locator = mpl.ticker.MaxNLocator(nbins=brief_ticks)
+             limits = min(self._hue_map.levels), max(self._hue_map.levels)
++            hue_offset = locator_to_legend_offset(locator, limits)
++            if hue_offset:
++                legend_offsets.append(hue_offset)
+             hue_levels, hue_formatted_levels = locator_to_legend_entries(
+                 locator, limits, self.plot_data["hue"].infer_objects().dtype
+             )
+@@ -253,8 +261,10 @@ class _RelationalPlotter(VectorPlotter):
+ 
+         # Add the hue semantic subtitle
+         if not legend_title and self.variables.get("hue", None) is not None:
+-            update((self.variables["hue"], "title"),
+-                   self.variables["hue"], **title_kws)
++            hue_title = self.variables["hue"]
++            if brief_hue:
++                hue_title = f"{hue_title} {hue_offset}".rstrip()
++            update((self.variables["hue"], "title"), hue_title, **title_kws)
+ 
+         # Add the hue semantic labels
+         for level, formatted_level in zip(hue_levels, hue_formatted_levels):
+@@ -275,6 +285,9 @@ class _RelationalPlotter(VectorPlotter):
+                 locator = mpl.ticker.MaxNLocator(nbins=brief_ticks)
+             # Define the min/max data values
+             limits = min(self._size_map.levels), max(self._size_map.levels)
++            size_offset = locator_to_legend_offset(locator, limits)
++            if size_offset:
++                legend_offsets.append(size_offset)
+             size_levels, size_formatted_levels = locator_to_legend_entries(
+                 locator, limits, self.plot_data["size"].infer_objects().dtype
+             )
+@@ -285,8 +298,10 @@ class _RelationalPlotter(VectorPlotter):
+ 
+         # Add the size semantic subtitle
+         if not legend_title and self.variables.get("size", None) is not None:
+-            update((self.variables["size"], "title"),
+-                   self.variables["size"], **title_kws)
++            size_title = self.variables["size"]
++            if brief_size and size_offset:
++                size_title = f"{size_title} {size_offset}"
++            update((self.variables["size"], "title"), size_title, **title_kws)
+ 
+         # Add the size semantic labels
+         for level, formatted_level in zip(size_levels, size_formatted_levels):
+@@ -338,6 +353,8 @@ class _RelationalPlotter(VectorPlotter):
+             legend_data[key] = artist
+             legend_order.append(key)
+ 
++        if legend_title and legend_offsets:
++            legend_title = f"{legend_title} {legend_offsets[-1]}"
+         self.legend_title = legend_title
+         self.legend_data = legend_data
+         self.legend_order = legend_order
+diff --git a/seaborn/utils.py b/seaborn/utils.py
+index 2407853c..00b6f4dd 100644
+--- a/seaborn/utils.py
++++ b/seaborn/utils.py
+@@ -710,6 +710,22 @@ def locator_to_legend_entries(locator, limits, dtype):
+     return raw_levels, formatted_levels
+ 
+ 
++def locator_to_legend_offset(locator, limits):
++    """Return the multiplicative offset string of a ScalarFormatter, if any."""
++    if isinstance(locator, mpl.ticker.LogLocator):
++        return ""
++
++    class dummy_axis:
++        def get_view_interval(self):
++            return limits
++
++    formatter = mpl.ticker.ScalarFormatter()
++    formatter.axis = dummy_axis()
++    raw_levels = locator.tick_values(*limits)
++    formatter.set_locs(raw_levels)
++    return formatter.get_offset() or ""
++
++
+ def relative_luminance(color):
+     """Calculate the relative luminance of a color according to W3C standards
+ 
+
+</diff>
+
+
+2026-10-11 17:37:57,883 - INFO - swea-agent - ========================= STEP 26 =========================
+2026-10-11 17:37:57,900 - WARNING - swea-lm - No max input tokens found for model 'anthropic/claude-haiku-5-5'. If you are using a local model, you can set `max_input_token` in the model config to override this.
+2026-10-11 17:37:59,715 - INFO - swea-agent - 💭 THOUGHT
+Before I resubmit, I'll go through the checklist. My reproduction scripts lived in `/tmp` (outside the repo), so there is nothing to remove from `/testbed`. I didn't modify any test files, so nothing needs reverting. The one thing I should check is that the diff contains only the intended source changes. It does, and the reproduction was already re-run after the final edit (the `mass 1e6` title check).
+
+One edge case I noticed while reviewing: the `_legend_offset` attribute on the `Plotter` path uses `getattr` with a default, which is defensive but harmless. The relational path also appends only the last offset when both hue and size are present with a shared title; that is a reasonable approximation but worth flagging.
+
+Resubmitting to confirm:
+
+🎬 ACTION
+submit
+2026-10-11 17:38:00,055 - INFO - swea-agent - Found submission: diff --git a/seaborn/_core/plot.py b/seaborn/_core/plot.py
+index 8915616b..19ece6f1 100644
+--- a/seaborn/_core/plot.py
++++ b/seaborn/_core/plot.py
+@@ -1562,6 +1562,7 @@ class Plotter:
+             var_legend = scales[var]._legend
+             if var_legend is not None:
+                 values, labels = var_legend
++                offset = getattr(scales[var], "_legend_offset", "")
+                 for (_, part_id), part_vars, _ in schema:
+                     if data.ids[var] == part_id:
+                         # Allow multiple plot semantics to represent same data variable
+@@ -1569,6 +1570,8 @@ class Plotter:
+                         break
+                 else:
+                     title = self._resolve_label(p, var, data.names[var])
++                    if offset:
++                        title = f"{title} {offset}"
+                     entry = (title, data.ids[var]), [var], (values, labels)
+                     schema.append(entry)
+ 
+diff --git a/seaborn/_core/scales.py b/seaborn/_core/scales.py
+index 55874bf2..c2f26988 100644
+--- a/seaborn/_core/scales.py
++++ b/seaborn/_core/scales.py
+@@ -67,6 +67,7 @@ class Scale:
+         self._tick_params = None
+         self._label_params = None
+         self._legend = None
++        self._legend_offset = ""
+ 
+     def tick(self):
+         raise NotImplementedError()
+@@ -378,8 +379,11 @@ class ContinuousBase(Scale):
+             axis.set_view_interval(vmin, vmax)
+             locs = axis.major.locator()
+             locs = locs[(vmin <= locs) & (locs <= vmax)]
+-            labels = axis.major.formatter.format_ticks(locs)
++            formatter = axis.major.formatter
++            labels = formatter.format_ticks(locs)
+             new._legend = list(locs), list(labels)
++            offset = formatter.get_offset()
++            new._legend_offset = offset if offset else ""
+ 
+         return new
+ 
+diff --git a/seaborn/relational.py b/seaborn/relational.py
+index 18e18bb6..11adc97d 100644
+--- a/seaborn/relational.py
++++ b/seaborn/relational.py
+@@ -10,6 +10,7 @@ from ._oldcore import (
+ )
+ from .utils import (
+     locator_to_legend_entries,
++    locator_to_legend_offset,
+     adjust_legend_subtitles,
+     _default_color,
+     _deprecate_ci,
+@@ -215,6 +216,10 @@ class _RelationalPlotter(VectorPlotter):
+         else:
+             legend_title = ""
+ 
++        # Offsets from ScalarFormatter (e.g. "1e6") are stripped from brief
++        # numeric tick labels, so they are appended to the title instead
++        legend_offsets = []
++
+         title_kws = dict(
+             visible=False, color="w", s=0, linewidth=0, marker="", dashes=""
+         )
+@@ -243,6 +248,9 @@ class _RelationalPlotter(VectorPlotter):
+             else:
+                 locator = mpl.ticker.MaxNLocator(nbins=brief_ticks)
+             limits = min(self._hue_map.levels), max(self._hue_map.levels)
++            hue_offset = locator_to_legend_offset(locator, limits)
++            if hue_offset:
++                legend_offsets.append(hue_offset)
+             hue_levels, hue_formatted_levels = locator_to_legend_entries(
+                 locator, limits, self.plot_data["hue"].infer_objects().dtype
+             )
+@@ -253,8 +261,10 @@ class _RelationalPlotter(VectorPlotter):
+ 
+         # Add the hue semantic subtitle
+         if not legend_title and self.variables.get("hue", None) is not None:
+-            update((self.variables["hue"], "title"),
+-                   self.variables["hue"], **title_kws)
++            hue_title = self.variables["hue"]
++            if brief_hue:
++                hue_title = f"{hue_title} {hue_offset}".rstrip()
++            update((self.variables["hue"], "title"), hue_title, **title_kws)
+ 
+         # Add the hue semantic labels
+         for level, formatted_level in zip(hue_levels, hue_formatted_levels):
+@@ -275,6 +285,9 @@ class _RelationalPlotter(VectorPlotter):
+                 locator = mpl.ticker.MaxNLocator(nbins=brief_ticks)
+             # Define the min/max data values
+             limits = min(self._size_map.levels), max(self._size_map.levels)
++            size_offset = locator_to_legend_offset(locator, limits)
++            if size_offset:
++                legend_offsets.append(size_offset)
+             size_levels, size_formatted_levels = locator_to_legend_entries(
+                 locator, limits, self.plot_data["size"].infer_objects().dtype
+             )
+@@ -285,8 +298,10 @@ class _RelationalPlotter(VectorPlotter):
+ 
+         # Add the size semantic subtitle
+         if not legend_title and self.variables.get("size", None) is not None:
+-            update((self.variables["size"], "title"),
+-                   self.variables["size"], **title_kws)
++            size_title = self.variables["size"]
++            if brief_size and size_offset:
++                size_title = f"{size_title} {size_offset}"
++            update((self.variables["size"], "title"), size_title, **title_kws)
+ 
+         # Add the size semantic labels
+         for level, formatted_level in zip(size_levels, size_formatted_levels):
+@@ -338,6 +353,8 @@ class _RelationalPlotter(VectorPlotter):
+             legend_data[key] = artist
+             legend_order.append(key)
+ 
++        if legend_title and legend_offsets:
++            legend_title = f"{legend_title} {legend_offsets[-1]}"
+         self.legend_title = legend_title
+         self.legend_data = legend_data
+         self.legend_order = legend_order
+diff --git a/seaborn/utils.py b/seaborn/utils.py
+index 2407853c..00b6f4dd 100644
+--- a/seaborn/utils.py
++++ b/seaborn/utils.py
+@@ -710,6 +710,22 @@ def locator_to_legend_entries(locator, limits, dtype):
+     return raw_levels, formatted_levels
+ 
+ 
++def locator_to_legend_offset(locator, limits):
++    """Return the multiplicative offset string of a ScalarFormatter, if any."""
++    if isinstance(locator, mpl.ticker.LogLocator):
++        return ""
++
++    class dummy_axis:
++        def get_view_interval(self):
++            return limits
++
++    formatter = mpl.ticker.ScalarFormatter()
++    formatter.axis = dummy_axis()
++    raw_levels = locator.tick_values(*limits)
++    formatter.set_locs(raw_levels)
++    return formatter.get_offset() or ""
++
++
+ def relative_luminance(color):
+     """Calculate the relative luminance of a color according to W3C standards
+ 
+
+2026-10-11 17:38:00,067 - INFO - swea-agent - 🤖 MODEL INPUT
+OBSERVATION:
+diff --git a/seaborn/_core/plot.py b/seaborn/_core/plot.py
+index 8915616b..19ece6f1 100644
+--- a/seaborn/_core/plot.py
++++ b/seaborn/_core/plot.py
+@@ -1562,6 +1562,7 @@ class Plotter:
+             var_legend = scales[var]._legend
+             if var_legend is not None:
+                 values, labels = var_legend
++                offset = getattr(scales[var], "_legend_offset", "")
+                 for (_, part_id), part_vars, _ in schema:
+                     if data.ids[var] == part_id:
+                         # Allow multiple plot semantics to represent same data variable
+@@ -1569,6 +1570,8 @@ class Plotter:
+                         break
+                 else:
+                     title = self._resolve_label(p, var, data.names[var])
++                    if offset:
++                        title = f"{title} {offset}"
+                     entry = (title, data.ids[var]), [var], (values, labels)
+                     schema.append(entry)
+ 
+diff --git a/seaborn/_core/scales.py b/seaborn/_core/scales.py
+index 55874bf2..c2f26988 100644
+--- a/seaborn/_core/scales.py
++++ b/seaborn/_core/scales.py
+@@ -67,6 +67,7 @@ class Scale:
+         self._tick_params = None
+         self._label_params = None
+         self._legend = None
++        self._legend_offset = ""
+ 
+     def tick(self):
+         raise NotImplementedError()
+@@ -378,8 +379,11 @@ class ContinuousBase(Scale):
+             axis.set_view_interval(vmin, vmax)
+             locs = axis.major.locator()
+             locs = locs[(vmin <= locs) & (locs <= vmax)]
+-            labels = axis.major.formatter.format_ticks(locs)
++            formatter = axis.major.formatter
++            labels = formatter.format_ticks(locs)
+             new._legend = list(locs), list(labels)
++            offset = formatter.get_offset()
++            new._legend_offset = offset if offset else ""
+ 
+         return new
+ 
+diff --git a/seaborn/relational.py b/seaborn/relational.py
+index 18e18bb6..11adc97d 100644
+--- a/seaborn/relational.py
++++ b/seaborn/relational.py
+@@ -10,6 +10,7 @@ from ._oldcore import (
+ )
+ from .utils import (
+     locator_to_legend_entries,
++    locator_to_legend_offset,
+     adjust_legend_subtitles,
+     _default_color,
+     _deprecate_ci,
+@@ -215,6 +216,10 @@ class _RelationalPlotter(VectorPlotter):
+         else:
+             legend_title = ""
+ 
++        # Offsets from ScalarFormatter (e.g. "1e6") are stripped from brief
++        # numeric tick labels, so they are appended to the title instead
++        legend_offsets = []
++
+         title_kws = dict(
+             visible=False, color="w", s=0, linewidth=0, marker="", dashes=""
+         )
+@@ -243,6 +248,9 @@ class _RelationalPlotter(VectorPlotter):
+             else:
+                 locator = mpl.ticker.MaxNLocator(nbins=brief_ticks)
+             limits = min(self._hue_map.levels), max(self._hue_map.levels)
++            hue_offset = locator_to_legend_offset(locator, limits)
++            if hue_offset:
++                legend_offsets.append(hue_offset)
+             hue_levels, hue_formatted_levels = locator_to_legend_entries(
+                 locator, limits, self.plot_data["hue"].infer_objects().dtype
+             )
+@@ -253,8 +261,10 @@ class _RelationalPlotter(VectorPlotter):
+ 
+         # Add the hue semantic subtitle
+         if not legend_title and self.variables.get("hue", None) is not None:
+-            update((self.variables["hue"], "title"),
+-                   self.variables["hue"], **title_kws)
++            hue_title = self.variables["hue"]
++            if brief_hue:
++                hue_title = f"{hue_title} {hue_offset}".rstrip()
++            update((self.variables["hue"], "title"), hue_title, **title_kws)
+ 
+         # Add the hue semantic labels
+         for level, formatted_level in zip(hue_levels, hue_formatted_levels):
+@@ -275,6 +285,9 @@ class _RelationalPlotter(VectorPlotter):
+                 locator = mpl.ticker.MaxNLocator(nbins=brief_ticks)
+             # Define the min/max data values
+             limits = min(self._size_map.levels), max(self._size_map.levels)
++            size_offset = locator_to_legend_offset(locator, limits)
++            if size_offset:
++                legend_offsets.append(size_offset)
+             size_levels, size_formatted_levels = locator_to_legend_entries(
+                 locator, limits, self.plot_data["size"].infer_objects().dtype
+             )
+@@ -285,8 +298,10 @@ class _RelationalPlotter(VectorPlotter):
+ 
+         # Add the size semantic subtitle
+         if not legend_title and self.variables.get("size", None) is not None:
+-            update((self.variables["size"], "title"),
+-                   self.variables["size"], **title_kws)
++            size_title = self.variables["size"]
++            if brief_size and size_offset:
++                size_title = f"{size_title} {size_offset}"
++            update((self.variables["size"], "title"), size_title, **title_kws)
+ 
+         # Add the size semantic labels
+         for level, formatted_level in zip(size_levels, size_formatted_levels):
+@@ -338,6 +353,8 @@ class _RelationalPlotter(VectorPlotter):
+             legend_data[key] = artist
+             legend_order.append(key)
+ 
++        if legend_title and legend_offsets:
++            legend_title = f"{legend_title} {legend_offsets[-1]}"
+         self.legend_title = legend_title
+         self.legend_data = legend_data
+         self.legend_order = legend_order
+diff --git a/seaborn/utils.py b/seaborn/utils.py
+index 2407853c..00b6f4dd 100644
+--- a/seaborn/utils.py
++++ b/seaborn/utils.py
+@@ -710,6 +710,22 @@ def locator_to_legend_entries(locator, limits, dtype):
+     return raw_levels, formatted_levels
+ 
+ 
++def locator_to_legend_offset(locator, limits):
++    """Return the multiplicative offset string of a ScalarFormatter, if any."""
++    if isinstance(locator, mpl.ticker.LogLocator):
++        return ""
++
++    class dummy_axis:
++        def get_view_interval(self):
++            return limits
++
++    formatter = mpl.ticker.ScalarFormatter()
++    formatter.axis = dummy_axis()
++    raw_levels = locator.tick_values(*limits)
++    formatter.set_locs(raw_levels)
++    return formatter.get_offset() or ""
++
++
+ def relative_luminance(color):
+     """Calculate the relative luminance of a color according to W3C standards
+ 
+
+2026-10-11 17:38:00,122 - INFO - swea-agent - Trajectory saved to /home/box/context-shaping/results/swebench/runs/mwaskom__seaborn-3187/swe_agent_nothink/out/mwaskom__seaborn-3187/mwaskom__seaborn-3187.traj
+2026-10-11 17:38:00,134 - INFO - swea-env - Beginning environment shutdown...

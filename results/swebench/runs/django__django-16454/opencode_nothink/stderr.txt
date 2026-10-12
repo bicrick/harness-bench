@@ -1,0 +1,144 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "class CommandParser" -A 45 django/core/management/base.py
+46:class CommandParser(ArgumentParser):
+47-    """
+48-    Customized ArgumentParser class to improve some error messages and prevent
+49-    SystemExit in several occasions, as SystemExit is unacceptable when a
+50-    command is called programmatically.
+51-    """
+52-
+53-    def __init__(
+54-        self, *, missing_args_message=None, called_from_command_line=None, **kwargs
+55-    ):
+56-        self.missing_args_message = missing_args_message
+57-        self.called_from_command_line = called_from_command_line
+58-        super().__init__(**kwargs)
+59-
+60-    def parse_args(self, args=None, namespace=None):
+61-        # Catch missing argument for a better error message
+62-        if self.missing_args_message and not (
+63-            args or any(not arg.startswith("-") for arg in args)
+64-        ):
+65-            self.error(self.missing_args_message)
+66-        return super().parse_args(args, namespace)
+67-
+68-    def error(self, message):
+69-        if self.called_from_command_line:
+70-            super().error(message)
+71-        else:
+72-            raise CommandError("Error: %s" % message)
+73-
+74-
+75-def handle_default_options(options):
+76-    """
+77-    Include any default options that all commands should accept here
+78-    so that ManagementUtility can handle them before searching for
+79-    user commands.
+80-    """
+81-    if options.settings:
+82-        os.environ["DJANGO_SETTINGS_MODULE"] = options.settings
+83-    if options.pythonpath:
+84-        sys.path.insert(0, options.pythonpath)
+85-
+86-
+87-def no_translations(handle_func):
+88-    """Decorator that forces a command to run with translations deactivated."""
+89-
+90-    def wrapper(*args, **kwargs):
+91-        from django.utils import translation
+[0m
+[0m← [0mEdit django/core/management/base.py
+Index: /testbed/django/core/management/base.py
+===================================================================
+--- /testbed/django/core/management/base.py
++++ /testbed/django/core/management/base.py
+@@ -64,8 +64,20 @@
+     ):
+         self.error(self.missing_args_message)
+     return super().parse_args(args, namespace)
+ 
++def add_subparsers(self, **kwargs):
++    # Ensure subparsers created via add_parser() retain the error
++    # formatting arguments of this parser.
++    parser_class = kwargs.get("parser_class", type(self))
++    if issubclass(parser_class, CommandParser):
++        kwargs["parser_class"] = partial(
++            parser_class,
++            called_from_command_line=self.called_from_command_line,
++            missing_args_message=self.missing_args_message,
++        )
++    return super().add_subparsers(**kwargs)
++
+ def error(self, message):
+     if self.called_from_command_line:
+         super().error(message)
+     else:
+
+[0m
+[0m$ [0mcd /testbed && head -20 django/core/management/base.py | grep -n import; grep -n "^from functools\|^import functools" django/core/management/base.py
+5:import argparse
+6:import os
+7:import sys
+8:from argparse import ArgumentParser, HelpFormatter
+9:from io import TextIOBase
+11:import django
+12:from django.core import checks
+13:from django.core.exceptions import ImproperlyConfigured
+14:from django.core.management.color import color_style, no_style
+15:from django.db import DEFAULT_DB_ALIAS, connections
+[0m
+[0m← [0mEdit django/core/management/base.py
+Index: /testbed/django/core/management/base.py
+===================================================================
+--- /testbed/django/core/management/base.py
++++ /testbed/django/core/management/base.py
+@@ -5,8 +5,9 @@
+ import argparse
+ import os
+ import sys
+ from argparse import ArgumentParser, HelpFormatter
++from functools import partial
+ from io import TextIOBase
+ 
+ import django
+ from django.core import checks
+
+[0m
+[0m$ [0mcd /tmp && mkdir -p sptest && cd sptest && cat > run.py <<'EOF'
+import django
+from django.conf import settings
+settings.configure()
+django.setup()
+from django.core.management.base import BaseCommand, CommandError
+class Command(BaseCommand):
+    def add_arguments(self, parser):
+        subparsers = parser.add_subparsers(required=True)
+        create = subparsers.add_parser("create")
+        create.add_argument("name")
+    def handle(self, *args, **options):
+        pass
+try:
+    Command().run_from_argv(["manage.py", "cheeses", "create"])
+except CommandError as e:
+    print("CommandError:", e)
+except SystemExit as e:
+    print("SystemExit", e.code)
+EOF
+PYTHONPATH=/testbed python run.py 2>&1 | tail -5; cd /testbed && python -m pytest tests/user_commands tests/admin_scripts -q 2>&1 | tail -3
+usage: manage.py cheeses create [-h] name
+manage.py cheeses create: error: the following arguments are required: name
+SystemExit 2
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py user_commands admin_scripts 2>&1 | tail -4
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py user_commands admin_scripts 2>&1 | grep -E "^(Ran|OK|FAILED)"
+Ran 254 tests in 26.410s
+OK
+[0m

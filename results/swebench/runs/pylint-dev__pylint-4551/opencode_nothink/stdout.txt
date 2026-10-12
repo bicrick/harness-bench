@@ -1,0 +1,16 @@
+I'll look at the pyreverse code that handles attribute type inference.
+The attribute type comes from inference of the assigned value, which for `a: str = None` in `__init__` (the parameter `a`) infers to `None`. I'll make the parameter's annotation take precedence when available. Let me check how the annotation is exposed and where `handle_assignattr_type` is called.
+Now I'll update `handle_assignattr_type` so that when the assigned value is a name bound to an annotated function argument, the annotation is used instead of the inferred `None`.
+Now I'll add the helper function near the top of the module.
+The annotation lives on the function argument. I'll implement the helper so it resolves an `AssignAttr` value that is a `Name` referring to a function argument with an annotation, and returns the inferred type of that annotation.
+Now I'll verify the behavior with the example from the issue.
+The attribute `a` is now typed as `str` instead of `None`. Let me run the existing pyreverse tests to check for regressions.
+Pyreverse now uses the PEP 484 annotation of a constructor argument when inferring an instance attribute's type, so `self.a = a` with `a: str = None` is reported as `str` instead of `None`.
+
+The change is in `pylint/pyreverse/inspector.py`:
+- A new helper, `_annotated_type_of_assigned_value`, checks whether the assigned value is a function argument with an annotation and, if the annotation resolves to a class, returns that class.
+- `handle_assignattr_type` uses this annotated type in place of the inferred value when one is available.
+
+I checked the issue's example directly: the attribute `a` is now typed as `str`. The existing pyreverse unit tests pass (14 selected). I did not add or change any tests.
+
+This only covers annotations that resolve to a class (such as `str` or `int`). Complex annotations like `Optional[str]` or unions fall back to the previous inference behaviour.

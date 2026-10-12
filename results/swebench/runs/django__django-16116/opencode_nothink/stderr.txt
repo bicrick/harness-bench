@@ -1,0 +1,339 @@
+[0m
+> build · claude-haiku-5-5
+[0m
+[0m$ [0mcd /testbed && grep -n "check" django/core/management/commands/makemigrations.py
+70:            "--check",
+72:            dest="check_changes",
+113:        check_changes = options["check_changes"]
+137:        consistency_check_labels = {config.label for config in apps.get_app_configs()}
+138:        # Non-default databases are only checked if database routers used.
+139:        aliases_to_check = (
+142:        for alias in sorted(aliases_to_check):
+149:                for app_label in consistency_check_labels
+153:                    loader.check_consistent_history(connection)
+156:                        "Got an error checking a consistent migration history "
+255:            if check_changes:
+270:            # Multiple leaf nodes have already been checked earlier in command.
+[0m
+[0m$ [0mcd /testbed && sed -n 1,80p django/core/management/commands/makemigrations.py && grep -n "dry_run\|check_changes" django/core/management/commands/makemigrations.py
+import os
+import sys
+import warnings
+from itertools import takewhile
+
+from django.apps import apps
+from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError, no_translations
+from django.core.management.utils import run_formatters
+from django.db import DEFAULT_DB_ALIAS, OperationalError, connections, router
+from django.db.migrations import Migration
+from django.db.migrations.autodetector import MigrationAutodetector
+from django.db.migrations.loader import MigrationLoader
+from django.db.migrations.migration import SwappableTuple
+from django.db.migrations.optimizer import MigrationOptimizer
+from django.db.migrations.questioner import (
+    InteractiveMigrationQuestioner,
+    MigrationQuestioner,
+    NonInteractiveMigrationQuestioner,
+)
+from django.db.migrations.state import ProjectState
+from django.db.migrations.utils import get_migration_name_timestamp
+from django.db.migrations.writer import MigrationWriter
+
+
+class Command(BaseCommand):
+    help = "Creates new migration(s) for apps."
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "args",
+            metavar="app_label",
+            nargs="*",
+            help="Specify the app label(s) to create migrations for.",
+        )
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Just show what migrations would be made; don't actually write them.",
+        )
+        parser.add_argument(
+            "--merge",
+            action="store_true",
+            help="Enable fixing of migration conflicts.",
+        )
+        parser.add_argument(
+            "--empty",
+            action="store_true",
+            help="Create an empty migration.",
+        )
+        parser.add_argument(
+            "--noinput",
+            "--no-input",
+            action="store_false",
+            dest="interactive",
+            help="Tells Django to NOT prompt the user for input of any kind.",
+        )
+        parser.add_argument(
+            "-n",
+            "--name",
+            help="Use this name for migration file(s).",
+        )
+        parser.add_argument(
+            "--no-header",
+            action="store_false",
+            dest="include_header",
+            help="Do not add header comments to new migration file(s).",
+        )
+        parser.add_argument(
+            "--check",
+            action="store_true",
+            dest="check_changes",
+            help="Exit with a non-zero status if model changes are missing migrations.",
+        )
+        parser.add_argument(
+            "--scriptable",
+            action="store_true",
+            dest="scriptable",
+            help=(
+                "Divert log output and input prompts to stderr, writing only "
+72:            dest="check_changes",
+106:        self.dry_run = options["dry_run"]
+113:        check_changes = options["check_changes"]
+196:                dry_run=self.dry_run,
+202:                dry_run=self.dry_run,
+255:            if check_changes:
+350:                if not self.dry_run:
+493:                if not self.dry_run:
+[0m
+[0m$ [0mcd /testbed && sed -n 100,130p django/core/management/commands/makemigrations.py && sed -n 180,270p django/core/management/commands/makemigrations.py
+@no_translations
+    def handle(self, *app_labels, **options):
+        self.written_files = []
+        self.verbosity = options["verbosity"]
+        self.interactive = options["interactive"]
+        self.dry_run = options["dry_run"]
+        self.merge = options["merge"]
+        self.empty = options["empty"]
+        self.migration_name = options["name"]
+        if self.migration_name and not self.migration_name.isidentifier():
+            raise CommandError("The migration name must be a valid Python identifier.")
+        self.include_header = options["include_header"]
+        check_changes = options["check_changes"]
+        self.scriptable = options["scriptable"]
+        self.update = options["update"]
+        # If logs and prompts are diverted to stderr, remove the ERROR style.
+        if self.scriptable:
+            self.stderr.style_func = None
+
+        # Make sure the app they asked for exists
+        app_labels = set(app_labels)
+        has_bad_labels = False
+        for app_label in app_labels:
+            try:
+                apps.get_app_config(app_label)
+            except LookupError as err:
+                self.stderr.write(str(err))
+                has_bad_labels = True
+        if has_bad_labels:
+            sys.exit(2)
+                "'python manage.py makemigrations --merge'" % name_str
+            )
+
+        # If they want to merge and there's nothing to merge, then politely exit
+        if self.merge and not conflicts:
+            self.log("No conflicts detected to merge.")
+            return
+
+        # If they want to merge and there is something to merge, then
+        # divert into the merge code
+        if self.merge and conflicts:
+            return self.handle_merge(loader, conflicts)
+
+        if self.interactive:
+            questioner = InteractiveMigrationQuestioner(
+                specified_apps=app_labels,
+                dry_run=self.dry_run,
+                prompt_output=self.log_output,
+            )
+        else:
+            questioner = NonInteractiveMigrationQuestioner(
+                specified_apps=app_labels,
+                dry_run=self.dry_run,
+                verbosity=self.verbosity,
+                log=self.log,
+            )
+        # Set up autodetector
+        autodetector = MigrationAutodetector(
+            loader.project_state(),
+            ProjectState.from_apps(apps),
+            questioner,
+        )
+
+        # If they want to make an empty migration, make one for each app
+        if self.empty:
+            if not app_labels:
+                raise CommandError(
+                    "You must supply at least one app label when using --empty."
+                )
+            # Make a fake changes() result we can pass to arrange_for_graph
+            changes = {app: [Migration("custom", app)] for app in app_labels}
+            changes = autodetector.arrange_for_graph(
+                changes=changes,
+                graph=loader.graph,
+                migration_name=self.migration_name,
+            )
+            self.write_migration_files(changes)
+            return
+
+        # Detect changes
+        changes = autodetector.changes(
+            graph=loader.graph,
+            trim_to_apps=app_labels or None,
+            convert_apps=app_labels or None,
+            migration_name=self.migration_name,
+        )
+
+        if not changes:
+            # No changes? Tell them.
+            if self.verbosity >= 1:
+                if app_labels:
+                    if len(app_labels) == 1:
+                        self.log("No changes detected in app '%s'" % app_labels.pop())
+                    else:
+                        self.log(
+                            "No changes detected in apps '%s'"
+                            % ("', '".join(app_labels))
+                        )
+                else:
+                    self.log("No changes detected")
+        else:
+            if self.update:
+                self.write_to_last_migration_files(changes)
+            else:
+                self.write_migration_files(changes)
+            if check_changes:
+                sys.exit(1)
+
+    def write_to_last_migration_files(self, changes):
+        loader = MigrationLoader(connections[DEFAULT_DB_ALIAS])
+        new_changes = {}
+        update_previous_migration_paths = {}
+        for app_label, app_migrations in changes.items():
+            # Find last migration.
+            leaf_migration_nodes = loader.graph.leaf_nodes(app=app_label)
+            if len(leaf_migration_nodes) == 0:
+                raise CommandError(
+                    f"App {app_label} has no migration, cannot update last migration."
+                )
+            leaf_migration_node = leaf_migration_nodes[0]
+            # Multiple leaf nodes have already been checked earlier in command.
+[0m
+[0m← [0mEdit django/core/management/commands/makemigrations.py
+Index: /testbed/django/core/management/commands/makemigrations.py
+===================================================================
+--- /testbed/django/core/management/commands/makemigrations.py
++++ /testbed/django/core/management/commands/makemigrations.py
+@@ -247,14 +247,14 @@
+                     )
+             else:
+                 self.log("No changes detected")
+     else:
++        if check_changes:
++            sys.exit(1)
+         if self.update:
+             self.write_to_last_migration_files(changes)
+         else:
+             self.write_migration_files(changes)
+-        if check_changes:
+-            sys.exit(1)
+ 
+ def write_to_last_migration_files(self, changes):
+     loader = MigrationLoader(connections[DEFAULT_DB_ALIAS])
+     new_changes = {}
+
+[0m
+[0m$ [0mcd /testbed && grep -rn "makemigrations.*--check\|check.*makemigrations" docs/ | head -20
+docs/releases/1.10.txt:332:* The new :option:`makemigrations --check` option makes the command exit
+docs/releases/1.10.txt:1144:  :option:`makemigrations --check` option.
+[0m
+[0m$ [0mcd /testbed && grep -n -A12 "option:: --check" docs/ref/django-admin.txt | sed -n 1,40p; grep -n "makemigrations --check" docs/ref/django-admin.txt
+823:.. django-admin-option:: --check
+824-
+825-Makes ``makemigrations`` exit with a non-zero status when model changes without
+826-migrations are detected.
+827-
+828-.. django-admin-option:: --scriptable
+829-
+830-.. versionadded:: 4.1
+831-
+832-Diverts log output and input prompts to ``stderr``, writing only paths of
+833-generated migration files to ``stdout``.
+834-
+835-.. django-admin-option:: --update
+--
+913:.. django-admin-option:: --check
+914-
+915-Makes ``migrate`` exit with a non-zero status when unapplied migrations are
+916-detected.
+917-
+918-.. django-admin-option:: --prune
+919-
+920-.. versionadded:: 4.1
+921-
+922-Deletes nonexistent migrations from the ``django_migrations`` table. This is
+923-useful when migration files replaced by a squashed migration have been removed.
+924-See :ref:`migration-squashing` for more details.
+925-
+--
+938:.. django-admin-option:: --check
+939-
+940-Makes ``optimizemigration`` exit with a non-zero status when a migration can be
+941-optimized.
+942-
+943-``runserver``
+944--------------
+945-
+946-.. django-admin:: runserver [addrport]
+947-
+948-Starts a lightweight development web server on the local machine. By default,
+949-the server runs on port 8000 on the IP address ``127.0.0.1``. You can pass in an
+[0m
+[0m← [0mEdit docs/ref/django-admin.txt
+Index: /testbed/docs/ref/django-admin.txt
+===================================================================
+--- /testbed/docs/ref/django-admin.txt
++++ /testbed/docs/ref/django-admin.txt
+@@ -822,9 +822,10 @@
+ 
+ .. django-admin-option:: --check
+ 
+ Makes ``makemigrations`` exit with a non-zero status when model changes without
+-migrations are detected.
++migrations are detected. No migration files are written when this option is
++used.
+ 
+ .. django-admin-option:: --scriptable
+ 
+ .. versionadded:: 4.1
+
+[0m
+[0m$ [0mcd /testbed && python -m pytest tests/migrations/test_commands.py -q -k "check" 2>&1 | tail -15
+/opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[0m
+[0m$ [0mcd /testbed/tests && python runtests.py migrations.test_commands 2>&1 | tail -15
+Ran 140 tests in 5.679s
+
+OK
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'default'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+Destroying test database for alias 'other'...
+[0m

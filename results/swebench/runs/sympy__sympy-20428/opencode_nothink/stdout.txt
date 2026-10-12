@@ -1,0 +1,19 @@
+I'll look at how `clear_denoms` is implemented in the polys code.
+The `dmp_mul_ground` with a zero-valued (EX) result leaves an unstripped leading zero. The simplest robust fix is to strip the result of `dmp_mul_ground` in `dmp_clear_denoms`, and also the `dup` path. Let me check `dup_clear_denoms` and `dmp_mul_ground`.
+The cleanest fix is to strip the result in `dmp_clear_denoms` after multiplying by the common denominator. I'll check that `dmp_strip` is available in densetools.
+`dmp_strip` is already imported in densetools. Now I'll make the fix: strip the result after multiplying by the common denominator.
+Now let me check the univariate path (`dup_clear_denoms`), since the `if not u` branch is used for univariate polys.
+The univariate path has the same issue. I'll apply the same stripping there.
+Now let me verify the issue reproduces as fixed.
+The reproduction now yields `DMP([], EX, None)`, `is_zero` is `True`, and `terms_gcd()`/`primitive()` work. pytest isn't installed, so I'll run the existing tests with the sympy test runner.
+The fix is in place: `clear_denoms()` on the problematic poly now returns a properly stripped zero, and the relevant polys tests pass.
+
+**Root cause:** `dmp_clear_denoms` and `dup_clear_denoms` in `sympy/polys/densetools.py` multiply the polynomial by the common denominator but never strip the result. When the coefficients simplify to zero in the EX domain, the list keeps a leading `EX(0)` (`DMP([EX(0)], EX, None)`) instead of the canonical `DMP([], EX, None)`, which breaks `terms_gcd`, `primitive`, and `is_zero`.
+
+**Change:** both functions now wrap their return values in `dmp_strip` / `dup_strip`, in both the `convert=False` and `convert=True` branches.
+
+Verification:
+- The issue's example now gives `DMP([], EX, None)`, `is_zero == True`, `terms_gcd()` returns `((0,), Poly(0, x, domain='EX'))`, and `primitive()` returns `(0, Poly(0, x, domain='EX'))`.
+- `test_densetools.py`, `test_polytools.py`, and `test_rings.py` all pass (155 + 62 tests).
+
+I didn't add or modify any tests, per your instructions.

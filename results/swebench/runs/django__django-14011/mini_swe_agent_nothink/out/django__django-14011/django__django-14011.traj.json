@@ -1,0 +1,719 @@
+{
+  "info": {
+    "model_stats": {
+      "instance_cost": 0.0015079800000000001,
+      "api_calls": 6
+    },
+    "config": {
+      "agent": {
+        "system_template": "You are a helpful assistant that can interact with a computer shell to solve programming tasks.\n",
+        "instance_template": "<pr_description>\nConsider the following PR description:\n{{task}}\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\n\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n<IMPORTANT>This is an interactive process where you will think and issue AT LEAST ONE command, see the result, then think and issue your next command(s).</important>\n\nFor each response:\n\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide one or more bash tool calls to execute\n\n## Important Boundaries\n\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\n\nYou are operating in an environment where\n\n1. You issue at least one command\n2. The system executes the command(s) in a subshell\n3. You see the result(s)\n4. You write your next command(s)\n\nEach response should include:\n\n1. **Reasoning text** where you explain your analysis and plan\n2. At least one tool call with your command\n\n**CRITICAL REQUIREMENTS:**\n\n- Your response SHOULD include reasoning text explaining what you're doing\n- Your response MUST include AT LEAST ONE bash tool call. You can make MULTIPLE tool calls in a single response when the commands are independent (e.g., searching multiple files, reading different parts of the codebase).\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nI need to understand the Builder-related code. Let me find relevant files and check the project structure.\n\n[Makes multiple bash tool calls: {\"command\": \"ls -la\"}, {\"command\": \"find src -name '*.java' | grep -i builder\"}, {\"command\": \"cat README.md | head -50\"}]\n</example_response>\n\n## Environment Details\n\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- You can use bash commands or invoke any tool that is available in the environment\n- You can also create new tools or scripts to help you with the task\n- If a tool isn't available, you can also install it\n\n## Submission\n\nWhen you've completed your work, you MUST submit your changes as a git patch.\nFollow these steps IN ORDER, with SEPARATE commands:\n\nStep 1: Create the patch file\nRun `git diff -- path/to/file1 path/to/file2 > patch.txt` listing only the source files you modified.\nDo NOT commit your changes.\n\n<IMPORTANT>\nThe patch must only contain changes to the specific source files you modified to fix the issue.\nDo not submit file creations or changes to any of the following files:\n\n- test and reproduction files\n- helper scripts, tests, or tools that you created\n- installation, build, packaging, configuration, or setup scripts unless they are directly part of the issue you were fixing (you can assume that the environment is already set up for your client)\n- binary or compiled files\n</IMPORTANT>\n\nStep 2: Verify your patch\nInspect patch.txt to confirm it only contains your intended changes and headers show `--- a/` and `+++ b/` paths.\n\nStep 3: Submit (EXACT command required)\nYou MUST use this EXACT command to submit:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat patch.txt\n```\n\nIf the command fails (nonzero exit status), it will not submit.\n\n<CRITICAL>\n- Creating/viewing the patch and submitting it MUST be separate commands (not combined with &&).\n- If you modify patch.txt after verifying, you SHOULD verify again before submitting.\n- You CANNOT continue working (reading, editing, testing) in any way on this task after submitting.\n</CRITICAL>\n</instructions>\n",
+        "step_limit": 50,
+        "cost_limit": 100.0,
+        "wall_time_limit_seconds": 0,
+        "max_consecutive_format_errors": 3,
+        "output_path": null
+      },
+      "agent_type": "minisweagent.run.benchmarks.utils.common.ProgressTrackingAgent",
+      "model": {
+        "model_name": "anthropic/claude-haiku-5-5",
+        "model_kwargs": {
+          "drop_params": true,
+          "parallel_tool_calls": true
+        },
+        "litellm_model_registry": null,
+        "set_cache_control": "default_end",
+        "cost_tracking": "ignore_errors",
+        "format_error_template": "{% if finish_reason is defined and (finish_reason == \"length\" or (finish_reason == \"tool_calls\" and not has_tool_calls)) -%}\nYour previous response reached the output token limit (finish_reason={{ finish_reason }}) before you produced a tool call, so it was cut off. Respond more concisely and finish with exactly one bash tool call. If you need to think more, do so briefly.\n{%- else -%}\nTool call error:\n\n<error>\n{{error}}\n</error>\n\nHere is general guidance on how to submit correct toolcalls:\n\nEvery response needs to use the 'bash' tool at least once to execute commands.\n\nCall the bash tool with your command as the argument:\n- Tool: bash\n- Arguments: {\"command\": \"your_command_here\"}\n\nIf you have completed your assignment, please consult the first message about how to\nsubmit your solution (you will not be able to continue working on this task after that).\n{%- endif %}\n",
+        "observation_template": "{% if output.exception_info -%}\n<exception>{{output.exception_info}}</exception>\n{% endif -%}\n<returncode>{{output.returncode}}</returncode>\n{% if output.output | length < 10000 -%}\n<output>\n{{ output.output -}}\n</output>\n{%- else -%}\n<warning>\nThe output of your last command was too long.\nPlease try a different command that produces less output.\nIf you're looking at a file you can try use head, tail or sed to view a smaller number of lines selectively.\nIf you're using grep or find and it produced too much output, you can use a more selective search pattern.\nIf you really need to see something from the full command's output, you can redirect output to a file and then search in that file.\n</warning>\n{%- set elided_chars = output.output | length - 10000 -%}\n<output_head>\n{{ output.output[:5000] }}\n</output_head>\n<elided_chars>\n{{ elided_chars }} characters elided\n</elided_chars>\n<output_tail>\n{{ output.output[-5000:] }}\n</output_tail>\n{%- endif -%}\n",
+        "multimodal_regex": ""
+      },
+      "model_type": "minisweagent.models.litellm_model.LitellmModel",
+      "environment": {
+        "image": "docker.io/swebench/sweb.eval.x86_64.django_1776_django-14011:latest",
+        "cwd": "/testbed",
+        "env": {
+          "PAGER": "cat",
+          "MANPAGER": "cat",
+          "LESS": "-R",
+          "PIP_PROGRESS_BAR": "off",
+          "TQDM_DISABLE": "1",
+          "BASH_ENV": "/root/.bashrc"
+        },
+        "forward_env": [],
+        "timeout": 60,
+        "executable": "docker",
+        "run_args": [
+          "--rm"
+        ],
+        "container_timeout": "2h",
+        "pull_timeout": 120,
+        "interpreter": [
+          "bash",
+          "-c"
+        ]
+      },
+      "environment_type": "minisweagent.environments.docker.DockerEnvironment"
+    },
+    "mini_version": "2.4.6",
+    "exit_status": "Submitted",
+    "submission": "diff --git a/django/core/servers/basehttp.py b/django/core/servers/basehttp.py\nindex 14dab517c9..909723dd0f 100644\n--- a/django/core/servers/basehttp.py\n+++ b/django/core/servers/basehttp.py\n@@ -81,6 +81,18 @@ class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):\n     \"\"\"A threaded version of the WSGIServer\"\"\"\n     daemon_threads = True\n \n+    def process_request_thread(self, request, client_address):\n+        \"\"\"\n+        Ensure the database connections opened by the request thread are\n+        closed when the thread finishes, so that they don't keep the test\n+        database busy when it is destroyed.\n+        \"\"\"\n+        try:\n+            super().process_request_thread(request, client_address)\n+        finally:\n+            from django.db import connections\n+            connections.close_all()\n+\n \n class ServerHandler(simple_server.ServerHandler):\n     http_version = '1.1'\n"
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant that can interact with a computer shell to solve programming tasks."
+    },
+    {
+      "role": "user",
+      "content": "<pr_description>\nConsider the following PR description:\nLiveServerTestCase's ThreadedWSGIServer doesn't close database connections after each thread\nDescription\n\t\nIn Django 2.2.17, I'm seeing the reappearance of #22414 after it was fixed in 1.11. #22414 is the issue where the following error will occur at the conclusion of a test run when destroy_test_db() is called:\nOperationalError: database \"test_myapp\" is being accessed by other users\nThis error happens when not all of the database connections are closed. In my case today, I'm seeing this when running a single test that is a LiveServerTestCase. I see it in approximately half of my test runs, so it's not wholly deterministic (it's a race condition).\nThere weren't a whole lot of changes in the LiveServerTestCase-related code between 1.11 and 2.2, so I looked at them individually.\nIssue #20238 added threading support to LiveServerTestCase. One of the changes it made \u200bwas changing LiveServerThread to use ThreadedWSGIServer instead of WSGIServer. LiveServerThread is used by LiveServerTestCase.\nWhen I tried modifying LiveServerThread to use the old WSGIServer, I could no longer reproduce the above error. My changes were as follows:\nclass NonThreadedLiveServerThread(LiveServerThread):\n\tdef _create_server(self):\n\t\treturn WSGIServer((self.host, self.port), QuietWSGIRequestHandler, allow_reuse_address=False)\nclass MyTest(LiveServerTestCase):\n\tserver_thread_class = NonThreadedLiveServerThread\nThe CPython docs \u200bdescribe ThreadingMixIn as defining an attribute \"which indicates whether or not the server should wait for thread termination.\"\nConsistent with what I described above, Aymeric said the following on ticket #20238, seeming to foreshadow issues like this one:\nmore threading will certainly create more race conditions on shutdown, especially when it comes to the database connections \u2014 it's taken months to eliminate most from LiveServerTestCase, and I'm sure there are still some left,\n\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\n\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n<IMPORTANT>This is an interactive process where you will think and issue AT LEAST ONE command, see the result, then think and issue your next command(s).</important>\n\nFor each response:\n\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide one or more bash tool calls to execute\n\n## Important Boundaries\n\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\n\nYou are operating in an environment where\n\n1. You issue at least one command\n2. The system executes the command(s) in a subshell\n3. You see the result(s)\n4. You write your next command(s)\n\nEach response should include:\n\n1. **Reasoning text** where you explain your analysis and plan\n2. At least one tool call with your command\n\n**CRITICAL REQUIREMENTS:**\n\n- Your response SHOULD include reasoning text explaining what you're doing\n- Your response MUST include AT LEAST ONE bash tool call. You can make MULTIPLE tool calls in a single response when the commands are independent (e.g., searching multiple files, reading different parts of the codebase).\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nI need to understand the Builder-related code. Let me find relevant files and check the project structure.\n\n[Makes multiple bash tool calls: {\"command\": \"ls -la\"}, {\"command\": \"find src -name '*.java' | grep -i builder\"}, {\"command\": \"cat README.md | head -50\"}]\n</example_response>\n\n## Environment Details\n\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- You can use bash commands or invoke any tool that is available in the environment\n- You can also create new tools or scripts to help you with the task\n- If a tool isn't available, you can also install it\n\n## Submission\n\nWhen you've completed your work, you MUST submit your changes as a git patch.\nFollow these steps IN ORDER, with SEPARATE commands:\n\nStep 1: Create the patch file\nRun `git diff -- path/to/file1 path/to/file2 > patch.txt` listing only the source files you modified.\nDo NOT commit your changes.\n\n<IMPORTANT>\nThe patch must only contain changes to the specific source files you modified to fix the issue.\nDo not submit file creations or changes to any of the following files:\n\n- test and reproduction files\n- helper scripts, tests, or tools that you created\n- installation, build, packaging, configuration, or setup scripts unless they are directly part of the issue you were fixing (you can assume that the environment is already set up for your client)\n- binary or compiled files\n</IMPORTANT>\n\nStep 2: Verify your patch\nInspect patch.txt to confirm it only contains your intended changes and headers show `--- a/` and `+++ b/` paths.\n\nStep 3: Submit (EXACT command required)\nYou MUST use this EXACT command to submit:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat patch.txt\n```\n\nIf the command fails (nonzero exit status), it will not submit.\n\n<CRITICAL>\n- Creating/viewing the patch and submitting it MUST be separate commands (not combined with &&).\n- If you modify patch.txt after verifying, you SHOULD verify again before submitting.\n- You CANNOT continue working (reading, editing, testing) in any way on this task after submitting.\n</CRITICAL>\n</instructions>"
+    },
+    {
+      "content": "THOUGHT: The fix in Django (upstream commit for #32138? actually ticket #22414 follow-up) was to make ThreadedWSGIServer close database connections at the end of each thread by overriding `process_request_thread` to call `connections.close_all()`. Let me look at the current code.",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "index": 1,
+          "caller": {
+            "type": "direct"
+          },
+          "function": {
+            "arguments": "{\"command\": \"cd /testbed && grep -n \\\"ThreadedWSGIServer\\\" -A 20 django/test/testcases.py | head -60; sed -n 1,30p django/test/testcases.py | grep -n import\"}",
+            "name": "bash"
+          },
+          "id": "toolu_01UdPoYw9dBjSumzZddmg2Dk",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "citations": null,
+        "thinking_blocks": null
+      },
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && grep -n \"ThreadedWSGIServer\" -A 20 django/test/testcases.py | head -60; sed -n 1,30p django/test/testcases.py | grep -n import",
+            "tool_call_id": "toolu_01UdPoYw9dBjSumzZddmg2Dk"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-196b7736-e595-4891-8d82-25749695345b",
+          "created": 1791754131,
+          "model": "claude-haiku-5-5",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: The fix in Django (upstream commit for #32138? actually ticket #22414 follow-up) was to make ThreadedWSGIServer close database connections at the end of each thread by overriding `process_request_thread` to call `connections.close_all()`. Let me look at the current code.",
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "index": 1,
+                    "caller": {
+                      "type": "direct"
+                    },
+                    "function": {
+                      "arguments": "{\"command\": \"cd /testbed && grep -n \\\"ThreadedWSGIServer\\\" -A 20 django/test/testcases.py | head -60; sed -n 1,30p django/test/testcases.py | grep -n import\"}",
+                      "name": "bash"
+                    },
+                    "id": "toolu_01UdPoYw9dBjSumzZddmg2Dk",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "citations": null,
+                  "thinking_blocks": null
+                }
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 209,
+            "prompt_tokens": 2610,
+            "total_tokens": 2819,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "text_tokens": 209
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cache_write_tokens": 2606,
+              "cached_tokens": 0,
+              "text_tokens": 4,
+              "image_tokens": null,
+              "video_tokens": null,
+              "cache_creation_tokens": 2606,
+              "cache_creation_token_details": {
+                "ephemeral_5m_input_tokens": 2606,
+                "ephemeral_1h_input_tokens": 0
+              }
+            },
+            "cache_creation_input_tokens": 2606,
+            "cache_read_input_tokens": 0,
+            "iterations": null,
+            "inference_geo": "global",
+            "speed": null,
+            "service_tier": "standard"
+          }
+        },
+        "cost": 0.00043065,
+        "timestamp": 1791754131.6696656
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\n33:from django.core.servers.basehttp import ThreadedWSGIServer, WSGIRequestHandler\n34-from django.db import DEFAULT_DB_ALIAS, connection, connections, transaction\n35-from django.forms.fields import CharField\n36-from django.http import QueryDict\n37-from django.http.request import split_domain_port, validate_host\n38-from django.test.client import AsyncClient, Client\n39-from django.test.html import HTMLParseError, parse_html\n40-from django.test.signals import setting_changed, template_rendered\n41-from django.test.utils import (\n42-    CaptureQueriesContext, ContextList, compare_xml, modify_settings,\n43-    override_settings,\n44-)\n45-from django.utils.deprecation import RemovedInDjango41Warning\n46-from django.utils.functional import classproperty\n47-from django.utils.version import PY310\n48-from django.views.static import serve\n49-\n50-__all__ = ('TestCase', 'TransactionTestCase',\n51-           'SimpleTestCase', 'skipIfDBFeature', 'skipUnlessDBFeature')\n52-\n53-\n--\n1479:    server_class = ThreadedWSGIServer\n1480-\n1481-    def __init__(self, host, static_handler, connections_override=None, port=0):\n1482-        self.host = host\n1483-        self.port = port\n1484-        self.is_ready = threading.Event()\n1485-        self.error = None\n1486-        self.static_handler = static_handler\n1487-        self.connections_override = connections_override\n1488-        super().__init__()\n1489-\n1490-    def run(self):\n1491-        \"\"\"\n1492-        Set up the live server and databases, and then loop over handling\n1493-        HTTP requests.\n1494-        \"\"\"\n1495-        if self.connections_override:\n1496-            # Override this thread's database connections with the ones\n1497-            # provided by the main thread.\n1498-            for alias, conn in self.connections_override.items():\n1499-                connections[alias] = conn\n1:import asyncio\n2:import difflib\n3:import json\n4:import logging\n5:import posixpath\n6:import sys\n7:import threading\n8:import unittest\n9:import warnings\n10:from collections import Counter\n11:from contextlib import contextmanager\n12:from copy import copy, deepcopy\n13:from difflib import get_close_matches\n14:from functools import wraps\n15:from unittest.suite import _DebugResult\n16:from unittest.util import safe_repr\n17:from urllib.parse import (\n20:from urllib.request import url2pathname\n22:from asgiref.sync import async_to_sync\n24:from django.apps import apps\n25:from django.conf import settings\n26:from django.core import mail\n27:from django.core.exceptions import ImproperlyConfigured, ValidationError\n28:from django.core.files import locks\n29:from django.core.handlers.wsgi import WSGIHandler, get_path_info\n30:from django.core.management import call_command\n</output>",
+      "extra": {
+        "raw_output": "33:from django.core.servers.basehttp import ThreadedWSGIServer, WSGIRequestHandler\n34-from django.db import DEFAULT_DB_ALIAS, connection, connections, transaction\n35-from django.forms.fields import CharField\n36-from django.http import QueryDict\n37-from django.http.request import split_domain_port, validate_host\n38-from django.test.client import AsyncClient, Client\n39-from django.test.html import HTMLParseError, parse_html\n40-from django.test.signals import setting_changed, template_rendered\n41-from django.test.utils import (\n42-    CaptureQueriesContext, ContextList, compare_xml, modify_settings,\n43-    override_settings,\n44-)\n45-from django.utils.deprecation import RemovedInDjango41Warning\n46-from django.utils.functional import classproperty\n47-from django.utils.version import PY310\n48-from django.views.static import serve\n49-\n50-__all__ = ('TestCase', 'TransactionTestCase',\n51-           'SimpleTestCase', 'skipIfDBFeature', 'skipUnlessDBFeature')\n52-\n53-\n--\n1479:    server_class = ThreadedWSGIServer\n1480-\n1481-    def __init__(self, host, static_handler, connections_override=None, port=0):\n1482-        self.host = host\n1483-        self.port = port\n1484-        self.is_ready = threading.Event()\n1485-        self.error = None\n1486-        self.static_handler = static_handler\n1487-        self.connections_override = connections_override\n1488-        super().__init__()\n1489-\n1490-    def run(self):\n1491-        \"\"\"\n1492-        Set up the live server and databases, and then loop over handling\n1493-        HTTP requests.\n1494-        \"\"\"\n1495-        if self.connections_override:\n1496-            # Override this thread's database connections with the ones\n1497-            # provided by the main thread.\n1498-            for alias, conn in self.connections_override.items():\n1499-                connections[alias] = conn\n1:import asyncio\n2:import difflib\n3:import json\n4:import logging\n5:import posixpath\n6:import sys\n7:import threading\n8:import unittest\n9:import warnings\n10:from collections import Counter\n11:from contextlib import contextmanager\n12:from copy import copy, deepcopy\n13:from difflib import get_close_matches\n14:from functools import wraps\n15:from unittest.suite import _DebugResult\n16:from unittest.util import safe_repr\n17:from urllib.parse import (\n20:from urllib.request import url2pathname\n22:from asgiref.sync import async_to_sync\n24:from django.apps import apps\n25:from django.conf import settings\n26:from django.core import mail\n27:from django.core.exceptions import ImproperlyConfigured, ValidationError\n28:from django.core.files import locks\n29:from django.core.handlers.wsgi import WSGIHandler, get_path_info\n30:from django.core.management import call_command\n",
+        "returncode": 0,
+        "timestamp": 1791754131.9252732,
+        "exception_info": ""
+      },
+      "tool_call_id": "toolu_01UdPoYw9dBjSumzZddmg2Dk",
+      "role": "tool"
+    },
+    {
+      "content": "Let me look at the `ThreadedWSGIServer` class in basehttp.py.",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "index": 1,
+          "caller": {
+            "type": "direct"
+          },
+          "function": {
+            "arguments": "{\"command\": \"cd /testbed && grep -n \\\"class ThreadedWSGIServer\\\" -B3 -A 12 django/core/servers/basehttp.py; grep -n \\\"^from\\\\|^import\\\" django/core/servers/basehttp.py\"}",
+            "name": "bash"
+          },
+          "id": "toolu_01Dm6RkFaSZC6TBmh2bCt9ec",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "citations": null,
+        "thinking_blocks": null
+      },
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && grep -n \"class ThreadedWSGIServer\" -B3 -A 12 django/core/servers/basehttp.py; grep -n \"^from\\|^import\" django/core/servers/basehttp.py",
+            "tool_call_id": "toolu_01Dm6RkFaSZC6TBmh2bCt9ec"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-137f943f-b788-4635-9532-d122d659b68d",
+          "created": 1791754132,
+          "model": "claude-haiku-5-5",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": "Let me look at the `ThreadedWSGIServer` class in basehttp.py.",
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "index": 1,
+                    "caller": {
+                      "type": "direct"
+                    },
+                    "function": {
+                      "arguments": "{\"command\": \"cd /testbed && grep -n \\\"class ThreadedWSGIServer\\\" -B3 -A 12 django/core/servers/basehttp.py; grep -n \\\"^from\\\\|^import\\\" django/core/servers/basehttp.py\"}",
+                      "name": "bash"
+                    },
+                    "id": "toolu_01Dm6RkFaSZC6TBmh2bCt9ec",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "citations": null,
+                  "thinking_blocks": null
+                }
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 147,
+            "prompt_tokens": 3830,
+            "total_tokens": 3977,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "text_tokens": 147
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cache_write_tokens": 1222,
+              "cached_tokens": 2606,
+              "text_tokens": 2,
+              "image_tokens": null,
+              "video_tokens": null,
+              "cache_creation_tokens": 1222,
+              "cache_creation_token_details": {
+                "ephemeral_5m_input_tokens": 1222,
+                "ephemeral_1h_input_tokens": 0
+              }
+            },
+            "cache_creation_input_tokens": 1222,
+            "cache_read_input_tokens": 2606,
+            "iterations": null,
+            "inference_geo": "global",
+            "speed": null,
+            "service_tier": "standard"
+          }
+        },
+        "cost": 0.00025251,
+        "timestamp": 1791754132.9218357
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\n77-            super().handle_error(request, client_address)\n78-\n79-\n80:class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):\n81-    \"\"\"A threaded version of the WSGIServer\"\"\"\n82-    daemon_threads = True\n83-\n84-\n85-class ServerHandler(simple_server.ServerHandler):\n86-    http_version = '1.1'\n87-\n88-    def __init__(self, stdin, stdout, stderr, environ, **kwargs):\n89-        \"\"\"\n90-        Use a LimitedStream so that unread request data will be ignored at\n91-        the end of the request. WSGIRequest uses a LimitedStream but it\n92-        shouldn't discard the data since the upstream servers usually do this.\n10:import logging\n11:import socket\n12:import socketserver\n13:import sys\n14:from wsgiref import simple_server\n16:from django.core.exceptions import ImproperlyConfigured\n17:from django.core.handlers.wsgi import LimitedStream\n18:from django.core.wsgi import get_wsgi_application\n19:from django.utils.module_loading import import_string\n</output>",
+      "extra": {
+        "raw_output": "77-            super().handle_error(request, client_address)\n78-\n79-\n80:class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):\n81-    \"\"\"A threaded version of the WSGIServer\"\"\"\n82-    daemon_threads = True\n83-\n84-\n85-class ServerHandler(simple_server.ServerHandler):\n86-    http_version = '1.1'\n87-\n88-    def __init__(self, stdin, stdout, stderr, environ, **kwargs):\n89-        \"\"\"\n90-        Use a LimitedStream so that unread request data will be ignored at\n91-        the end of the request. WSGIRequest uses a LimitedStream but it\n92-        shouldn't discard the data since the upstream servers usually do this.\n10:import logging\n11:import socket\n12:import socketserver\n13:import sys\n14:from wsgiref import simple_server\n16:from django.core.exceptions import ImproperlyConfigured\n17:from django.core.handlers.wsgi import LimitedStream\n18:from django.core.wsgi import get_wsgi_application\n19:from django.utils.module_loading import import_string\n",
+        "returncode": 0,
+        "timestamp": 1791754133.106146,
+        "exception_info": ""
+      },
+      "tool_call_id": "toolu_01Dm6RkFaSZC6TBmh2bCt9ec",
+      "role": "tool"
+    },
+    {
+      "content": "The fix is to make each request-handling thread close its database connections when it finishes. I'll override `process_request_thread` in `ThreadedWSGIServer`.",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "index": 1,
+          "caller": {
+            "type": "direct"
+          },
+          "function": {
+            "arguments": "{\"command\": \"cd /testbed && python - <<'EOF'\\np='django/core/servers/basehttp.py'\\ns=open(p).read()\\ns=s.replace('''class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):\\n    \\\"\\\"\\\"A threaded version of the WSGIServer\\\"\\\"\\\"\\n    daemon_threads = True\\n''','''class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):\\n    \\\"\\\"\\\"A threaded version of the WSGIServer\\\"\\\"\\\"\\n    daemon_threads = True\\n\\n    def process_request_thread(self, request, client_address):\\n        \\\"\\\"\\\"\\n        Ensure the database connections opened by the request thread are\\n        closed when the thread finishes, so that they don't keep the test\\n        database busy when it is destroyed.\\n        \\\"\\\"\\\"\\n        try:\\n            super().process_request_thread(request, client_address)\\n        finally:\\n            from django.db import connections\\n            connections.close_all()\\n''')\\nopen(p,'w').write(s)\\nEOF\\ngit diff --stat && python -c \\\"\\nimport django,os\\nos.environ.setdefault('DJANGO_SETTINGS_MODULE','tests.settings')\\n\\\" && cd tests && python runtests.py servers --parallel 1 -q 2>&1 | tail -3\"}",
+            "name": "bash"
+          },
+          "id": "toolu_01UsNhJfDEbXbr2M7iBBFJ28",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "citations": null,
+        "thinking_blocks": null
+      },
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && python - <<'EOF'\np='django/core/servers/basehttp.py'\ns=open(p).read()\ns=s.replace('''class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):\n    \"\"\"A threaded version of the WSGIServer\"\"\"\n    daemon_threads = True\n''','''class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):\n    \"\"\"A threaded version of the WSGIServer\"\"\"\n    daemon_threads = True\n\n    def process_request_thread(self, request, client_address):\n        \"\"\"\n        Ensure the database connections opened by the request thread are\n        closed when the thread finishes, so that they don't keep the test\n        database busy when it is destroyed.\n        \"\"\"\n        try:\n            super().process_request_thread(request, client_address)\n        finally:\n            from django.db import connections\n            connections.close_all()\n''')\nopen(p,'w').write(s)\nEOF\ngit diff --stat && python -c \"\nimport django,os\nos.environ.setdefault('DJANGO_SETTINGS_MODULE','tests.settings')\n\" && cd tests && python runtests.py servers --parallel 1 -q 2>&1 | tail -3",
+            "tool_call_id": "toolu_01UsNhJfDEbXbr2M7iBBFJ28"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-f745b0a4-0931-439c-86a5-d4c7789075fc",
+          "created": 1791754135,
+          "model": "claude-haiku-5-5",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": "The fix is to make each request-handling thread close its database connections when it finishes. I'll override `process_request_thread` in `ThreadedWSGIServer`.",
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "index": 1,
+                    "caller": {
+                      "type": "direct"
+                    },
+                    "function": {
+                      "arguments": "{\"command\": \"cd /testbed && python - <<'EOF'\\np='django/core/servers/basehttp.py'\\ns=open(p).read()\\ns=s.replace('''class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):\\n    \\\"\\\"\\\"A threaded version of the WSGIServer\\\"\\\"\\\"\\n    daemon_threads = True\\n''','''class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):\\n    \\\"\\\"\\\"A threaded version of the WSGIServer\\\"\\\"\\\"\\n    daemon_threads = True\\n\\n    def process_request_thread(self, request, client_address):\\n        \\\"\\\"\\\"\\n        Ensure the database connections opened by the request thread are\\n        closed when the thread finishes, so that they don't keep the test\\n        database busy when it is destroyed.\\n        \\\"\\\"\\\"\\n        try:\\n            super().process_request_thread(request, client_address)\\n        finally:\\n            from django.db import connections\\n            connections.close_all()\\n''')\\nopen(p,'w').write(s)\\nEOF\\ngit diff --stat && python -c \\\"\\nimport django,os\\nos.environ.setdefault('DJANGO_SETTINGS_MODULE','tests.settings')\\n\\\" && cd tests && python runtests.py servers --parallel 1 -q 2>&1 | tail -3\"}",
+                      "name": "bash"
+                    },
+                    "id": "toolu_01UsNhJfDEbXbr2M7iBBFJ28",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "citations": null,
+                  "thinking_blocks": null
+                }
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 505,
+            "prompt_tokens": 4378,
+            "total_tokens": 4883,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "text_tokens": 505
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cache_write_tokens": 548,
+              "cached_tokens": 3828,
+              "text_tokens": 2,
+              "image_tokens": null,
+              "video_tokens": null,
+              "cache_creation_tokens": 548,
+              "cache_creation_token_details": {
+                "ephemeral_5m_input_tokens": 548,
+                "ephemeral_1h_input_tokens": 0
+              }
+            },
+            "cache_creation_input_tokens": 548,
+            "cache_read_input_tokens": 3828,
+            "iterations": null,
+            "inference_geo": "global",
+            "speed": null,
+            "service_tier": "standard"
+          }
+        },
+        "cost": 0.00035948,
+        "timestamp": 1791754135.462022
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\n django/core/servers/basehttp.py | 12 ++++++++++++\n 1 file changed, 12 insertions(+)\n                   [-b] [--timing] [-k TEST_NAME_PATTERNS]\n                   [module [module ...]]\nruntests.py: error: unrecognized arguments: -q\n</output>",
+      "extra": {
+        "raw_output": " django/core/servers/basehttp.py | 12 ++++++++++++\n 1 file changed, 12 insertions(+)\n                   [-b] [--timing] [-k TEST_NAME_PATTERNS]\n                   [module [module ...]]\nruntests.py: error: unrecognized arguments: -q\n",
+        "returncode": 0,
+        "timestamp": 1791754138.97351,
+        "exception_info": ""
+      },
+      "tool_call_id": "toolu_01UsNhJfDEbXbr2M7iBBFJ28",
+      "role": "tool"
+    },
+    {
+      "content": "The change is in. Let me run the server tests without the unsupported flag.",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "index": 1,
+          "caller": {
+            "type": "direct"
+          },
+          "function": {
+            "arguments": "{\"command\": \"cd /testbed/tests && python runtests.py servers --parallel 1 2>&1 | tail -5\"}",
+            "name": "bash"
+          },
+          "id": "toolu_01E6QtK2mMgEHJ7MdrqmQdRE",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "citations": null,
+        "thinking_blocks": null
+      },
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed/tests && python runtests.py servers --parallel 1 2>&1 | tail -5",
+            "tool_call_id": "toolu_01E6QtK2mMgEHJ7MdrqmQdRE"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-ecace1a3-868c-43bf-a3c7-8b1690d0ac25",
+          "created": 1791754139,
+          "model": "claude-haiku-5-5",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": "The change is in. Let me run the server tests without the unsupported flag.",
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "index": 1,
+                    "caller": {
+                      "type": "direct"
+                    },
+                    "function": {
+                      "arguments": "{\"command\": \"cd /testbed/tests && python runtests.py servers --parallel 1 2>&1 | tail -5\"}",
+                      "name": "bash"
+                    },
+                    "id": "toolu_01E6QtK2mMgEHJ7MdrqmQdRE",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "citations": null,
+                  "thinking_blocks": null
+                }
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 103,
+            "prompt_tokens": 5011,
+            "total_tokens": 5114,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "text_tokens": 103
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cache_write_tokens": 633,
+              "cached_tokens": 4376,
+              "text_tokens": 2,
+              "image_tokens": null,
+              "video_tokens": null,
+              "cache_creation_tokens": 633,
+              "cache_creation_token_details": {
+                "ephemeral_5m_input_tokens": 633,
+                "ephemeral_1h_input_tokens": 0
+              }
+            },
+            "cache_creation_input_tokens": 633,
+            "cache_read_input_tokens": 4376,
+            "iterations": null,
+            "inference_geo": "global",
+            "speed": null,
+            "service_tier": "standard"
+          }
+        },
+        "cost": 0.000174585,
+        "timestamp": 1791754139.8684793
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\n----------------------------------------------------------------------\nRan 25 tests in 4.263s\n\nOK (skipped=1)\nDestroying test database for alias 'default'...\n</output>",
+      "extra": {
+        "raw_output": "----------------------------------------------------------------------\nRan 25 tests in 4.263s\n\nOK (skipped=1)\nDestroying test database for alias 'default'...\n",
+        "returncode": 0,
+        "timestamp": 1791754144.9074464,
+        "exception_info": ""
+      },
+      "tool_call_id": "toolu_01E6QtK2mMgEHJ7MdrqmQdRE",
+      "role": "tool"
+    },
+    {
+      "content": "The server tests pass. Now I'll create the patch.",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "index": 1,
+          "caller": {
+            "type": "direct"
+          },
+          "function": {
+            "arguments": "{\"command\": \"cd /testbed && git diff -- django/core/servers/basehttp.py > patch.txt && cat patch.txt\"}",
+            "name": "bash"
+          },
+          "id": "toolu_011vPReNNpWSc8L67nzSQpmH",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "citations": null,
+        "thinking_blocks": null
+      },
+      "extra": {
+        "actions": [
+          {
+            "command": "cd /testbed && git diff -- django/core/servers/basehttp.py > patch.txt && cat patch.txt",
+            "tool_call_id": "toolu_011vPReNNpWSc8L67nzSQpmH"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-1c899aab-f4fa-4a33-8868-e21ad99053c0",
+          "created": 1791754145,
+          "model": "claude-haiku-5-5",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": "The server tests pass. Now I'll create the patch.",
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "index": 1,
+                    "caller": {
+                      "type": "direct"
+                    },
+                    "function": {
+                      "arguments": "{\"command\": \"cd /testbed && git diff -- django/core/servers/basehttp.py > patch.txt && cat patch.txt\"}",
+                      "name": "bash"
+                    },
+                    "id": "toolu_011vPReNNpWSc8L67nzSQpmH",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "citations": null,
+                  "thinking_blocks": null
+                }
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 102,
+            "prompt_tokens": 5191,
+            "total_tokens": 5293,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "text_tokens": 102
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cache_write_tokens": 180,
+              "cached_tokens": 5009,
+              "text_tokens": 2,
+              "image_tokens": null,
+              "video_tokens": null,
+              "cache_creation_tokens": 180,
+              "cache_creation_token_details": {
+                "ephemeral_5m_input_tokens": 180,
+                "ephemeral_1h_input_tokens": 0
+              }
+            },
+            "cache_creation_input_tokens": 180,
+            "cache_read_input_tokens": 5009,
+            "iterations": null,
+            "inference_geo": "global",
+            "speed": null,
+            "service_tier": "standard"
+          }
+        },
+        "cost": 0.00012379,
+        "timestamp": 1791754145.8316782
+      }
+    },
+    {
+      "content": "<returncode>0</returncode>\n<output>\ndiff --git a/django/core/servers/basehttp.py b/django/core/servers/basehttp.py\nindex 14dab517c9..909723dd0f 100644\n--- a/django/core/servers/basehttp.py\n+++ b/django/core/servers/basehttp.py\n@@ -81,6 +81,18 @@ class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):\n     \"\"\"A threaded version of the WSGIServer\"\"\"\n     daemon_threads = True\n \n+    def process_request_thread(self, request, client_address):\n+        \"\"\"\n+        Ensure the database connections opened by the request thread are\n+        closed when the thread finishes, so that they don't keep the test\n+        database busy when it is destroyed.\n+        \"\"\"\n+        try:\n+            super().process_request_thread(request, client_address)\n+        finally:\n+            from django.db import connections\n+            connections.close_all()\n+\n \n class ServerHandler(simple_server.ServerHandler):\n     http_version = '1.1'\n</output>",
+      "extra": {
+        "raw_output": "diff --git a/django/core/servers/basehttp.py b/django/core/servers/basehttp.py\nindex 14dab517c9..909723dd0f 100644\n--- a/django/core/servers/basehttp.py\n+++ b/django/core/servers/basehttp.py\n@@ -81,6 +81,18 @@ class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):\n     \"\"\"A threaded version of the WSGIServer\"\"\"\n     daemon_threads = True\n \n+    def process_request_thread(self, request, client_address):\n+        \"\"\"\n+        Ensure the database connections opened by the request thread are\n+        closed when the thread finishes, so that they don't keep the test\n+        database busy when it is destroyed.\n+        \"\"\"\n+        try:\n+            super().process_request_thread(request, client_address)\n+        finally:\n+            from django.db import connections\n+            connections.close_all()\n+\n \n class ServerHandler(simple_server.ServerHandler):\n     http_version = '1.1'\n",
+        "returncode": 0,
+        "timestamp": 1791754146.0573647,
+        "exception_info": ""
+      },
+      "tool_call_id": "toolu_011vPReNNpWSc8L67nzSQpmH",
+      "role": "tool"
+    },
+    {
+      "content": "The patch is written to `patch.txt`. Submitting now:",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "index": 1,
+          "caller": {
+            "type": "direct"
+          },
+          "function": {
+            "arguments": "{\"command\": \"echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat /testbed/patch.txt\"}",
+            "name": "bash"
+          },
+          "id": "toolu_01MQbnWH7hRu1QSqmQUXVJUK",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": {
+        "citations": null,
+        "thinking_blocks": null
+      },
+      "extra": {
+        "actions": [
+          {
+            "command": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat /testbed/patch.txt",
+            "tool_call_id": "toolu_01MQbnWH7hRu1QSqmQUXVJUK"
+          }
+        ],
+        "response": {
+          "id": "chatcmpl-b777d4a8-5092-42c3-96e1-d7b7c2bc05fc",
+          "created": 1791754147,
+          "model": "claude-haiku-5-5",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": "The patch is written to `patch.txt`. Submitting now:",
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "index": 1,
+                    "caller": {
+                      "type": "direct"
+                    },
+                    "function": {
+                      "arguments": "{\"command\": \"echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat /testbed/patch.txt\"}",
+                      "name": "bash"
+                    },
+                    "id": "toolu_01MQbnWH7hRu1QSqmQUXVJUK",
+                    "type": "function"
+                  }
+                ],
+                "function_call": null,
+                "provider_specific_fields": {
+                  "citations": null,
+                  "thinking_blocks": null
+                }
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 113,
+            "prompt_tokens": 5658,
+            "total_tokens": 5771,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "text_tokens": 113
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cache_write_tokens": 467,
+              "cached_tokens": 5189,
+              "text_tokens": 2,
+              "image_tokens": null,
+              "video_tokens": null,
+              "cache_creation_tokens": 467,
+              "cache_creation_token_details": {
+                "ephemeral_5m_input_tokens": 467,
+                "ephemeral_1h_input_tokens": 0
+              }
+            },
+            "cache_creation_input_tokens": 467,
+            "cache_read_input_tokens": 5189,
+            "iterations": null,
+            "inference_geo": "global",
+            "speed": null,
+            "service_tier": "standard"
+          }
+        },
+        "cost": 0.00016696499999999998,
+        "timestamp": 1791754147.122528
+      }
+    },
+    {
+      "role": "exit",
+      "content": "diff --git a/django/core/servers/basehttp.py b/django/core/servers/basehttp.py\nindex 14dab517c9..909723dd0f 100644\n--- a/django/core/servers/basehttp.py\n+++ b/django/core/servers/basehttp.py\n@@ -81,6 +81,18 @@ class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):\n     \"\"\"A threaded version of the WSGIServer\"\"\"\n     daemon_threads = True\n \n+    def process_request_thread(self, request, client_address):\n+        \"\"\"\n+        Ensure the database connections opened by the request thread are\n+        closed when the thread finishes, so that they don't keep the test\n+        database busy when it is destroyed.\n+        \"\"\"\n+        try:\n+            super().process_request_thread(request, client_address)\n+        finally:\n+            from django.db import connections\n+            connections.close_all()\n+\n \n class ServerHandler(simple_server.ServerHandler):\n     http_version = '1.1'\n",
+      "extra": {
+        "exit_status": "Submitted",
+        "submission": "diff --git a/django/core/servers/basehttp.py b/django/core/servers/basehttp.py\nindex 14dab517c9..909723dd0f 100644\n--- a/django/core/servers/basehttp.py\n+++ b/django/core/servers/basehttp.py\n@@ -81,6 +81,18 @@ class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):\n     \"\"\"A threaded version of the WSGIServer\"\"\"\n     daemon_threads = True\n \n+    def process_request_thread(self, request, client_address):\n+        \"\"\"\n+        Ensure the database connections opened by the request thread are\n+        closed when the thread finishes, so that they don't keep the test\n+        database busy when it is destroyed.\n+        \"\"\"\n+        try:\n+            super().process_request_thread(request, client_address)\n+        finally:\n+            from django.db import connections\n+            connections.close_all()\n+\n \n class ServerHandler(simple_server.ServerHandler):\n     http_version = '1.1'\n"
+      }
+    }
+  ],
+  "trajectory_format": "mini-swe-agent-1.1",
+  "instance_id": "django__django-14011"
+}

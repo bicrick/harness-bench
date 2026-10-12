@@ -1,0 +1,84 @@
+Detected dumb terminal, disabling fancy input and pretty output.
+
+Update git name with: git config user.name "Your Name"
+Update git email with: git config user.email "you@example.com"
+Aider v0.86.2
+Model: anthropic/claude-haiku-5-5 with diff edit format, prompt cache
+Git repo: .git with 1,815 files
+Warning: For large repos, consider using --subtree-only and .aiderignore
+See: https://aider.chat/docs/faq.html#can-i-use-aider-in-a-large-mono-repo
+Repo-map: using 4096 tokens, files refresh
+
+
+https://aider.chat/HISTORY.html#release-notes
+
+Initial repo scan can be slow in larger repos, but only happens once.
+I can't edit the repository files directly here, so I'll give the fix as 
+SEARCH/REPLACE blocks. The root cause is that `clear_denoms()` in 
+`sympy/polys/polyclasses.py` builds a DMP whose coefficient list still has a 
+leading zero when the EX-domain constant evaluates to zero. The fix is to strip 
+the result of `clear_denoms` the same way the other operations do, so a zero 
+polynomial is always represented as an empty list.
+
+Please add `sympy/polys/polyclasses.py` to the chat so I can make the edit 
+against its exact contents. I'll then:
+
+1. In `DMP.clear_denoms`, call `strip` on the resulting polynomial (or use the 
+existing zero-normalising path) so a numerically zero EX coefficient collapses 
+to `[]`.
+2. Make sure `Poly.clear_denoms` in `sympy/polys/polytools.py` returns the 
+normalised representation, so `is_zero` and `as_expr()` agree.
+
+Once you've added the file, I'll produce the exact SEARCH/REPLACE blocks.
+
+Tokens: 33k sent, 15k cache write, 356 received. Cost: $0.0023 message, $0.0023 
+session.
+
+sympy/polys/polyclasses.py
+
+sympy/polys/polytools.py
+The root cause is in `DMP.clear_denoms` in `polyclasses.py`: the coefficient 
+list returned by `dmp_clear_denoms` can keep a leading zero (here, `EX(0)`), so 
+the DMP is not normalised. The `DMP` constructor path doesn't strip it, so `rep`
+stays `[EX(0)]` even though the polynomial is zero.
+
+The fix is to normalise the result of `clear_denoms` with `dmp_strip`-style 
+normalisation, using the existing `dmp_normal` helper that is already imported 
+in `polyclasses.py`. `dmp_normal` converts and strips leading zeros, so a zero 
+polynomial becomes `[]`.
+
+sympy/polys/polyclasses.py
+```python
+<<<<<<< SEARCH
+    def clear_denoms(f):
+        """Clear denominators, but keep the ground domain. """
+        coeff, F = dmp_clear_denoms(f.rep, f.lev, f.dom)
+        return coeff, f.per(F)
+=======
+    def clear_denoms(f):
+        """Clear denominators, but keep the ground domain. """
+        coeff, F = dmp_clear_denoms(f.rep, f.lev, f.dom)
+        F = dmp_normal(F, f.lev, f.dom)
+        return coeff, f.per(F)
+>>>>>>> REPLACE
+```
+
+This keeps the representation canonical, so `bad_poly.rep` becomes `DMP([], EX, 
+None)`, `is_zero` agrees with `as_expr()`, and the downstream `terms_gcd` and 
+`primitive` calls no longer hit the unstripped leading zero.
+
+No other files need to be changed for this fix. You can verify with:
+
+```bash
+python -c "from sympy import *; x=symbols('x'); p=Poly(sympify('x*0 + (1/2 - 
+1/2)*sqrt(2)'), x, domain='EX'); c,q=p.clear_denoms(); print(q.rep, q.is_zero, 
+q.terms_gcd())"
+```
+
+Tokens: 220k sent, 107k cache write, 2.4k cache hit, 681 received.
+Cost: $0.01 message, $0.02 session.
+Applied edit to sympy/polys/polyclasses.py
+
+python -c "from sympy import *; x=symbols('x'); p=Poly(sympify('x*0 + (1/2 - 
+1/2)*sqrt(2)'), x, domain='EX'); c,q=p.clear_denoms(); print(q.rep, q.is_zero, 
+q.terms_gcd())"

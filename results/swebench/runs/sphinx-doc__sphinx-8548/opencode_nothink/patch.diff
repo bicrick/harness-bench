@@ -1,0 +1,102 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..9c7a2bc65 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -584,6 +584,37 @@ class Documenter:
+         else:
+             return 'docstring of %s' % fullname
+ 
++    def _find_inherited_attr_doc(self) -> Optional[List[str]]:
++        """Find attribute documentation of an attribute inherited from a base class.
++
++        Attribute docs are keyed by (namespace, name) of the defining module, so
++        search the MRO of the parent class for the defining class.
++        """
++        if not self.parent or not self.objpath:
++            return None
++
++        attrname = self.objpath[-1]
++        try:
++            mro = inspect.getmro(self.parent)
++        except (AttributeError, TypeError):
++            return None
++
++        for cls in mro[1:]:
++            try:
++                qualname = safe_getattr(cls, '__qualname__')
++                module = safe_getattr(cls, '__module__')
++                if not qualname or not module:
++                    continue
++                analyzer = ModuleAnalyzer.for_module(module)
++                analyzer.analyze()
++                attr_docs = analyzer.find_attr_docs()
++                if (qualname, attrname) in attr_docs:
++                    return list(attr_docs[(qualname, attrname)])
++            except (AttributeError, PycodeError):
++                continue
++
++        return None
++
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         """Add content from docstrings, attribute documentation and user."""
+@@ -607,6 +638,15 @@ class Documenter:
+                     for i, line in enumerate(self.process_doc(docstrings)):
+                         self.add_line(line, sourcename, i)
+ 
++        if not no_docstring and self.objpath:
++            # the attribute may be inherited from a base class defined in another
++            # module; use the attribute docstring found there.
++            inherited = self._find_inherited_attr_doc()
++            if inherited:
++                no_docstring = True
++                for i, line in enumerate(self.process_doc([inherited])):
++                    self.add_line(line, sourcename, i)
++
+         # add content from docstrings
+         if not no_docstring:
+             docstrings = self.get_doc()
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index d6e73d36a..7d9012cb3 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -315,9 +315,39 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable,
+                 members[name] = ClassAttribute(subject, name, INSTANCEATTR,
+                                                '\n'.join(docstring))
+ 
++    # attach attribute docstrings of inherited attributes, which are stored in
++    # the analyzer of the module where the base class is defined.
++    for name, member in members.items():
++        if member.docstring:
++            continue
++        docstring = _find_inherited_attr_docstring(subject, name)
++        if docstring:
++            member.docstring = docstring
++
+     return members
+ 
+ 
++def _find_inherited_attr_docstring(subject: Any, name: str) -> Optional[str]:
++    """Find the attribute docstring of *name* defined in a base class of *subject*."""
++    from sphinx.pycode import ModuleAnalyzer, PycodeError
++
++    for cls in getmro(subject)[1:]:
++        try:
++            qualname = safe_getattr(cls, '__qualname__')
++            module = safe_getattr(cls, '__module__')
++            if not qualname or not module:
++                continue
++            analyzer = ModuleAnalyzer.for_module(module)
++            analyzer.analyze()
++            attr_docs = analyzer.find_attr_docs()
++            if (qualname, name) in attr_docs:
++                return '\n'.join(attr_docs[(qualname, name)])
++        except (AttributeError, PycodeError):
++            continue
++
++    return None
++
++
+ from sphinx.ext.autodoc.mock import (MockFinder, MockLoader, _MockModule, _MockObject,  # NOQA
+                                      mock)
+ 

@@ -1,0 +1,37 @@
+Let me look at the relevant code.
+The GridSpec is created with wspace/hspace, but the subfigures are then laid out elsewhere. Let me see the rest and how GridSpec handles these values.
+The GridSpec gets wspace/hspace, but the subfigure grid is laid out by `GridSpec` with `figure=self`, which uses the figure's subplotpars rather than the GridSpec's own values. Let me check how `GridSpecBase`/`GridSpec` stores them.
+The GridSpec stores the values correctly. The problem is in the subfigure layout: `get_grid_positions` for a subfigure grid uses `fig.subplotpars`, not the GridSpec's params. Let me check `get_grid_positions` and how `SubFigure` computes its positions.
+The `get_grid_positions` path looks right. Now let me check `SubFigure` and the subfigure grid positioning — specifically the `subplotspec` `get_position` path for subfigures.
+Let me look at the `SubFigure` placement and the `subfigures` layout: subfigures are placed via `gs[j, i]` positions. The subfigure grid is created with `figure=self`, and `get_subplot_params(self)` takes values from the GridSpec attributes *first* — but `update` on `SubplotParams` may ignore `None`s. The real culprit is likely in `GridSpec.__init__`, so let me inspect the `GridSpec` constructor and `SubplotSpec.get_position`.
+The subfigure layout is computed from `subplotspec.get_position(figure)`. Let me see how `SubplotSpec.get_position` gets the params, since the subfigure is positioned relative to its parent figure, and the grid for the subfigures is `gs`, whose `figure` is `self`.
+This is the key. `get_position(figure)` is called with the parent figure, so `get_grid_positions(figure)` → `get_subplot_params(figure)` → `copy(figure.subplotpars)` then `update` with the GridSpec attributes. That path looks right, but `SubplotParams.update` with `None` values — let me check whether it ignores `None` correctly, and how `SubFigure` gets its layout. Let me view `SubplotParams.update`.
+The `SubplotParams` logic is fine. The bug: `subfigures` passes `wspace`/`hspace` to GridSpec, but the grid positions get computed by `get_subplot_params(figure)`, which overrides with `getattr(self, k)` for *all* keys. That's fine for non-None values. So the issue must be in `get_grid_positions` itself — when `wspace` is 0 it's still used. Let me check the rest of `get_grid_positions` and the `GridSpec` `wspace` handling in `__init__`.
+This is all correct. So the bug is in how subfigure positions are computed in `SubFigure`. Subfigures are positioned using `subplotspec.get_position(self.parent)` — but the subfigure's *own* `subplotpars` may be used. Let me check `SubFigure.__init__` (around line 2213).
+The subfigure's positions come from `subplotspec.get_position(parent)`. Now I'll look at `GridSpec.__init__` tail — specifically whether it stores `wspace`/`hspace` only when figure is given, and what `subfigures` does. Let's check `_redo_transform_rel_fig` and `get_gridspec` / `get_topmost_subplotspec`, then just reproduce to see the actual values.
+Reproduced in principle, but the GridSpec values are `0` and the boxes look fine here. Note the GridSpec attributes are set *before* `super().__init__`, but `get_subplot_params` only uses `getattr`. Let me check whether `SubFigure`'s `_redo_transform_rel_fig` uses `subplotspec.get_position`, and whether `subfigures` is actually the call path. Let me compare with `wspace=0.5`.
+Confirmed: the subfigure bboxes don't change at all. Note the subfigure gridspec's wspace is set, so the issue is in `get_grid_positions`/`get_position`. Still, the subfigure bboxes ignore it — with `wspace=0.5` the boxes should be the same width but there'd be a gap. Let me check whether the values reach `get_grid_positions` at all, and look at the subfigure's `_redo_transform_rel_fig` body.
+There's the root cause: `_redo_transform_rel_fig` computes the subfigure's relative bbox purely from width/height ratios (`x0`, `dx`, `y0`, `dy`), ignoring the GridSpec's `wspace`/`hspace`. The gridspec-aware positions exist (`get_grid_positions`) but aren't used. I'll switch it to use `SubplotSpec.get_position(self._parent)`, which honors the spacing.
+
+Note `get_position` uses the parent figure's `subplotpars` for margins, but the GridSpec's own `left/right/top/bottom` override them if set — which is the intended behavior for `subfigures` too. However, subfigures should fill the full parent area, not inherit the parent figure's margins. So I'll compute the grid positions with `raw=True` (no margins) and apply only the spacing from the GridSpec.
+I left some messy leftover code (`subplot_params` unused, and `wr` based math that's now convoluted). Let me simplify it to be clean and verify against `get_grid_positions(raw=True)`.
+Now let me verify: with no spacing the result should match the old behavior, and with spacing the subfigure boxes should shrink and gap.
+Spacing now works (gaps appear for 0.5, and 0 matches the default-free layout). Let me verify the 3x2 case sums correctly (widths: 1/3 + 2/3 with 0.2 gap → total 1 ✓; heights: 1+2+1 with 0.1 gaps → total 1 ✓). One test fails; let me check whether it failed before my change.
+My change broke `test_subfigure_spanning` (it passed before). Let me look at that test's expectations.
+This test uses a default GridSpec with `wspace=None`, which I map to 0 — that's fine. The failure is that `wspace=None` should fall back to the rcParam `figure.subplot.wspace`, which the old code ignored. But for a *default* GridSpec the spacing of subfigures should be 0 — the existing layout doesn't account for that. Let me check what the old code gave versus the failing numbers.
+
+The key issue: `gs.wspace` is `None` for default grids, and the old behavior used no spacing, so `0` is correct. The real discrepancy is in the `dx` / `x0` math for spanning cells. Let me compare numerically.
+The positions are actually right; the failing assertion is a floating-point `0` vs `2.6e-14` on `y`. Let me check the `y0` for the bottom row: `y_top - dy` yields tiny rounding error. Rather than rely on exact arithmetic, I'll clamp via a simpler formula that's exact at the boundaries: compute edges from cumulative sums.
+Now the bottom edge is computed as `1 - (...)`, which is exact for the last row (sums to 1), so the `0` comes out exactly.
+The fix is in place and the related test suites pass (187 passed).
+
+## Summary
+
+**Root cause:** `SubFigure._redo_transform_rel_fig` in `lib/matplotlib/figure.py` computed each subfigure's position purely from the width/height ratios of the GridSpec. It never looked at the GridSpec's `wspace`/`hspace`, so those values were stored but ignored.
+
+**Fix:** In `_redo_transform_rel_fig`, the subfigure's relative bbox is now computed using the GridSpec's `wspace`/`hspace`. The separation between cells is subtracted from the available space and distributed across the ratio-based cell sizes, and spanned cells account for the gaps they cover. Margins are intentionally not applied, since subfigures fill their parent.
+
+**Verification:**
+- `wspace=0, hspace=0` gives the tiled layout; `wspace=0.3, hspace=0.3` now produces visible gaps.
+- Ratios with spacing still sum to the full parent extent.
+- `test_figure.py`, `test_gridspec.py`, and `test_constrainedlayout.py` all pass (187 passed, 7 skipped). I did not modify any tests.
