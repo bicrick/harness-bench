@@ -7,7 +7,7 @@ into its context window, which tools it gets, and when it stops. Most benchmarks
 the model fixed (Claude Haiku 5.5, same settings everywhere) and changes only the harness, to see how much the
 harness matters on its own.
 
-Write-up: **https://bicrick.com/projects/context-shaping**
+Write-up: **https://bicrick.com/projects/harness-bench**
 
 ## Results
 
