@@ -72,7 +72,7 @@ def _patch(cname):
     r = _sh(DOCKER + ["exec", cname, "bash", "-lc", f"cd /testbed && git add -A && git diff --cached --binary HEAD -- . {excl}"])
     return r.stdout
 
-def _in_container(inst, name, argv, env, logdir, env_file=False):
+def _in_container(inst, name, argv, env, logdir, env_file=False, keep_home=False):
     cname = _container(inst, name)
     base_env = {**_net_env(), "HOME": "/tmp/sbr/home", "TERM": "dumb", "NO_COLOR": "1", "CI": "1",
                 "PATH": f"{TESTBED_PATH}:{TOOLS}/node/bin:{TOOLS}/npm/bin:{TOOLS}/cursor/bin:/usr/local/bin:/usr/bin:/bin"}
@@ -97,7 +97,13 @@ def _in_container(inst, name, argv, env, logdir, env_file=False):
             notes["timeout"] = True
         if envpath:
             os.unlink(envpath)
-        (logdir / "stdout.txt").write_text(out[-200000:])
+        (logdir / "stdout.txt").write_text(out if keep_home else out[-200000:])
+        if keep_home:  # SBR_KEEP_CURSOR_HOME: save the run's Cursor HOME (chat store) so /context can be read later
+            dest = logdir / "home"; dest.mkdir(exist_ok=True)
+            _sh(DOCKER + ["exec", cname, "bash", "-c", 'h=$(cat /tmp/sbr/cursorhome.path) && tar -C "$h" --exclude=./.npm -cf /tmp/sbr/home.tar .'])
+            _sh(DOCKER + ["cp", f"{cname}:/tmp/sbr/home.tar", str(logdir / "home.tar")])
+            if (logdir / "home.tar").exists():
+                _sh(["tar", "-C", str(dest), "-xf", str(logdir / "home.tar")]); (logdir / "home.tar").unlink()
         (logdir / "stderr.txt").write_text(err[-50000:])
         notes["exit_code"] = rc
         return _patch(cname), notes
@@ -129,7 +135,7 @@ CURSOR_CLI_CONFIG = json.dumps({"version": 1, "editor": {"vimMode": False},
                                 "sandbox": {"mode": "disabled"}, "notifications": False, "hints": False,
                                 "attribution": {"attributeCommitsToAgent": False, "attributePRsToAgent": False}})
 
-def cursor(inst, url, logdir, model=None):
+def cursor(inst, url, logdir, model=None, name=None, keep_home=False):
     """Cursor's agent goes to Cursor's servers, not our proxy: no per-call logs, no dollar cap.
     Its cost comes from Cursor's own usage numbers and is reported separately.
 
@@ -138,7 +144,7 @@ def cursor(inst, url, logdir, model=None):
     env-file, tools run locally in the task container (no cloud agent, worker, worktree, or resume),
     no --approve-mcps."""
     env = {"CURSOR_API_KEY": os.environ["CURSOR_API_KEY"], "NO_OPEN_BROWSER": "1"}
-    setup = ('export HOME=$(mktemp -d /tmp/sbr/cursorhome.XXXXXX) && export CURSOR_CONFIG_DIR=$HOME/.cursor '
+    setup = ('export HOME=$(mktemp -d /tmp/sbr/cursorhome.XXXXXX) && echo $HOME > /tmp/sbr/cursorhome.path && export CURSOR_CONFIG_DIR=$HOME/.cursor '
              '&& export XDG_CONFIG_HOME=$HOME/.config XDG_CACHE_HOME=$HOME/.cache XDG_DATA_HOME=$HOME/.local/share '
              f'&& mkdir -p $CURSOR_CONFIG_DIR && printf %s {shlex.quote(CURSOR_CLI_CONFIG)} > $CURSOR_CONFIG_DIR/cli-config.json '
              # The account's installed plugins (with their MCP servers, skills, hooks) are git-cloned at startup.
@@ -150,7 +156,7 @@ def cursor(inst, url, logdir, model=None):
                        for u in ["https://", "http://", "git@", "ssh://", "git://"]) + '&& ')
     argv = setup + (f'agent -p --force --trust --sandbox disabled --workspace /testbed '
                     f'--model {shlex.quote(model or CURSOR_MODEL)} --output-format stream-json "$(cat /tmp/sbr/prompt.txt)"')
-    return _in_container(inst, "cursor_nothink" if model else "cursor", argv, env, logdir, env_file=True)
+    return _in_container(inst, name or ("cursor_nothink" if model else "cursor"), argv, env, logdir, env_file=True, keep_home=keep_home)
 
 AIDER_SETTINGS = f"""- name: anthropic/{MODEL}
   edit_format: diff
@@ -238,6 +244,10 @@ HARNESSES = {
     # default Haiku 5.5 id resolving to the thinking/High variant. Same code path otherwise.
     "opencode_auto": lambda inst, url, logdir: opencode(inst, url, logdir, auto=True),
     "cursor_nothink": lambda inst, url, logdir: cursor(inst, url, logdir, model=CURSOR_NOTHINK_MODEL),
+    # Same as cursor_nothink; with SBR_KEEP_CURSOR_HOME=1 it also keeps each run's HOME (chat store) under
+    # runs/<task>/cursor_nothink2/home/ and the full untruncated stream-json, so /context can be read afterwards.
+    "cursor_nothink2": lambda inst, url, logdir: cursor(inst, url, logdir, model=CURSOR_NOTHINK_MODEL, name="cursor_nothink2",
+                                                        keep_home=os.environ.get("SBR_KEEP_CURSOR_HOME") == "1"),
 }
 # Same-settings set (2026-10-11): Haiku 5.5 thinks adaptively by default, so every proxied harness had thinking on.
 # These rerun each proxied harness unchanged except that its proxy forces thinking off (proxy.normalize), matching
@@ -246,6 +256,6 @@ for _h in ("mini_swe_agent", "swe_agent", "aider", "claude_code"):
     HARNESSES[f"{_h}_nothink"] = HARNESSES[_h]
 HARNESSES["opencode_nothink"] = HARNESSES["opencode_auto"]
 CURSOR_NOTHINK_MODEL = os.environ.get("SBR_CURSOR_NOTHINK_MODEL", "claude-haiku-5-5-high")  # "Haiku 5.5 High No Thinking"
-PROXIED = set(HARNESSES) - {"cursor", "cursor_nothink", "gold"}
-CHECKS = {"gold", "opencode_auto", "cursor_nothink", "mini_swe_agent_nothink", "swe_agent_nothink", "aider_nothink",
+PROXIED = set(HARNESSES) - {"cursor", "cursor_nothink", "cursor_nothink2", "gold"}
+CHECKS = {"gold", "opencode_auto", "cursor_nothink", "cursor_nothink2", "mini_swe_agent_nothink", "swe_agent_nothink", "aider_nothink",
           "claude_code_nothink", "opencode_nothink"}  # not run unless asked for by name
