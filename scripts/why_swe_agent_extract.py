@@ -1,6 +1,6 @@
 import json,re,glob,os,collections,sys
 R=os.path.expanduser('~/context-shaping/results/swebench')
-H=["claude_code_nothink","cursor_nothink","opencode_nothink","swe_agent_nothink","mini_swe_agent_nothink"]
+H=["claude_code_nothink","cursor_nothink","opencode_nothink","swe_agent_nothink","mini_swe_agent_nothink","claude_code_nothink2","cursor_nothink2"]
 last={}
 for l in open(R+'/results.jsonl'):
     r=json.loads(l)
@@ -58,10 +58,10 @@ def ev_oc(t):
         elif cur: cur[2]+=line+'\n'
     if cur: ev.append(cur)
     return [tuple(e) for e in ev],sum(e[0]=='Ex' for e in ev)
-def ev_cur(t):
-    f=f'{R}/runs/{t}/cursor_nothink/stdout.txt'
+def ev_cur(t,h='cursor_nothink'):
+    f=f'{R}/runs/{t}/{h}/stdout.txt'
     if not os.path.exists(f): return None
-    raw=open(f,errors='ignore').read();trunc=len(raw)>=199000
+    raw=open(f,errors='ignore').read();trunc=h=='cursor_nothink' and len(raw)>=199000
     ev=[];res={}
     for l in raw.splitlines():
         try: d=json.loads(l)
@@ -74,6 +74,28 @@ def ev_cur(t):
         elif k in('editToolCall','writeToolCall','searchReplaceToolCall','applyPatchToolCall'): ev.append(('E',json.dumps(a)[:200],o))
         else: ev.append(('R',k,o))
     return ev,0,trunc
+def ev_cc(t,h='claude_code_nothink2'):
+    # Claude Code --output-format stream-json --verbose: assistant tool_use blocks, results in the next user message
+    f=f'{R}/runs/{t}/{h}/stdout.txt'
+    if not os.path.exists(f): return None
+    calls=[];res={}
+    for l in open(f,errors='ignore'):
+        try: d=json.loads(l)
+        except: continue
+        for c in (d.get('message') or {}).get('content') or []:
+            if not isinstance(c,dict): continue
+            if d.get('type')=='assistant' and c.get('type')=='tool_use': calls.append(c)
+            elif d.get('type')=='user' and c.get('type')=='tool_result':
+                o=c.get('content');res[c.get('tool_use_id')]=o if isinstance(o,str) else json.dumps(o)
+    ev=[]
+    for c in calls:
+        n,a,o=c.get('name',''),c.get('input') or {},res.get(c.get('id'),'')[:20000]
+        if n=='Bash': ev.append((classify_bash(a.get('command','')),a.get('command',''),o))
+        elif n in('Edit','MultiEdit','Write','NotebookEdit'):
+            bad=re.search(r'String to replace not found|<tool_use_error>',o or '')
+            ev.append(('Ex' if bad else 'E',json.dumps(a)[:200],o))
+        else: ev.append(('R',n,o))
+    return ev,sum(e[0]=='Ex' for e in ev)
 def feats(ev):
     k=[e[0] for e in ev]
     fe=next((i for i,x in enumerate(k) if x=='E'),None)
@@ -95,7 +117,8 @@ def feats(ev):
     return dict(n=len(ev),edits=k.count('E'),runs=sum(run(x) for x in k),suite=k.count('T'),repro_first=repro_first,tested_after=tested_after,cycles=cyc,revise=revise>0,fail_checks=fails_after,noedit=fe is None)
 out={}
 for t in tasks:
-    for h,fn in [('swe_agent_nothink',ev_swe),('mini_swe_agent_nothink',ev_mini),('opencode_nothink',ev_oc),('cursor_nothink',ev_cur)]:
+    for h,fn in [('swe_agent_nothink',ev_swe),('mini_swe_agent_nothink',ev_mini),('opencode_nothink',ev_oc),('cursor_nothink',ev_cur),
+                 ('cursor_nothink2',lambda t:ev_cur(t,'cursor_nothink2')),('claude_code_nothink2',ev_cc)]:
         r=fn(t)
         if r is None: continue
         f=feats(r[0]);f['lint']=r[1];f['trunc']=r[2] if len(r)>2 else False
@@ -107,3 +130,11 @@ for t in tasks:
     except Exception as e: pass
 import pickle;pickle.dump((tasks,last,{k:v for k,v in out.items()}),open('/workspace/why/out.pkl','wb'))
 print('ok',len(out))
+# behavior summary per harness (share of runs; 'checked its fix' = ran code after its first edit)
+for h in H:
+    fs=[v[0] for (t,hh),v in out.items() if hh==h and 'tested_after' in v[0]]
+    if not fs: continue
+    ed=[f for f in fs if not f['noedit']]
+    pct=lambda k,xs:f"{100*sum(bool(f[k]) for f in xs)/max(len(xs),1):.0f}%"
+    print(f"{h:24s} n={len(fs):2d} checked_fix={pct('tested_after',ed)} (all runs {pct('tested_after',fs)}) revised_after_fail={pct('revise',ed)} "
+          f"repro_first={pct('repro_first',ed)} median_steps={sorted(f['n'] for f in fs)[len(fs)//2]} truncated={sum(f['trunc'] for f in fs)}")
